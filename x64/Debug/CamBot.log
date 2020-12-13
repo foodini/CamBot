@@ -1,6 +1,1 @@
-﻿  widget.cpp
-D:\ronb\hardware\OpenGL\CamBot\CamBot\telemetry.h(99,24): warning C4267: 'return': conversion from 'size_t' to 'uint32_t', possible loss of data
-D:\ronb\hardware\OpenGL\CamBot\CamBot\widget.cpp(87,37): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
-D:\ronb\hardware\OpenGL\CamBot\CamBot\widget.cpp(88,40): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
-D:\ronb\hardware\OpenGL\CamBot\CamBot\widget.cpp(89,37): warning C4244: '=': conversion from 'int' to 'float', possible loss of data
-  CamBot.vcxproj -> D:\ronb\hardware\OpenGL\CamBot\x64\Debug\CamBot.exe
+﻿
