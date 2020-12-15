@@ -13,14 +13,25 @@
 
 #pragma warning(suppress : 4101)
 
+#define REFRESH_FREQUENCY 30
+
 class Shader
 {
 public:
     unsigned int ID;
+
+    uint64_t get_path_mtime(const char* path) {
+        struct stat file_info;
+        stat(path, &file_info);
+        return file_info.st_mtime;
+    }
+
     // constructor generates the shader on the fly
     // ------------------------------------------------------------------------
-    Shader(const char* vertex_path, const char* fragment_path)
+    void shader_setup(const char* vertex_path, const char* fragment_path)
     {
+        strcpy(m_vertex_path, vertex_path);
+        strcpy(m_fragment_path, fragment_path);
         // 1. retrieve the vertex/fragment source code from filePath
         std::string vertexCode;
         std::string fragmentCode;
@@ -59,11 +70,13 @@ public:
         glShaderSource(vertex, 1, &vShaderCode, NULL);
         glCompileShader(vertex);
         checkCompileErrors(vertex, "VERTEX");
+        m_last_vertex_update = get_path_mtime(m_vertex_path);
         // fragment Shader
         fragment = glCreateShader(GL_FRAGMENT_SHADER);
         glShaderSource(fragment, 1, &fShaderCode, NULL);
         glCompileShader(fragment);
         checkCompileErrors(fragment, "FRAGMENT");
+        m_last_fragment_update = get_path_mtime(m_fragment_path);
         // shader Program
         ID = glCreateProgram();
         glAttachShader(ID, vertex);
@@ -74,10 +87,23 @@ public:
         glDeleteShader(vertex);
         glDeleteShader(fragment);
     }
+
+    Shader(const char* vertex_path, const char* fragment_path) :
+        m_refresh_countdown(REFRESH_FREQUENCY)
+    {
+        shader_setup(vertex_path, fragment_path);
+    }
+
     // activate the shader
     // ------------------------------------------------------------------------
-    void use()
+    void use(bool autorefresh = false)
     {
+        if (autorefresh && m_refresh_countdown-- == 0) {
+            if (get_path_mtime(m_fragment_path) != m_last_fragment_update || get_path_mtime(m_vertex_path) != m_last_vertex_update) {
+                shader_setup(m_vertex_path, m_fragment_path);
+            }
+            m_refresh_countdown = REFRESH_FREQUENCY;
+        }
         glUseProgram(ID);
     }
 
@@ -99,7 +125,27 @@ public:
         glUniform1f(glGetUniformLocation(ID, name.c_str()), value);
     }
 
+    void setFloat2(const std::string& name, float value_x, float value_y) const
+    {
+        glUniform2f(glGetUniformLocation(ID, name.c_str()), value_x, value_y);
+    }
+
+    void setFloat3(const std::string& name, float value_x, float value_y, float value_z) const
+    {
+        glUniform3f(glGetUniformLocation(ID, name.c_str()), value_x, value_y, value_z);
+    }
+
+    void setFloat4(const std::string& name, float value_x, float value_y, float value_z, float value_w) const
+    {
+        glUniform4f(glGetUniformLocation(ID, name.c_str()), value_x, value_y, value_z, value_w);
+    }
+
 private:
+    uint32_t m_refresh_countdown;
+    uint64_t m_last_vertex_update;
+    uint64_t m_last_fragment_update;
+    char     m_vertex_path[1024];
+    char     m_fragment_path[1024];
     // utility function for checking shader compilation/linking errors.
     // ------------------------------------------------------------------------
     void checkCompileErrors(unsigned int shader, std::string type)

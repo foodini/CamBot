@@ -1,1 +1,6 @@
-﻿
+﻿  main.cpp
+D:\ronb\hardware\OpenGL\CamBot\CamBot\telemetry.h(99,24): warning C4267: 'return': conversion from 'size_t' to 'uint32_t', possible loss of data
+  widget.cpp
+D:\ronb\hardware\OpenGL\CamBot\CamBot\telemetry.h(99,24): warning C4267: 'return': conversion from 'size_t' to 'uint32_t', possible loss of data
+  Generating Code...
+  CamBot.vcxproj -> D:\ronb\hardware\OpenGL\CamBot\x64\Debug\CamBot.exe

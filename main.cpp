@@ -86,6 +86,7 @@ int main()
     MediaContainerMgr media_container_mgr("c:\\Users\\foodi\\Videos\\VIRB\\VIRB_0347.mp4", 0, "3.3.shader.vert", "3.3.shader.frag", extents);
     FontManager font_manager("c:\\Windows\\Fonts\\courbd.ttf", 48, SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT);
     TelemetryMgr telemetry_mgr("11222122.log");
+    //TelemetryMgr telemetry_mgr("11223344_test.log");
     //TODO(P1) Hand the telemetry_mgr, instead of its vector, into the env_config.
     EnvConfig env_config(media_container_mgr, telemetry_mgr, font_manager, (float)SCR_WIDTH, (float)SCR_HEIGHT + (float)UI_HEIGHT, (float)UI_HEIGHT);
     InteractionMgr* interaction_mgr = InteractionMgr::instance();

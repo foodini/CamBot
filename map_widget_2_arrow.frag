@@ -18,7 +18,7 @@ void main() {
     FragColor = vec4(0.0, 0.0, 0.0, 0.0);
     if (projection >= 0.0) {
         float dist_from_line = length(pixel_direction - (flight_direction * projection));
-        if (pixel_dist + 3.0 * dist_from_line < 0.15) {
+        if (pixel_dist + 3.0 * dist_from_line < 0.05) {
             FragColor = vec4(1.0, 1.0, 0.0, 1.0);
         }
     }

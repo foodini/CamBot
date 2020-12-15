@@ -30,7 +30,7 @@ glm::vec2 Space::latlon_to_coords(float lat, float lon) {
 	dist_x *= cos(M_PI / 2.0 * lat / 90.0);
 	double dist_y = ((double)lat - m_center_lat) / 90.0 * 10000000.0;
 
-	return glm::vec2(dist_x, dist_y);
+	return glm::vec2(dist_x*4.0, dist_y*4.0);
 }
 
 Space::SpatialIndex Space::coords_to_gridref(const glm::vec2& xy_coords) {
@@ -39,7 +39,7 @@ Space::SpatialIndex Space::coords_to_gridref(const glm::vec2& xy_coords) {
 	!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	*/
-	return SpatialIndex(0, 0);
+	//return SpatialIndex(0, 0);
 
 	SpatialIndex retval;
 	retval.first = xy_coords.x / m_tile_size;
@@ -101,11 +101,15 @@ void Space::polygonalize(TelemetryMgr& telemetry_mgr, float line_width) {
 	if (telemetry_mgr.size() < 3)
 		return;
 
-	m_center_lat = telemetry_mgr[0].m_gps_lat - 0.002;
-	m_center_lon = telemetry_mgr[0].m_gps_lon - 0.002;
+	m_center_lat = telemetry_mgr[0].m_gps_lat;
+	m_center_lon = telemetry_mgr[0].m_gps_lon;
 	glm::vec2 last_right(1.0, 0.0);
 	
 	for (int i = 1; i < telemetry_mgr.size() - 1; i++) {
+		bool trigger = true;
+		if (i == 7533) {
+			trigger = false;
+		}
 		glm::vec2 p0 = latlon_to_coords(telemetry_mgr[i-1].m_gps_lat, telemetry_mgr[i-1].m_gps_lon);
 		SpatialIndex s0 = coords_to_gridref(p0);
 		glm::vec2 p1 = latlon_to_coords(telemetry_mgr[i].m_gps_lat, telemetry_mgr[i].m_gps_lon);
@@ -117,7 +121,7 @@ void Space::polygonalize(TelemetryMgr& telemetry_mgr, float line_width) {
 		glm::vec2 d12 = p2 - p1;
 		glm::vec2 avg_direction = glm::length(d01) * d12 + glm::length(d12) * d01;
 		glm::vec2 right;
-		if (avg_direction == glm::vec2(0.0, 0.0)) {
+		if (glm::length(avg_direction) < 0.00001) {
 			right = last_right;
 		} else {
 			right = glm::normalize(glm::vec2(avg_direction.y, -avg_direction.x));
@@ -134,14 +138,18 @@ void Space::polygonalize(TelemetryMgr& telemetry_mgr, float line_width) {
 			// new location.
 			if (vert_vect0->size() > 0) {
 				// Should only happen with the first vert. 
+				climb_rate = 0.0;
 				push_verts(vert_vect0, p1, right, climb_rate, false);
 			}
 			if (vert_vect1->size() == 0) {
+				climb_rate = 0.25;
 				push_verts(vert_vect1, p1, right, climb_rate, false);
 			} else {
+				climb_rate = 0.5;
 				push_verts(vert_vect1, p1, right, climb_rate, true);
 			}
 		} else {
+			climb_rate = 0.75;
 			push_verts(vert_vect1, p1, right, climb_rate, false);
 		}
 	}
@@ -230,6 +238,10 @@ TelemetrySlice::TelemetrySlice(const std::string& line) :
 	}
 }
 
+float TelemetrySlice::course_rad() const {
+	return 3.14159265f * (360.0f - m_course_deg) / 180.0f + 3.14159265f/2.0f;
+}
+
 TelemetryMgr::TelemetryMgr(const std::string& path) :
 	m_space(100.0),
 	m_parse_done(false)
@@ -241,6 +253,7 @@ TelemetryMgr::TelemetryMgr(const std::string& path) :
 void TelemetryMgr::parse_telemetry_file(const std::string& path) {
 	//TODO(P2): User needs to know if there were issues with the file.
 	//TODO(P2): Check that the file exists (and feedback to the user.)
+	//TODO(P0): This accempts a non-existent file as being empty. Complain if file 1) DNE or 2) empty.
 	std::fstream infile(path);
 	std::string line;
 
@@ -255,7 +268,7 @@ void TelemetryMgr::parse_telemetry_file(const std::string& path) {
 		}
 	}
 
-	m_space.polygonalize(*this, 5.0);
+	m_space.polygonalize(*this, 10.0);
 
 	//TODO(P2): Reap the thread when it's done. Better to do this when TelemetryMgr is receiving regular
 	//          calls and can periodically look at the bool & attempt to join().
@@ -272,6 +285,16 @@ const TelemetrySlice& TelemetryMgr::operator[](int64_t index) const {
 float* TelemetryMgr::get_course_buffer(uint32_t& size) {
 	auto slice = EnvConfig::instance().telemetry_slice();
 	return m_space.get_course_buffer(slice.m_gps_lat, slice.m_gps_lon, size);
+}
+
+glm::vec2 TelemetryMgr::get_current_coords() {
+	TelemetrySlice current_slice = (*this)[EnvConfig::instance().telemetry_index()];
+	return m_space.latlon_to_coords(current_slice.m_gps_lat, current_slice.m_gps_lon);
+}
+
+Space::SpatialIndex TelemetryMgr::get_current_gridref() {
+	TelemetrySlice current_slice = (*this)[EnvConfig::instance().telemetry_index()];
+	return m_space.latlon_to_gridref(current_slice.m_gps_lat, current_slice.m_gps_lon);
 }
 
 void TelemetryMgr::tick() {

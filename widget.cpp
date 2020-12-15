@@ -83,13 +83,6 @@ MapWidget::MapWidget(float width, float height, float x_pos, float y_pos) :
 	m_shader_course("map_widget_1_course.vert", "map_widget_1_course.frag"),
 	m_shader_arrow("map_widget_2_arrow.vert", "map_widget_2_arrow.frag")
 {
-	for (int i = 0; i < test_course_buffer_vert_count; i++) {
-		test_course_buffer[i * 4 + 0] = i % 2 ? 20.0 : 10.0 + (i % 4);
-		test_course_buffer[i * 4 + 1] = 10.0 + (i/2) * 10;
-		test_course_buffer[i * 4 + 2] = i % 2;
-		test_course_buffer[i * 4 + 3] = 10.0;
-	}
-
 	glGenVertexArrays(1, &m_course_vao);
 	glGenBuffers(1, &m_course_vbo);
 	//glBindVertexArray(m_course_vao);
@@ -138,34 +131,42 @@ void MapWidget::render() {
 	
 	if (env_config.telemetry_mgr().geometry_available()) {
 		// Set up geometry for course tracing
-		m_shader_course.use();
+		m_shader_course.use(true);
 
 		glEnable(GL_CULL_FACE);
 		glEnable(GL_BLEND);
+		glEnable(GL_CLIP_DISTANCE0);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 		glBindVertexArray(m_course_vao);
 		glBindBuffer(GL_ARRAY_BUFFER, m_course_vbo);
 
 		uint32_t course_buffer_size;
-		if (true) {
-			float* course_buffer = env_config.telemetry_mgr().get_course_buffer(course_buffer_size);
-			glBufferData(GL_ARRAY_BUFFER, sizeof(float) * course_buffer_size, course_buffer, GL_STATIC_DRAW);
-		} else {
-			course_buffer_size = sizeof(test_course_buffer) / 4;
-			glBufferData(GL_ARRAY_BUFFER, sizeof(test_course_buffer), test_course_buffer, GL_STATIC_DRAW);
-		}
+		float* course_buffer = env_config.telemetry_mgr().get_course_buffer(course_buffer_size);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(float) * course_buffer_size, course_buffer, GL_STATIC_DRAW);
 		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);  //xy
 		glEnableVertexAttribArray(0);
 		glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));  // u part of uv
 		glEnableVertexAttribArray(1);
-		/*
 		glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(4 * sizeof(float)));  // 1-float color
 		glEnableVertexAttribArray(2);
-		*/
+
 
 		// The first value is the ID of the attribute in the shader layout
 		glm::mat4 projection = glm::ortho(0.0f, static_cast<float>(env_config.screen_width()), 0.0f, static_cast<float>(env_config.screen_height()));
+		glm::vec4 min_clip(m_x_pos, m_y_pos, 0.0f, 1.0f);
+		glm::vec4 max_clip(m_x_pos + m_width, m_y_pos + m_height, 0.0f, 1.0f);
+		min_clip = projection * min_clip;
+		max_clip = projection * max_clip;
+		m_shader_course.setFloat2("min_clip", min_clip.x, min_clip.y);
+		m_shader_course.setFloat2("max_clip", max_clip.x, max_clip.y);
+
+		// Center the track over the center of the widget:
+		projection = glm::translate(projection, glm::vec3(m_x_pos + m_width/2.0, m_y_pos + m_height/2.0, 0.0));
+		glm::vec2 current_coords = env_config.telemetry_mgr().get_current_coords();
+		std::pair<int32_t, int32_t> gridref = env_config.telemetry_mgr().get_current_gridref();
+		env_config.font_mgr().format(0, 0.33f, glm::vec2(m_x_pos, m_y_pos - 16), glm::vec3(1, 1, 1), 1, "<%d,%d>", gridref.first, gridref.second);
+		projection = glm::translate(projection, glm::vec3(-current_coords.x, -current_coords.y, 0));
 
 		glUniformMatrix4fv(glGetUniformLocation(m_shader_course.ID, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
@@ -176,7 +177,7 @@ void MapWidget::render() {
 		glBindVertexArray(0);
 	}
 
-	m_shader_arrow.use();
+	m_shader_arrow.use(true);
 	WidgetBase::render(m_shader_arrow);
 
 	env_config.font_mgr().format(0, 0.33f, glm::vec2(m_x_pos, m_y_pos), glm::vec3(1.0, 1.0, 1.0), 1.0, "%5.1frad", env_config.telemetry_slice().course_rad());

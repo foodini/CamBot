@@ -28,8 +28,6 @@ protected:
 private:
 };
 
-#define test_course_buffer_vert_count 100
-
 class MapWidget : public WidgetBase {
 public:
 	//TODO(P1): make width, height, pos all part of vec2s.
@@ -48,5 +46,4 @@ private:
 
 	uint32_t       m_course_vao;
 	uint32_t       m_course_vbo;
-	float          test_course_buffer[4 * test_course_buffer_vert_count];
 };

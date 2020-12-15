@@ -29,12 +29,12 @@ public:
 
 	Space(float tile_size);
 	~Space();
-	float* get_course_buffer(float lat, float lon, uint32_t& size);
-	void polygonalize(TelemetryMgr& telemetry_mgr, float line_width);
-
-protected:
+	float*              get_course_buffer(float lat, float lon, uint32_t& size);
+	void                polygonalize(TelemetryMgr& telemetry_mgr, float line_width);
 	glm::vec2           latlon_to_coords(float lat, float lon);
 	SpatialIndex        latlon_to_gridref(float lat, float lon);
+
+protected:
 	SpatialIndex        coords_to_gridref(const glm::vec2& xy_coords);
 	std::vector<float>* get_poly_verts(const SpatialIndex& spatial_index);
 	void                push_verts(std::vector<float>* vert_vect, const glm::vec2& p1, const glm::vec2& right, float climb_rate, bool degenerate);
@@ -67,7 +67,7 @@ public:
 	int hour()         const { return m_timestruct.tm_hour; }
 	int minute()       const { return m_timestruct.tm_min; }
 	int second()       const { return m_timestruct.tm_sec; }
-	float course_rad() const { return 3.14159265f * m_course_deg / 180.0f; }  // TODO(P1): precomp and store?
+	float course_rad() const;  // TODO(P1): precomp and store?
 	float speed_mph()  const { return m_speed_kts * 1.15078f; }  // TODO(P1): precomp and store?
 	float speed_kts()  const { return m_speed_kts; }
 	float speed_kph()  const { return m_speed_kts * 1.852f; }  // TODO(P1): precomp and store?
@@ -99,6 +99,9 @@ public:
 	uint32_t size() const { return m_telemetry.size(); }
 	float* get_course_buffer(uint32_t& size);
 	bool geometry_available() { return m_parse_done == true && m_thread_running == false; }
+
+	glm::vec2 get_current_coords();
+	std::pair<int32_t, int32_t> get_current_gridref();  // Really, only useful for debugging.
 
 	void tick();
 
