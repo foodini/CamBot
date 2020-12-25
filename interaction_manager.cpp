@@ -63,7 +63,7 @@ void InteractionMgr::tick(GLFWwindow* window) {
 	double x_pos, y_pos;
 	glfwGetCursorPos(window, &x_pos, &y_pos);
 	m_mouse_x_pos = (float)x_pos;
-	m_mouse_y_pos = EnvConfig::instance().screen_height() - (float)y_pos;
+	m_mouse_y_pos = EnvConfig::instance->screen_height() - (float)y_pos;
 
 	int mouse_button = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
 	if (mouse_button == GLFW_PRESS) {

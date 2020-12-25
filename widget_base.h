@@ -10,6 +10,8 @@
 #include "shader_s.h"
 #include "telemetry.h"
 
+class TelemetrySlice;
+
 class WidgetBase {
 public:
 	WidgetBase(float width, float height, float x_pos, float y_pos,
@@ -19,18 +21,19 @@ public:
 	virtual void handle_input() {}
 	virtual void render(Shader& shader);
 	virtual void change_geometry(float width, float height, float x_pos, float y_pos);
-	 
+	virtual void polygonalize(TelemetrySlice& slice, uint32_t index, uint32_t num_slices) {};
+
 protected:
 	unsigned int m_VBO;
 	unsigned int m_VAO;
 
-	float m_width;
-	float m_height;
-	float m_x_pos;
-	float m_y_pos;
+	float      m_width;
+	float      m_height;
+	float      m_x_pos;
+	float      m_y_pos;
 
-	Shader   m_shader;
-	float m_vertices[12];
+	Shader     m_shader;
+	float      m_vertices[12];
 
 private:
 

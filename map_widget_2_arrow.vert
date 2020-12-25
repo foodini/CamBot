@@ -8,7 +8,6 @@ uniform float width;
 uniform float height;
 
 out vec2 texCoord;
-out float glClipDistance[4];  // distance to each edge of the map, for clipping. //TODO(P1)
 void main()
 {
     gl_Position = projection * vec4(aPos.xy, 0.0, 1.0);

@@ -1,4 +1,5 @@
 #include "widget_base.h"
+#include "util.h"
 
 WidgetBase::WidgetBase(float width, float height, float x_pos, float y_pos,
 	const std::string& vert, const std::string& frag) :
@@ -19,7 +20,7 @@ WidgetBase::~WidgetBase() {
 // DOES NOT CALL shader.use(). You'll want to do that first - this'll give you the opportunity to set your uniforms.
 // All this does is render a single vert/frag shader pair to the quad given in the constructor. 
 void WidgetBase::render(Shader& shader) {
-	const EnvConfig& env_config = EnvConfig::instance();
+	const EnvConfig* env_config = EnvConfig::instance;
 
 	glEnable(GL_CULL_FACE);
 	glEnable(GL_BLEND);
@@ -31,7 +32,7 @@ void WidgetBase::render(Shader& shader) {
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
 	glEnableVertexAttribArray(0);
 
-	glm::mat4 projection = glm::ortho(0.0f, static_cast<float>(env_config.screen_width()), 0.0f, static_cast<float>(env_config.screen_height()));
+	glm::mat4 projection = glm::ortho(0.0f, static_cast<float>(env_config->screen_width()), 0.0f, static_cast<float>(env_config->screen_height()));
 
 	glUniformMatrix4fv(glGetUniformLocation(shader.ID, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
@@ -65,9 +66,7 @@ void WidgetBase::change_geometry(float width, float height, float x_pos, float y
 	glGenVertexArrays(1, &m_VAO);
 	glGenBuffers(1, &m_VBO);
 	glBindVertexArray(m_VAO);
-	//glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
-	//glBufferData(GL_ARRAY_BUFFER, sizeof(m_vertices), m_vertices, GL_STATIC_DRAW);
 
-	//glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
-	//glEnableVertexAttribArray(0);
+	float screen_width = EnvConfig::instance->screen_width();
+	float screen_height = EnvConfig::instance->screen_height();
 }

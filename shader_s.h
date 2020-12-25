@@ -96,14 +96,16 @@ public:
 
     // activate the shader
     // ------------------------------------------------------------------------
-    void use(bool autorefresh = false)
+    void use()
     {
-        if (autorefresh && m_refresh_countdown-- == 0) {
+#ifdef _DEBUG
+        if (m_refresh_countdown-- == 0) {
             if (get_path_mtime(m_fragment_path) != m_last_fragment_update || get_path_mtime(m_vertex_path) != m_last_vertex_update) {
                 shader_setup(m_vertex_path, m_fragment_path);
             }
             m_refresh_countdown = REFRESH_FREQUENCY;
         }
+#endif
         glUseProgram(ID);
     }
 

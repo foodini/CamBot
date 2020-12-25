@@ -7,7 +7,6 @@ in vec2 texCoord;
 uniform float time;
 uniform float time_parametric;
 
-
 void main() {
     float shade = 0.5 * (1.0 - abs(texCoord.y-0.5));
     shade *= time_parametric < texCoord.x ? 0.0 : 1.0;

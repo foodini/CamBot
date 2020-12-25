@@ -1,9 +1,7 @@
-//#include <chrono>
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
-//#include <thread>
 #include <inttypes.h>
 
 #include "shader_s.h"

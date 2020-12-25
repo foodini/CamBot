@@ -11,4 +11,5 @@ namespace ffsw {
 	// Get time since GLFW was initted
 	float elapsed();
 	char* make_time(char* buf, float t, bool decimal);
+	void  sleep(uint32_t milliseconds);
 }

@@ -1,3 +1,6 @@
+#include <chrono>
+#include <thread>
+
 #include "stdio.h"
 
 #include "util.h"
@@ -21,4 +24,8 @@ char* ffsw::make_time(char* buf, float t, bool decimal) {
 		sprintf(buf, "%02d:%02d:%02d", hours, min, sec);
 
 	return buf;
+}
+
+void ffsw::sleep(uint32_t milliseconds) {
+	std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
 }

@@ -54,6 +54,9 @@
     <ClCompile Include="util.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="lines.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="3.3.shader.frag">
@@ -98,6 +101,36 @@
     <None Include="map_widget_2_arrow.vert">
       <Filter>Resource Files</Filter>
     </None>
+    <None Include="lines.frag">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="lines.vert">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="graph_widget_0_background.frag">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="graph_widget_0_background.vert">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="graph_widget_1_alt_body.frag">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="graph_widget_1_alt_body.vert">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="graph_widget_2_alt_outline.frag">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="graph_widget_2_alt_outline.vert">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="graph_widget_3_alt_position.frag">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="graph_widget_3_alt_position.vert">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Header.h">
@@ -125,6 +158,9 @@
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="stb_image.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="lines.h">
       <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>

@@ -12,6 +12,7 @@
 #include "env_config.h"
 #include "font_manager.h"
 #include "interaction_manager.h"
+#include "lines.h"
 #include "media_container_manager.h"
 #include "telemetry.h"
 #include "util.h"
@@ -58,7 +59,7 @@ int main()
 
     // glfw window creation
     // --------------------
-    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT+UI_HEIGHT, "LearnOpenGL", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT, "LearnOpenGL", NULL, NULL);
     if (window == NULL)
     {
         std::cout << "Failed to create GLFW window" << std::endl;
@@ -76,19 +77,30 @@ int main()
         std::cout << "Failed to initialize GLAD" << std::endl;
         return -1;
     }
-    
+
     float bottom = (float)(1.0 - 2.0 * SCR_HEIGHT / (SCR_HEIGHT + UI_HEIGHT));
     glm::vec3 extents[4];  //bl, br, tl, tr
     extents[0] = glm::vec3(-1.0, bottom, 0.0);
-    extents[1] = glm::vec3( 1.0, bottom, 0.0);
+    extents[1] = glm::vec3(1.0, bottom, 0.0);
     extents[2] = glm::vec3(-1.0, 1.0, 0.0);
-    extents[3] = glm::vec3( 1.0, 1.0, 0.0);
+    extents[3] = glm::vec3(1.0, 1.0, 0.0);
     MediaContainerMgr media_container_mgr("c:\\Users\\foodi\\Videos\\VIRB\\VIRB_0347.mp4", 0, "3.3.shader.vert", "3.3.shader.frag", extents);
     FontManager font_manager("c:\\Windows\\Fonts\\courbd.ttf", 48, SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT);
-    TelemetryMgr telemetry_mgr("11222122.log");
     //TelemetryMgr telemetry_mgr("11223344_test.log");
     //TODO(P1) Hand the telemetry_mgr, instead of its vector, into the env_config.
-    EnvConfig env_config(media_container_mgr, telemetry_mgr, font_manager, (float)SCR_WIDTH, (float)SCR_HEIGHT + (float)UI_HEIGHT, (float)UI_HEIGHT);
+    EnvConfig env_config(&media_container_mgr, &font_manager, (float)SCR_WIDTH, (float)SCR_HEIGHT + (float)UI_HEIGHT, (float)UI_HEIGHT);
+
+    DateTimeWidget date_time_widget(140.0, 56.0, SCR_WIDTH - 145.0, SCR_HEIGHT + UI_HEIGHT - 61.0);
+    MediaScrubWidget media_scrub_widget(SCR_WIDTH - 20.0, 20.0, 10.0, UI_HEIGHT - 5.0 - 20.0);
+
+    MapWidget map_widget(175.0, 175.0, SCR_WIDTH - 175.0 - 5.0, UI_HEIGHT + 5.0);
+    GraphWidget graph_widget(300.0, 100.0, 5.0, UI_HEIGHT + 5.0);
+    std::vector<WidgetBase*> polygonalized_widgets;
+    polygonalized_widgets.push_back(&map_widget);
+    polygonalized_widgets.push_back(&graph_widget);
+
+    TelemetryMgr telemetry_mgr("11222122.log", &polygonalized_widgets);
+
     InteractionMgr* interaction_mgr = InteractionMgr::instance();
     interaction_mgr->watch_key(GLFW_KEY_ESCAPE);
     interaction_mgr->watch_key(GLFW_KEY_SPACE);
@@ -97,10 +109,6 @@ int main()
     interaction_mgr->watch_key(GLFW_KEY_UP);
     interaction_mgr->watch_key(GLFW_KEY_DOWN);
     interaction_mgr->watch_key(GLFW_KEY_L);
-
-    DateTimeWidget date_time_widget(140.0, 56.0, SCR_WIDTH - 145.0, SCR_HEIGHT + UI_HEIGHT - 61.0);
-    MediaScrubWidget media_scrub_widget(SCR_WIDTH - 20.0, 20.0, 10.0, UI_HEIGHT - 5.0 - 20.0);
-    MapWidget map_widget(175.0, 175.0, SCR_WIDTH - 175.0 - 5.0, UI_HEIGHT + 5.0);
 
     float frame_time = ffsw::elapsed();
     float prev_frame_time = frame_time;
@@ -125,11 +133,11 @@ int main()
         if (interaction_mgr->key_down(GLFW_KEY_RIGHT) || interaction_mgr->key_held(GLFW_KEY_RIGHT) >= 0.25)
             fwd = true;
         if (interaction_mgr->key_down(GLFW_KEY_UP) || interaction_mgr->key_held(GLFW_KEY_UP) >= 0.25)
-            env_config.telemetry_offset(env_config.telemetry_offset() + (paused ? 0.1f : 10.0f));
+            env_config.telemetry_offset(env_config.telemetry_offset() - (paused ? 0.1f : 10.0f));
         if (interaction_mgr->key_down(GLFW_KEY_LEFT) || interaction_mgr->key_held(GLFW_KEY_LEFT) >= 0.25)
             rev = true;
         if (interaction_mgr->key_down(GLFW_KEY_DOWN) || interaction_mgr->key_held(GLFW_KEY_DOWN) >= 0.25)
-            env_config.telemetry_offset(env_config.telemetry_offset() - (paused ? 0.1f : 10.0f));
+            env_config.telemetry_offset(env_config.telemetry_offset() + (paused ? 0.1f : 10.0f));
         if (interaction_mgr->key_down(GLFW_KEY_L)) {
             if (confirming_launch) {
                 confirming_launch = false;
@@ -151,6 +159,7 @@ int main()
 
         // Let the font manager know that it's time to clear out expired strings:
         font_manager.update_time(media_container_mgr.get_presentation_timestamp());
+
         if (confirming_launch) {
             glm::vec3 yellow(1.0, 0.2, 1.0);
             font_manager.format(0, 0.5, glm::vec2(10.0, 10.0), yellow, 2.0, "Press L again to confirm launch @ this frame");
@@ -181,14 +190,13 @@ int main()
         date_time_widget.render();
         media_scrub_widget.render();
         map_widget.render();
+        graph_widget.render();
         font_manager.render();
 
         // glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
         // -------------------------------------------------------------------------------
         glfwSwapBuffers(window);
         glfwPollEvents();
-
-        //std::this_thread::sleep_for(std::chrono::milliseconds(0));
 
         if (!paused) {
             if (!media_container_mgr.advance_frame()) {

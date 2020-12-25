@@ -148,6 +148,7 @@
   <ItemGroup>
     <ClCompile Include="env_config.cpp" />
     <ClCompile Include="interaction_manager.cpp" />
+    <ClCompile Include="lines.cpp" />
     <ClCompile Include="media_container_manager.cpp" />
     <ClCompile Include="font_manager.cpp" />
     <ClCompile Include="glad.c" />
@@ -165,6 +166,16 @@
     <None Include="3.3.shader.vert" />
     <None Include="date_time_widget.frag" />
     <None Include="date_time_widget.vert" />
+    <None Include="graph_widget_0_background.frag" />
+    <None Include="graph_widget_0_background.vert" />
+    <None Include="graph_widget_1_alt_body.frag" />
+    <None Include="graph_widget_1_alt_body.vert" />
+    <None Include="graph_widget_2_alt_outline.frag" />
+    <None Include="graph_widget_2_alt_outline.vert" />
+    <None Include="graph_widget_3_alt_position.frag" />
+    <None Include="graph_widget_3_alt_position.vert" />
+    <None Include="lines.frag" />
+    <None Include="lines.vert" />
     <None Include="map_widget.frag" />
     <None Include="map_widget.vert" />
     <None Include="map_widget_1_course.frag" />
@@ -180,6 +191,7 @@
     <ClInclude Include="env_config.h" />
     <ClInclude Include="Header.h" />
     <ClInclude Include="interaction_manager.h" />
+    <ClInclude Include="lines.h" />
     <ClInclude Include="stb_image.h" />
     <ClInclude Include="telemetry.h" />
     <ClInclude Include="util.h" />

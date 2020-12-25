@@ -2,34 +2,33 @@
 #include "telemetry.h"
 #include "media_container_manager.h"
 
-EnvConfig* EnvConfig::c_instance = nullptr;
+EnvConfig* EnvConfig::instance = nullptr;
 
-EnvConfig::EnvConfig(MediaContainerMgr& mcm, TelemetryMgr& tm, FontManager& fm, float screen_width, float screen_height, float ui_height) :
-	m_media_mgr(mcm),
-	m_telemetry_mgr(tm),
-	m_font_manager(fm),
+EnvConfig::EnvConfig(MediaContainerMgr* mcm, FontManager* fm, float screen_width, float screen_height, float ui_height) :
+	media_mgr(mcm),
+	font_mgr(fm),
 	m_launch_time(0.0),
 	m_telemetry_offset(0.0),
 	m_screen_width(screen_width),
 	m_screen_height(screen_height),
 	m_ui_height(ui_height)
 {
-	if (c_instance != nullptr) {
+	if (instance != nullptr) {
 		throw "Cannot create more than one EnvConfig";
 	}
-	c_instance = this;
+	instance = this;
 }
 
 float EnvConfig::time_parametric() const {
-	return m_media_mgr.in_parametric();
+	return media_mgr->in_parametric();
 }
 
 float EnvConfig::media_in_elapsed() const {
-	return m_media_mgr.in_elapsed();
+	return media_mgr->in_elapsed();
 }
 
 float EnvConfig::media_in_duration() const {
-	return m_media_mgr.in_duration();
+	return media_mgr->in_duration();
 }
 
 //TODO(2): move to the MediaContainerMgr:
@@ -52,5 +51,5 @@ int32_t EnvConfig::telemetry_index() const {
 }
 
 const TelemetrySlice& EnvConfig::telemetry_slice() const {
-	return m_telemetry_mgr[telemetry_index()];
+	return (*TelemetryMgr::instance)[telemetry_index()];
 }
