@@ -4,6 +4,7 @@
 #include <iostream>
 #include "stdio.h"
 
+#include "glm/gtc/type_ptr.hpp"
 #include <glad/glad.h>
 
 #include <string>
@@ -132,14 +133,29 @@ public:
         glUniform2f(glGetUniformLocation(ID, name.c_str()), value_x, value_y);
     }
 
+    void setFloat2(const std::string& name, glm::vec2& v) const
+    {
+        glUniform2f(glGetUniformLocation(ID, name.c_str()), v.x, v.y);
+    }
+
     void setFloat3(const std::string& name, float value_x, float value_y, float value_z) const
     {
         glUniform3f(glGetUniformLocation(ID, name.c_str()), value_x, value_y, value_z);
     }
 
+    void setFloat3(const std::string& name, glm::vec3& v) const
+    {
+        glUniform3f(glGetUniformLocation(ID, name.c_str()), v.x, v.y, v.z);
+    }
+
     void setFloat4(const std::string& name, float value_x, float value_y, float value_z, float value_w) const
     {
         glUniform4f(glGetUniformLocation(ID, name.c_str()), value_x, value_y, value_z, value_w);
+    }
+
+    void setFloat4(const std::string& name, glm::vec4& v) const
+    {
+        glUniform4f(glGetUniformLocation(ID, name.c_str()), v.x, v.y, v.z, v.w);
     }
 
 private:

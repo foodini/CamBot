@@ -10,14 +10,22 @@
 
 //TODO(P1): height and width are floats some places and uint32_ts elsewhere.
 
-MediaContainerMgr::MediaContainerMgr(const char* infile, int debug_write_rate, const std::string& vert, const std::string& frag,
-                                     const glm::vec3* extents) :
+MediaContainerMgr::MediaContainerMgr(const std::string& infile, int debug_write_rate, const std::string& vert, const std::string& frag,
+    const glm::vec3* extents) :
     m_video_stream_index(-1),
     m_height(0),
     m_width(0),
     m_debug_write_rate(debug_write_rate),
     m_debug_write_countdown(debug_write_rate),
-    m_shader(vert.c_str(), frag.c_str())
+    m_shader(vert.c_str(), frag.c_str()),
+    m_output_format(nullptr),
+    m_output_format_context(nullptr),
+    m_output_video_stream(nullptr),
+    m_output_codec(nullptr),
+    m_output_codec_context(nullptr),
+    m_output_video_frame(nullptr),
+    m_output_scale_context(nullptr),
+    m_output_stream(nullptr)
 {
     // AVFormatContext holds header info from the format specified in the container:
     m_format_context = avformat_alloc_context();
@@ -26,7 +34,7 @@ MediaContainerMgr::MediaContainerMgr(const char* infile, int debug_write_rate, c
     }
     
     // open the file and read its header. Codecs are not opened here.
-    if (avformat_open_input(&m_format_context, infile, NULL, NULL) != 0) {
+    if (avformat_open_input(&m_format_context, infile.c_str(), NULL, NULL) != 0) {
         throw "ERROR could not open input file for reading";
     }
 
@@ -50,7 +58,7 @@ MediaContainerMgr::MediaContainerMgr(const char* infile, int debug_write_rate, c
             throw "ERROR unsupported codec!";
         }
 
-        if (local_codec_parameters-> codec_type == AVMEDIA_TYPE_VIDEO) {
+        if (local_codec_parameters->codec_type == AVMEDIA_TYPE_VIDEO) {
             if (m_video_stream_index == -1) {
                 m_video_stream_index = i;
                 m_codec = local_codec;
@@ -124,7 +132,7 @@ void MediaContainerMgr::init_rendering(const glm::vec3* extents) {
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
     // position attribute
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(0 * sizeof(float)));
     glEnableVertexAttribArray(0);
     // color attribute
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
@@ -195,7 +203,7 @@ bool MediaContainerMgr::advance_frame() {
         }
         else {
             if (m_packet->stream_index == m_video_stream_index) {
-                printf("AVPacket->pts %" PRId64 "\n", m_packet->pts);
+                //printf("AVPacket->pts %" PRId64 "\n", m_packet->pts);
                 int response = decode_packet();
                 av_packet_unref(m_packet);
                 if (response != 0) {
@@ -203,6 +211,11 @@ bool MediaContainerMgr::advance_frame() {
                     //return false;
                 }
                 return true;
+            }
+            else {
+                //printf("m_packet->stream_index: %d\n", m_packet->stream_index);
+                //printf("  m_packet->pts: %lld\n", m_packet->pts);
+                //printf("  mpacket->size: %d\n", m_packet->size);
             }
         }
 
@@ -352,3 +365,167 @@ float MediaContainerMgr::in_duration() const {
 float MediaContainerMgr::timestamp_to_seconds(uint64_t timestamp) const {
     return (float)timestamp / m_format_context->duration * in_duration();
 }
+
+
+bool MediaContainerMgr::init_video_output(const std::string& video_file_name, unsigned int width, unsigned int height) {
+    advance_to(0L);
+
+    if (!(m_output_format = av_guess_format(nullptr, video_file_name.c_str(), nullptr))) {
+        printf("Cannot guess output format.\n");
+        return false;
+    }
+
+    int err = avformat_alloc_output_context2(&m_output_format_context, m_output_format, nullptr, video_file_name.c_str());
+    if (err < 0) {
+        printf("Failed to allocate output context.\n");
+        return false;
+    }
+
+    m_output_codec = avcodec_find_encoder(m_output_format->video_codec);
+    if (!m_output_codec) {
+        printf("Failed to create codec.\n");
+        return false;
+    }
+
+    m_output_stream = avformat_new_stream(m_output_format_context, m_output_codec);
+    if (!m_output_stream) {
+        printf("Failed to find format.\n");
+        return false;
+    } 
+
+    m_output_codec_context = avcodec_alloc_context3(m_output_codec);
+    if (!m_output_codec_context) {
+        printf("Failed to create codec context.\n");
+        return(false);
+    }
+
+    m_output_stream->codecpar->codec_id = m_output_format->video_codec;
+    m_output_stream->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
+    m_output_stream->codecpar->width = width;
+    m_output_stream->codecpar->height = height;
+    m_output_stream->codecpar->format = AV_PIX_FMT_YUV420P;
+    // Use the same bit rate as the input stream.
+    m_output_stream->codecpar->bit_rate = m_format_context->streams[m_video_stream_index]->codecpar->bit_rate;
+    m_output_stream->avg_frame_rate = m_format_context->streams[m_video_stream_index]->avg_frame_rate;
+    avcodec_parameters_to_context(m_output_codec_context, m_output_stream->codecpar);
+    m_output_codec_context->time_base = m_format_context->streams[m_video_stream_index]->time_base;
+    
+    //TODO(P1): Set these to match the input stream?
+    m_output_codec_context->max_b_frames = 2;
+    m_output_codec_context->gop_size = 12;
+    m_output_codec_context->framerate = m_format_context->streams[m_video_stream_index]->r_frame_rate;
+    //m_output_codec_context->refcounted_frames = 0;
+    if (m_output_stream->codecpar->codec_id == AV_CODEC_ID_H264) {
+        av_opt_set(m_output_codec_context, "preset", "ultrafast", 0);
+    } else if (m_output_stream->codecpar->codec_id == AV_CODEC_ID_H265) {
+        av_opt_set(m_output_codec_context, "preset", "ultrafast", 0);
+    } else {
+        av_opt_set_int(m_output_codec_context, "lossless", 1, 0);
+    }
+
+    avcodec_parameters_from_context(m_output_stream->codecpar, m_output_codec_context);
+
+    //TODO(P2): Free assets that have been allocated.
+    err = avcodec_open2(m_output_codec_context, m_output_codec, nullptr);
+    if (err < 0) {
+        printf("Failed to open codec.\n");
+        return false;
+    }
+
+    if (!(m_output_format->flags & AVFMT_NOFILE)) {
+        err = avio_open(&m_output_format_context->pb, video_file_name.c_str(), AVIO_FLAG_WRITE);
+        if (err < 0) {
+            printf("Failed to open output file.");
+            return false;
+        }
+    }
+
+    err = avformat_write_header(m_output_format_context, NULL);
+    if (err < 0) {
+        printf("Failed to write header.\n");
+        return false;
+    }
+
+    av_dump_format(m_output_format_context, 0, video_file_name.c_str(), 1);
+
+    return true;
+}
+
+//TODO(P0): Solve this width/height bullshit once and for all. We can't count on having enough screen space for the
+//          full video resolution, but I'd rather not "edit" at 1/2 resolution, then render to a frame buffer to make
+//          the video. Maybe bring the thing up at half-res, have a way to change resolutions, and output at whatever
+//          the current UI resolution is. The EnvConfig would then be the official source of the resolution of
+//          everything, except the input resolution... and even that would dictate the aspect ratio.
+bool MediaContainerMgr::output_video_frame(uint8_t* buf) {
+    int err;
+
+    if (!m_output_video_frame) {
+        m_output_video_frame = av_frame_alloc();
+        m_output_video_frame->format = AV_PIX_FMT_YUV420P;
+        m_output_video_frame->width = m_output_codec_context->width;
+        m_output_video_frame->height = m_output_codec_context->height;
+        err = av_frame_get_buffer(m_output_video_frame, 32);
+        if (err < 0) {
+            printf("Failed to allocate output frame.\n");
+            return false;
+        }
+    }
+
+    if (!m_output_scale_context) {
+        //TODO(P1): Do this in hardware? It's a lot of work to buy back a few seconds of processing time. If
+        //          anyone else takes an interest in the project, it'll be worth it, but it may never save me
+        //          as much time as it costs.
+        m_output_scale_context = sws_getContext(m_output_codec_context->width, m_output_codec_context->height, 
+                                                AV_PIX_FMT_RGB24,
+                                                m_output_codec_context->width, m_output_codec_context->height, 
+                                                AV_PIX_FMT_YUV420P, SWS_BICUBIC, 0, 0, 0);
+    }
+
+    int inLinesize[1] = { 3 * m_output_codec_context->width };
+    sws_scale(m_output_scale_context, (const uint8_t* const*)&buf, inLinesize, 0, m_output_codec_context->height,
+              m_output_video_frame->data, m_output_video_frame->linesize);
+    //TODO(P0): Switch m_frame to be m_input_video_frame so I don't end up using the presentation timestamp from
+    //          an audio frame if I threadify the frame reading.
+    m_output_video_frame->pts = m_frame->pts;
+    printf("Output PTS: %d, time_base: %d/%d\n", m_output_video_frame->pts,
+        m_output_codec_context->time_base.num, m_output_codec_context->time_base.den);
+    err = avcodec_send_frame(m_output_codec_context, m_output_video_frame);
+    if (err < 0) {
+        printf("  ERROR sending new video frame output: ");
+        switch (err) {
+        case AVERROR(EAGAIN):
+            printf("AVERROR(EAGAIN): %d\n", err);
+            break;
+        case AVERROR_EOF:
+            printf("AVERROR_EOF: %d\n", err);
+            break;
+        case AVERROR(EINVAL):
+            printf("AVERROR(EINVAL): %d\n", err);
+            break;
+        case AVERROR(ENOMEM):
+            printf("AVERROR(ENOMEM): %d\n", err);
+            break;
+        }
+
+        return false;
+    }
+
+    AVPacket pkt;
+    av_init_packet(&pkt);
+    pkt.data = nullptr;
+    pkt.size = 0;
+    pkt.flags |= AV_PKT_FLAG_KEY;
+    int ret = 0;
+    if ((ret = avcodec_receive_packet(m_output_codec_context, &pkt)) == 0) {
+        static int counter = 0;
+        printf("pkt.key: 0x%08x, pkt.size: %d, counter:\n", pkt.flags & AV_PKT_FLAG_KEY, pkt.size, counter++);
+        uint8_t* size = ((uint8_t*)pkt.data);
+        printf("sizes: %d %d %d %d %d %d %d %d %d\n", size[0], size[1], size[2], size[2], size[3], size[4], size[5], size[6], size[7]);
+        av_interleaved_write_frame(m_output_format_context, &pkt);
+    }
+    printf("push: %d\n", ret);
+    av_packet_unref(&pkt);
+
+    return true;
+}
+

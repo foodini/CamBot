@@ -24,13 +24,13 @@ void DateTimeWidget::render() {
 	char buf[50];
 	const TelemetrySlice& ts = env_config->telemetry_slice();
 	sprintf(buf, "Date:   %04d.%02d.%02d", ts.year(), ts.month(), ts.day());
-	env_config->font_mgr->add_string(buf, 0, .25, glm::vec2(m_x_pos + 5.0, m_y_pos + 39.0), glm::vec3(1.0, 1.0, 1.0), 1);
+	env_config->font_mgr->add_string(buf, 0, .33, glm::vec2(m_x_pos + 5.0, m_y_pos + 39.0), glm::vec3(1.0, 1.0, 1.0), 1);
 	sprintf(buf, "Time:     %02d:%02d:%02d", ts.hour(), ts.minute(), ts.second());
-	env_config->font_mgr->add_string(buf, 0, .25, glm::vec2(m_x_pos + 5.0, m_y_pos + 22.0), glm::vec3(1.0, 1.0, 1.0), 1);
+	env_config->font_mgr->add_string(buf, 0, .33, glm::vec2(m_x_pos + 5.0, m_y_pos + 22.0), glm::vec3(1.0, 1.0, 1.0), 1);
 	float total_sec = env_config->flight_time();
 	strcpy(buf, total_sec >= 0.0 ? "Duration +" : "Duration -");
 	ffsw::make_time(&buf[strlen(buf)], total_sec, false);
-	env_config->font_mgr->add_string(buf, 0, .25, glm::vec2(m_x_pos + 5.0, m_y_pos + 5.0), glm::vec3(1.0, 1.0, 1.0), 1);
+	env_config->font_mgr->add_string(buf, 0, .33, glm::vec2(m_x_pos + 5.0, m_y_pos + 5.0), glm::vec3(1.0, 1.0, 1.0), 1);
 }
 
 
@@ -186,25 +186,6 @@ void Space::polygonalize(TelemetrySlice& slice, uint32_t index, uint32_t num_sli
 	glm::vec2 p2 = latlon_to_coords(telemetry_mgr[index].m_gps_lat, telemetry_mgr[index].m_gps_lon);
 	SpatialIndex s2 = coords_to_gridref(p2);
 
-	//climb_rate, in m/s
-	float climb_rate = 0.0;
-	for (int i = 0; i < 3; i++) {
-		climb_rate += (telemetry_mgr[index - 1].m_alt[i] - telemetry_mgr[index - 2].m_alt[i]);
-	}
-	//avg & freq:
-	climb_rate /= (3.0 / TELEMETRY_FREQUENCY);
-	//convert to ft/min:
-	climb_rate *= 60.0 * 3.28084;
-
-	//static float cr = -1000.0;
-	//static float dcr = 9;
-	//cr += dcr;
-	//if (cr > 1000.0 || cr < -1000.0) {
-	//	dcr = -dcr;
-	//	cr += dcr;
-	//}
-	//climb_rate = cr;
-
 	glm::vec2 d01 = p1 - p0;
 	glm::vec2 d12 = p2 - p1;
 	glm::vec2 avg_direction = d12 + d01;
@@ -217,6 +198,8 @@ void Space::polygonalize(TelemetrySlice& slice, uint32_t index, uint32_t num_sli
 		m_last_right = right;
 	}
 	right *= m_line_width / 2.0;
+
+	float climb_rate = slice.m_climb_rate[1];
 
 	std::vector<float>* vert_vect0 = get_poly_verts(s0);
 	std::vector<float>* vert_vect1 = get_poly_verts(s1);
@@ -304,17 +287,9 @@ void MapWidget::polygonalize(TelemetrySlice& slice, uint32_t index, uint32_t num
 	}
 
 	glm::vec2 xy = latlon_to_coords(telemetry_mgr[index].m_gps_lat, telemetry_mgr[index].m_gps_lon);
-	uint32_t climb_rate_baseline_index;
-	if (index >= TELEMETRY_FREQUENCY) {
-		climb_rate_baseline_index = index - TELEMETRY_FREQUENCY;
-	} else {
-		climb_rate_baseline_index = 0;
-	}
-	float climb_rate = telemetry_mgr[index].m_alt[1] - telemetry_mgr[climb_rate_baseline_index].m_alt[1];
-	//climb_rate is currently m/s. Needs to be ft/min. (Yeah, I know.)
-	climb_rate *= (60.0 * 3.28084);
+
 	std::vector<float> supp;
-	supp.push_back(climb_rate);
+	supp.push_back(slice.m_climb_rate[1]);
 
 	m_course_lines.add_segment(xy, supp);
 }
@@ -343,7 +318,7 @@ void MapWidget::set_uniforms() {
 //TODO(P1): make this a member of MapWidget
 void set_map_widget_vertex_attrib_pointers() {
 	// The first value is the ID of the attribute in the shader layout
-	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);  //xy
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)(0 * sizeof(float)));  //xy
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)(2 * sizeof(float)));  // 1-float color
 	glEnableVertexAttribArray(1);
@@ -358,18 +333,33 @@ void MapWidget::render_course() {
 	glm::vec4 max_clip(m_x_pos + m_width, m_y_pos + m_height, 0.0f, 1.0f);
 	min_clip = projection * min_clip;
 	max_clip = projection * max_clip;
-	
+
+	projection = glm::mat4(1.0f);
+	glm::mat4 identity(1.0f);
+
+	// Set current pilot position at the center of the space
+	const TelemetrySlice& ts = env_config->telemetry_slice();
+	glm::vec2 position = latlon_to_coords(ts.m_gps_lat, ts.m_gps_lon);
+	projection = glm::translate(identity, glm::vec3(-position, 0.0)) * projection;
+
+	// Scale the data to have the displayed data in the [-1.0..1.0, -1.0..1.0] ranges
+	static float last_speed_scale = 1.0; //TODO(P0) move this to be a member.
+	float speed_scale = glm::min(1.0f, 1.0f / env_config->telemetry_slice().speed_mph() + 0.3f);
+	last_speed_scale = speed_scale * 0.01 + last_speed_scale * 0.99;
+	float widget_dimension_scale = max_clip.x - min_clip.x;
+	glm::vec3 scale_vec(0.01 * last_speed_scale * widget_dimension_scale);  // 0.01 to make the widget 200m tall when pilot stationary.
+	projection = glm::scale(identity, scale_vec) * projection;
+	env_config->font_mgr->format(0, 0.5, glm::vec2(10.0f, 400.0f), glm::vec3(1, 1, 1), 2.0, "scale: %f", last_speed_scale);
+
+	// Recenter the draw over the center of the widget
+	glm::mat4 xlate = glm::translate(identity, glm::vec3((max_clip.x + min_clip.x) / 2.0f, (max_clip.y + min_clip.y) / 2.0f, 0.0f));
+	projection = xlate * projection;
+
+
 	// YOU MUST use() the shader before setting its uniforms. I'm wondering if use() clears out any existing uniforms.
 	m_shader_course.use();
 	m_shader_course.setFloat2("min_clip", min_clip.x, min_clip.y);
 	m_shader_course.setFloat2("max_clip", max_clip.x, max_clip.y);
-
-	// Center the track over the center of the widget:
-	projection = glm::translate(projection, glm::vec3(m_x_pos + m_width / 2.0, m_y_pos + m_height / 2.0, 0.0));
-	// Position it so the current pilot position is at the center of the widget
-	const TelemetrySlice& ts = env_config->telemetry_slice();
-	glm::vec2 position = latlon_to_coords(ts.m_gps_lat, ts.m_gps_lon);
-	projection = glm::translate(projection, glm::vec3(-position, 0.0));
 
 	glUniformMatrix4fv(glGetUniformLocation(m_shader_course.ID, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
@@ -389,10 +379,13 @@ void MapWidget::render() {
 
 	const EnvConfig* env_config = EnvConfig::instance;
 
-	env_config->font_mgr->format(0, 0.33f, glm::vec2(m_x_pos + 3.0, m_y_pos + 3.0), glm::vec3(1.0, 1.0, 1.0), 1.5, "%4.1fmph", env_config->telemetry_slice().speed_mph());
+	const TelemetrySlice& ts = env_config->telemetry_slice();
+	env_config->font_mgr->format(0, 0.33f, glm::vec2(m_x_pos + 3.0, m_y_pos + 3.0), glm::vec3(1.0, 1.0, 1.0), 1.5, "%4.1fmph", ts.speed_mph());
 	// TODO(P2): right-justified fonts.
-	env_config->font_mgr->format(0, 0.33f, glm::vec2(m_x_pos + m_width - 40.0f, m_y_pos + 3.0f), glm::vec3(1.0, 1.0, 1.0), 1.5, "%3.0f", env_config->telemetry_slice().m_course_deg);
+	env_config->font_mgr->format(0, 0.33f, glm::vec2(m_x_pos + m_width - 40.0f, m_y_pos + 3.0f), glm::vec3(1.0, 1.0, 1.0), 1.5, "%3.0f", ts.m_course_deg);
 	env_config->font_mgr->format(0, 0.25f, glm::vec2(m_x_pos + m_width - 10.0f, m_y_pos + 8.0f), glm::vec3(1.0, 1.0, 1.0), 1.5, "o");
+	env_config->font_mgr->format(0, 0.33f, glm::vec2(m_x_pos + m_width - 90.0f, m_y_pos + m_height - 12.0f), glm::vec3(1, 1, 1), 1.5, "%+6.1ffpm", ts.m_climb_rate[1]);
+
 }
 
 GraphWidget::GraphWidget(float width, float height, float x_pos, float y_pos) :
@@ -498,7 +491,7 @@ void GraphWidget::render_alt_body() {
 	glBindBuffer(GL_ARRAY_BUFFER, m_alt_body_vbo);
 
 	// The first value is the ID of the attribute in the shader layout
-	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);  //xy
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)(0 * sizeof(float)));  //xy
 	glEnableVertexAttribArray(0);
 
 	// Draw the body.
@@ -536,7 +529,7 @@ void GraphWidget::render_pilot_position() {
 	// The first value is the ID of the attribute in the shader layout
 	// TODO(P0): Do I really have to do this every frame? Can I set these Attribs in the constructor? Would
 	//           allow me to remove the callback.
-	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);  //xy
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)(0 * sizeof(float)));  //xy
 	glEnableVertexAttribArray(0);
 	glPointSize(50.0);
 	
@@ -560,4 +553,26 @@ void GraphWidget::render() {
 	render_alt_body();
 	render_alt_outline();
 	render_pilot_position();
+}
+
+ClimbWidget::ClimbWidget(float width, float height, float x_pos, float y_pos) :
+	WidgetBase(width, height, x_pos, y_pos, "climb_widget.vert", "climb_widget.frag")
+{
+
+}
+
+ClimbWidget::~ClimbWidget() {
+
+}
+
+void ClimbWidget::render() {
+	EnvConfig* env_config = EnvConfig::instance;
+
+	m_shader.use();
+
+	const TelemetrySlice& ts = env_config->telemetry_slice();
+
+	m_shader.setFloat3("climb_rates", ts.m_climb_rate[0], ts.m_climb_rate[1], ts.m_climb_rate[2]);
+
+	WidgetBase::render(m_shader);
 }

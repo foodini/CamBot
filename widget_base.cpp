@@ -29,8 +29,10 @@ void WidgetBase::render(Shader& shader) {
 	glBindVertexArray(m_VAO);
 	glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(m_vertices), m_vertices, GL_DYNAMIC_DRAW);
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(0*sizeof(float)));
 	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3*sizeof(float)));
+	glEnableVertexAttribArray(1);
 
 	glm::mat4 projection = glm::ortho(0.0f, static_cast<float>(env_config->screen_width()), 0.0f, static_cast<float>(env_config->screen_height()));
 
@@ -51,17 +53,37 @@ void WidgetBase::change_geometry(float width, float height, float x_pos, float y
 	m_x_pos = x_pos;
 	m_y_pos = y_pos;
 
-	for (int i = 0; i < 12; i++)
-		m_vertices[i] = 0.0;
-
+	//vert0 position
 	m_vertices[0] = m_x_pos;
 	m_vertices[1] = m_y_pos;
-	m_vertices[3] = m_x_pos + m_width;
-	m_vertices[4] = m_y_pos;
-	m_vertices[6] = m_x_pos;
-	m_vertices[7] = m_y_pos + m_height;
-	m_vertices[9] = m_x_pos + m_width;
-	m_vertices[10] = m_y_pos + m_height;
+	m_vertices[2] = 0.0f;
+	//vert0 uv
+	m_vertices[3] = 0.0f;
+	m_vertices[4] = 0.0f;
+
+	//vert1 position
+	m_vertices[5] = m_x_pos + m_width;
+	m_vertices[6] = m_y_pos;
+	m_vertices[7] = 0.0f;
+	//vert1 uv
+	m_vertices[8] = 1.0f;
+	m_vertices[9] = 0.0f;
+
+	//vert2 position
+	m_vertices[10] = m_x_pos;
+	m_vertices[11] = m_y_pos + m_height;
+	m_vertices[12] = 0.0f;
+	//vert2 uv
+	m_vertices[13] = 0.0f;
+	m_vertices[14] = 1.0f;
+
+	//vert3 position
+	m_vertices[15] = m_x_pos + m_width;
+	m_vertices[16] = m_y_pos + m_height;
+	m_vertices[17] = 0.0f;
+	//vert3 uv
+	m_vertices[18] = 1.0f;
+	m_vertices[19] = 1.0f;
 
 	glGenVertexArrays(1, &m_VAO);
 	glGenBuffers(1, &m_VBO);

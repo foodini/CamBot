@@ -57,6 +57,9 @@
     <ClCompile Include="lines.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="project_file_manager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="3.3.shader.frag">
@@ -131,6 +134,12 @@
     <None Include="graph_widget_3_alt_position.vert">
       <Filter>Resource Files</Filter>
     </None>
+    <None Include="climb_widget.frag">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="climb_widget.vert">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Header.h">
@@ -161,6 +170,9 @@
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="lines.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="project_file_manager.h">
       <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>

@@ -32,7 +32,7 @@ struct pair_hash
 class TelemetrySlice {
 public:
 	TelemetrySlice();
-	TelemetrySlice(const std::string& line);
+	TelemetrySlice(const std::string& line, float gps_altitude_offset);
 
 	int year()         const { return m_timestruct.tm_year + 1900; }
 	int month()        const { return m_timestruct.tm_mon + 1; }
@@ -49,9 +49,9 @@ public:
 	float                m_gps_lat;
 	float                m_gps_lon;
 	float                m_gps_alt;
-	float                m_pressure[3];    // Left, Center, Right
 	float                m_temperature[3]; // Left, Center, Right
-	float                m_alt[3];
+	float                m_alt[3];         // Left, Center, Right
+	float                m_climb_rate[3];  // in ft/min!!! (Yeah, I know, but that's what US varios use.)
 	glm::vec3            m_accel;
 	glm::vec3            m_gyro;
 	bool                 m_pulse;

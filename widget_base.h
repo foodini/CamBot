@@ -14,6 +14,9 @@ class TelemetrySlice;
 
 class WidgetBase {
 public:
+	//TODO(P0): Should we really be passing in the vert and frag shaders? If so, we should be using a
+	//          default shader whenever all we're doing is darkening the background. (The media scrubber
+	//          is only one shader that does the darkening and the progress line in one frag.)
 	WidgetBase(float width, float height, float x_pos, float y_pos,
 		       const std::string& vert, const std::string& frag);
 	virtual ~WidgetBase();
@@ -33,7 +36,7 @@ protected:
 	float      m_y_pos;
 
 	Shader     m_shader;
-	float      m_vertices[12];
+	float      m_vertices[20]; //(x, y, z, u, v) * 4
 
 private:
 

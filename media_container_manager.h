@@ -9,6 +9,8 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/avutil.h>
+#include <libavutil/opt.h>
+#include <libswscale/swscale.h>
 }
 
 #include "shader_s.h"
@@ -16,7 +18,7 @@ extern "C" {
 class MediaContainerMgr {
 public:
 	glm::vec3 foo;
-	MediaContainerMgr(const char * infile, int debug_write_rate, const std::string& vert, const std::string& frag, 
+	MediaContainerMgr(const std::string& infile, int debug_write_rate, const std::string& vert, const std::string& frag, 
 		              const glm::vec3* extents);
 	~MediaContainerMgr();
 	bool advance_frame();
@@ -36,6 +38,9 @@ public:
 	unsigned long int get_frame_time() const;
 	float timestamp_to_seconds(uint64_t timestamp) const;
 	void render();
+
+	bool init_video_output(const std::string& video_file_name, unsigned int width, unsigned int height);
+	bool output_video_frame(uint8_t* buf);
 
 private:
 	AVFormatContext*   m_format_context;
@@ -59,8 +64,17 @@ private:
 	void init_rendering(const glm::vec3* extents);
 	int decode_packet();
 	void save_yellow_frame(unsigned char* buf, int wrap, char* filename);
-};
 
-int codec_test(void);
+	// For writing the output video:
+	void free_output_assets();
+	AVOutputFormat*        m_output_format;
+	AVFormatContext*       m_output_format_context;
+	AVStream*              m_output_video_stream;
+	AVCodec*               m_output_codec;
+	AVCodecContext*        m_output_codec_context;
+	AVFrame*               m_output_video_frame;
+	SwsContext*            m_output_scale_context;
+	AVStream*              m_output_stream;
+};
 
 #endif

@@ -1,4 +1,5 @@
 #include <chrono>
+#include <cstring>
 #include <stdio.h>
 #include <string>
 #include <thread>
@@ -13,6 +14,7 @@
 #include "font_manager.h"
 #include "interaction_manager.h"
 #include "lines.h"
+#include "project_file_manager.h"
 #include "media_container_manager.h"
 #include "telemetry.h"
 #include "util.h"
@@ -26,8 +28,8 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void processInput(GLFWwindow* window);
 
 // settings
-const unsigned int SCR_WIDTH = 1920 / 2;
-const unsigned int SCR_HEIGHT = 1080 / 2;
+const unsigned int SCR_WIDTH = 1920;
+const unsigned int SCR_HEIGHT = 1080;
 const unsigned int UI_HEIGHT = 134;        // Divisible by FOUR, RIGHT?
 
 bool paused = false;
@@ -46,6 +48,12 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 
 int main()
 {
+    std::string test_files[3][2] = {
+        "c:\\Users\\foodi\\Videos\\VIRB\\VIRB_0347.mp4", "11222122.log",
+        "VIRB_0354.mp4",                                 "12292234.log",
+        "VIRB0355.mp4",                                  "12312359.log"
+    };
+
     // glfw: initialize and configure
     // ------------------------------
     glfwInit();
@@ -84,22 +92,27 @@ int main()
     extents[1] = glm::vec3(1.0, bottom, 0.0);
     extents[2] = glm::vec3(-1.0, 1.0, 0.0);
     extents[3] = glm::vec3(1.0, 1.0, 0.0);
-    MediaContainerMgr media_container_mgr("c:\\Users\\foodi\\Videos\\VIRB\\VIRB_0347.mp4", 0, "3.3.shader.vert", "3.3.shader.frag", extents);
-    FontManager font_manager("c:\\Windows\\Fonts\\courbd.ttf", 48, SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT);
-    //TelemetryMgr telemetry_mgr("11223344_test.log");
-    //TODO(P1) Hand the telemetry_mgr, instead of its vector, into the env_config.
-    EnvConfig env_config(&media_container_mgr, &font_manager, (float)SCR_WIDTH, (float)SCR_HEIGHT + (float)UI_HEIGHT, (float)UI_HEIGHT);
 
-    DateTimeWidget date_time_widget(140.0, 56.0, SCR_WIDTH - 145.0, SCR_HEIGHT + UI_HEIGHT - 61.0);
+    ProjectFileManager project_file_mgr = ProjectFileManager();
+
+    MediaContainerMgr media_container_mgr(project_file_mgr.get_video_file_path(), 0, "3.3.shader.vert", "3.3.shader.frag", extents);
+    FontManager font_manager("c:\\Windows\\Fonts\\courbd.ttf", 48, SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT);
+    //TODO(P1) Hand the telemetry_mgr, instead of its vector, into the env_config.
+    EnvConfig env_config(&media_container_mgr, &font_manager, &project_file_mgr, (float)SCR_WIDTH, (float)SCR_HEIGHT + (float)UI_HEIGHT, (float)UI_HEIGHT);
+
+    DateTimeWidget date_time_widget(182.0, 56.0, SCR_WIDTH - 187.0, SCR_HEIGHT + UI_HEIGHT - 61.0);
     MediaScrubWidget media_scrub_widget(SCR_WIDTH - 20.0, 20.0, 10.0, UI_HEIGHT - 5.0 - 20.0);
 
-    MapWidget map_widget(175.0, 175.0, SCR_WIDTH - 175.0 - 5.0, UI_HEIGHT + 5.0);
+    MapWidget map_widget(175.0, 175.0, SCR_WIDTH - 25.0 - 5.0 - 175.0 - 5.0, UI_HEIGHT + 5.0);
+    ClimbWidget climb_widget(25.0, 175.0, SCR_WIDTH - 25.0 - 5.0, UI_HEIGHT + 5.0);
     GraphWidget graph_widget(300.0, 100.0, 5.0, UI_HEIGHT + 5.0);
+    //TODO(P0): This is dumb. Have each widget know whether it needs a poly call. The TelemetryMgr can call all widgets and
+    //construct the list of the ones that need data.
     std::vector<WidgetBase*> polygonalized_widgets;
     polygonalized_widgets.push_back(&map_widget);
     polygonalized_widgets.push_back(&graph_widget);
 
-    TelemetryMgr telemetry_mgr("11222122.log", &polygonalized_widgets);
+    TelemetryMgr telemetry_mgr(project_file_mgr.get_telemetry_file_path(), &polygonalized_widgets);
 
     InteractionMgr* interaction_mgr = InteractionMgr::instance();
     interaction_mgr->watch_key(GLFW_KEY_ESCAPE);
@@ -109,11 +122,14 @@ int main()
     interaction_mgr->watch_key(GLFW_KEY_UP);
     interaction_mgr->watch_key(GLFW_KEY_DOWN);
     interaction_mgr->watch_key(GLFW_KEY_L);
+    interaction_mgr->watch_key(GLFW_KEY_S);
+    interaction_mgr->watch_key(GLFW_KEY_R);
 
     float frame_time = ffsw::elapsed();
     float prev_frame_time = frame_time;
     float duration_avg = -1.0;
     bool confirming_launch = false;
+    bool recording = false;
     // render loop
     // -----------
     while (!glfwWindowShouldClose(window))
@@ -147,7 +163,24 @@ int main()
                 confirming_launch = true;
             }
         }
+        if (interaction_mgr->key_down(GLFW_KEY_S)) {
+            uint8_t* buf = new uint8_t[SCR_WIDTH * SCR_HEIGHT * 3];
+            //std::memset(buf, 0, SCR_WIDTH * SCR_HEIGHT * 3);
+            glReadPixels(0, UI_HEIGHT, SCR_WIDTH, SCR_HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, (void*)buf);
+            FILE* ppm_out = fopen("debug.ppm", "wb");
+            fprintf(ppm_out, "P6 %d %d 255\n", SCR_WIDTH, SCR_HEIGHT);
+            fwrite(buf, 1, SCR_WIDTH * SCR_HEIGHT * 3, ppm_out);
+            fclose(ppm_out);
+            delete[] buf;
+        }
+        if (interaction_mgr->key_down(GLFW_KEY_R)) {
+            const std::string& video_file_name = 
+                   project_file_mgr.get_project_file_path() + ".mp4"; //TODO(P2): trim off the proj's extension.
+            if (media_container_mgr.init_video_output(video_file_name, SCR_WIDTH, SCR_HEIGHT)) {
+                recording = true;
+            }
 
+        }
         if (fwd) {
             media_container_mgr.advance_by(paused ? 1 : 100); 
             fwd = false;
@@ -190,12 +223,19 @@ int main()
         date_time_widget.render();
         media_scrub_widget.render();
         map_widget.render();
+        climb_widget.render();
         graph_widget.render();
         font_manager.render();
 
         // glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
         // -------------------------------------------------------------------------------
         glfwSwapBuffers(window);
+        if (recording) {
+            uint8_t* buf = new uint8_t[SCR_WIDTH * SCR_HEIGHT * 4];
+            //std::memset(buf, 0, SCR_WIDTH * SCR_HEIGHT * 3);
+            glReadPixels(0, UI_HEIGHT, SCR_WIDTH, SCR_HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, (void*)buf);
+            media_container_mgr.output_video_frame(buf);
+        }
         glfwPollEvents();
 
         if (!paused) {

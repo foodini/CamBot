@@ -129,3 +129,12 @@ private:
 	void               update_graph_to_screen_projection();
 	glm::mat4          m_graph_to_screen_projection;
 };
+
+class ClimbWidget : public WidgetBase {
+public:
+	ClimbWidget(float width, float height, float x_pos, float y_pos);
+	~ClimbWidget();
+	void render();
+private:
+
+};

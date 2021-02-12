@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
@@ -12,4 +14,6 @@ namespace ffsw {
 	float elapsed();
 	char* make_time(char* buf, float t, bool decimal);
 	void  sleep(uint32_t milliseconds);
+
+	std::string file_dialog(const wchar_t* extension);
 }

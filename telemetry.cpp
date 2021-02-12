@@ -25,12 +25,11 @@ TelemetrySlice::TelemetrySlice() :
 	m_speed_kts(0.0),
 	m_course_deg(0.0),
 	m_temperature{ 0.0, 0.0, 0.0 },
-	m_pressure{ 0.0, 0.0, 0.0 },
 	m_alt{ 0.0, 0.0, 0.0 }
 {
 }
 
-TelemetrySlice::TelemetrySlice(const std::string& line) :
+TelemetrySlice::TelemetrySlice(const std::string& line, float gps_altitude_offset) :
 	m_pulse(false),
 	m_gps_alt(-1000000.0f)
 {
@@ -41,9 +40,10 @@ TelemetrySlice::TelemetrySlice(const std::string& line) :
 	ss.imbue(std::locale("en_US.utf-8"));
 	ss >> std::get_time(&m_timestruct, "%y.%m.%d %H:%M:%S") >> decimal_point >> ms
 		>> m_gps_lat >> lat_dir >> m_gps_lon >> lon_dir
-		>> m_temperature[0] >> unit >> m_pressure[0] >> unit
-		>> m_temperature[1] >> unit >> m_pressure[1] >> unit
-		>> m_temperature[2] >> unit >> m_pressure[2] >> unit
+		//>> m_gps_alt >> unit
+		>> m_temperature[0] >> unit >> m_alt[0] >> unit
+		>> m_temperature[1] >> unit >> m_alt[1] >> unit
+		>> m_temperature[2] >> unit >> m_alt[2] >> unit
 		>> unit >> unit >> open_brace >> m_accel.x >> m_accel.y >> m_accel.z >> close_brace
 		>> unit >> open_brace >> m_gyro.x >> m_gyro.y >> m_gyro.z >> close_brace
 		>> m_speed_kts >> unit >> m_course_deg;
@@ -56,6 +56,11 @@ TelemetrySlice::TelemetrySlice(const std::string& line) :
 			m_gps_lat = -m_gps_lat;
 		if (lon_dir == 'W')
 			m_gps_lon = -m_gps_lon;
+
+		//TODO(P0): Eventually, I need to have this adjust over time. The ambient barometric
+		//          pressure can change considerably over the course of a flight.
+		for (int alt_chan = 0; alt_chan < 3; alt_chan++)
+			m_alt[alt_chan] += gps_altitude_offset;
 
 		// Work out the difference between local and gmt. Remove twice that difference from the
 		// computed time to counter the fact that the conversion is taking us backward. Since
@@ -73,15 +78,6 @@ TelemetrySlice::TelemetrySlice(const std::string& line) :
 		m_timestruct.tm_mon = true_local->tm_mon;
 		m_timestruct.tm_mday = true_local->tm_mday;
 		m_timestruct.tm_hour = true_local->tm_hour;
-
-		for (uint32_t i = 0; i < 3; i++) {
-			if (m_pressure[i] < 1.0) {
-				//TODO(P0): fix the fact that we're getting a pressure of 0 from the hardware and protect
-				//          against it properly here.
-				m_pressure[i] = 1013.25;
-			}
-			m_alt[i] = (pow(1013.25 / m_pressure[i], 1.0 / 5.257) - 1.0) * (m_temperature[i] + 273.15) / 0.0065;
-		}
 	}
 }
 
@@ -126,12 +122,30 @@ void TelemetryMgr::parse_telemetry_file(const std::string& path, std::vector<Wid
 	}
 
 	uint32_t index = 0;
+	const uint32_t climb_rate_index_lookback = 5;
+	float gps_altitude_offset = 0.0;
 	for (auto i = lines.begin(); i != lines.end(); index++, i++) {
-		TelemetrySlice slice = TelemetrySlice(*i);
+		TelemetrySlice slice = TelemetrySlice(*i, gps_altitude_offset);
+		if (index == 0) {
+			gps_altitude_offset = slice.m_gps_alt - slice.m_alt[1];
+			slice = TelemetrySlice(*i, gps_altitude_offset);
+		}
 		m_telemetry.push_back(slice);
+		if (index < climb_rate_index_lookback) {
+			//TODO(P3): fix this so each slice has a climb rate, instead of dropping the first n.
+			slice.m_climb_rate[0] = slice.m_climb_rate[1] = slice.m_climb_rate[2] = 0.0;
+		} else {
+			for (int channel = 0; channel < 3; channel++) {
+				slice.m_climb_rate[channel] =
+					(slice.m_alt[channel] - m_telemetry[index - climb_rate_index_lookback].m_alt[channel]) /
+					((float)climb_rate_index_lookback / TELEMETRY_FREQUENCY);
+				slice.m_climb_rate[channel] *= 60.0f * 3.28084f;
+			}
+		}
 		for (auto widget = widgets->begin(); widget != widgets->end(); widget++) {
 			(*widget)->polygonalize(slice, index, lines.size());
 		}
+
 	}
 	m_default_slice = m_telemetry[0];
 

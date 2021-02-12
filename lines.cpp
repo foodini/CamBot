@@ -97,7 +97,7 @@ void Lines::render(void(*set_vertex_attribs)()) {
 	if (set_vertex_attribs) {
 		(*set_vertex_attribs)();
 	} else {
-		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)(0 * sizeof(float)));
 		glEnableVertexAttribArray(0);
 	}
 

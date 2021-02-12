@@ -5,6 +5,7 @@
 
 #include "font_manager.h"
 #include "media_container_manager.h"
+#include "project_file_manager.h"
 //#include "telemetry.h"
 
 class TelemetryMgr;
@@ -12,14 +13,14 @@ class TelemetrySlice;
 
 class EnvConfig {
 public:
-	EnvConfig(MediaContainerMgr* mcm, FontManager* fm, float screen_width, float screen_height, float ui_height);
+	EnvConfig(MediaContainerMgr* mcm, FontManager* fm, ProjectFileManager* pfm, float screen_width, float screen_height, float ui_height);
 
 	//Setters
 	bool screen_height(float height)                       { m_screen_height = height; return true; }
 	bool screen_width(float width)                         { m_screen_width = width; return true; }
 	bool telemetry_offset(float offset);
 	bool advance_to_parametric(float parametric)           { return media_mgr->advance_to_parametric(parametric); }
-	bool launch_time(float launch_time)                    { m_launch_time = launch_time; return true; }
+	bool launch_time(float launch_time);
 
 	//Getters
 	//TODO(P0): set these to sane values (0 and whatever the file max is) when the video is read and
@@ -36,12 +37,15 @@ public:
 	float                   telemetry_offset()       const { return m_telemetry_offset; }
 
 	// Current time, [0.0..1.0] from beginning to end of telemetry. Used by widgets to interpolate place
-	float                   time_parametric()    const;
-	float                   flight_time()        const; // Wall time since launch. (negative: wall time until launch)
+	float                   time_parametric()        const;
+	float                   flight_time()            const; // Wall time since launch. (negative: wall time until launch)
 	
+	void                    save_project();
+
 	static EnvConfig*       instance;
 	FontManager*            font_mgr;
 	MediaContainerMgr*      media_mgr;
+	ProjectFileManager*     project_file_mgr;
 
 private:
 	float                   m_launch_time;

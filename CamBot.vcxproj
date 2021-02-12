@@ -153,6 +153,7 @@
     <ClCompile Include="font_manager.cpp" />
     <ClCompile Include="glad.c" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="project_file_manager.cpp" />
     <ClCompile Include="Source.cpp" />
     <ClCompile Include="stb_image.cpp" />
     <ClCompile Include="telemetry.cpp" />
@@ -164,6 +165,8 @@
   <ItemGroup>
     <None Include="3.3.shader.frag" />
     <None Include="3.3.shader.vert" />
+    <None Include="climb_widget.frag" />
+    <None Include="climb_widget.vert" />
     <None Include="date_time_widget.frag" />
     <None Include="date_time_widget.vert" />
     <None Include="graph_widget_0_background.frag" />
@@ -192,6 +195,7 @@
     <ClInclude Include="Header.h" />
     <ClInclude Include="interaction_manager.h" />
     <ClInclude Include="lines.h" />
+    <ClInclude Include="project_file_manager.h" />
     <ClInclude Include="stb_image.h" />
     <ClInclude Include="telemetry.h" />
     <ClInclude Include="util.h" />

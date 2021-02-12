@@ -1,14 +1,16 @@
 #include "env_config.h"
-#include "telemetry.h"
 #include "media_container_manager.h"
+#include "telemetry.h"
+#include "util.h"
 
 EnvConfig* EnvConfig::instance = nullptr;
 
-EnvConfig::EnvConfig(MediaContainerMgr* mcm, FontManager* fm, float screen_width, float screen_height, float ui_height) :
+EnvConfig::EnvConfig(MediaContainerMgr* mcm, FontManager* fm, ProjectFileManager* pfm, float screen_width, float screen_height, float ui_height) :
 	media_mgr(mcm),
 	font_mgr(fm),
-	m_launch_time(0.0),
-	m_telemetry_offset(0.0),
+	project_file_mgr(pfm),
+	m_launch_time(pfm->get_launch_time()),
+	m_telemetry_offset(pfm->get_telemetry_offset()),
 	m_screen_width(screen_width),
 	m_screen_height(screen_height),
 	m_ui_height(ui_height)
@@ -42,6 +44,13 @@ float EnvConfig::flight_time() const {
 
 bool EnvConfig::telemetry_offset(float offset) {
 	m_telemetry_offset = offset;
+	save_project();
+	return true;
+}
+
+bool EnvConfig::launch_time(float launch_time) { 
+	m_launch_time = launch_time; 
+	save_project();
 	return true;
 }
 
@@ -52,4 +61,10 @@ int32_t EnvConfig::telemetry_index() const {
 
 const TelemetrySlice& EnvConfig::telemetry_slice() const {
 	return (*TelemetryMgr::instance)[telemetry_index()];
+}
+
+void EnvConfig::save_project() {
+	project_file_mgr->set_launch_time(m_launch_time);
+	project_file_mgr->set_telemetry_offset(m_telemetry_offset);
+	project_file_mgr->save_project();
 }
