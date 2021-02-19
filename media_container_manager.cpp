@@ -451,6 +451,17 @@ bool MediaContainerMgr::init_video_output(const std::string& video_file_name, un
     return true;
 }
 
+
+void PrepareFlipFrameJ420(AVFrame* pFrame) {
+    for (int i = 0; i < 4; i++) {
+        if (i)
+            pFrame->data[i] += pFrame->linesize[i] * ((pFrame->height >> 1) - 1);
+        else
+            pFrame->data[i] += pFrame->linesize[i] * (pFrame->height - 1);
+        pFrame->linesize[i] = -pFrame->linesize[i];
+    }
+}
+
 //TODO(P0): Solve this width/height bullshit once and for all. We can't count on having enough screen space for the
 //          full video resolution, but I'd rather not "edit" at 1/2 resolution, then render to a frame buffer to make
 //          the video. Maybe bring the thing up at half-res, have a way to change resolutions, and output at whatever
@@ -478,12 +489,13 @@ bool MediaContainerMgr::output_video_frame(uint8_t* buf) {
         m_output_scale_context = sws_getContext(m_output_codec_context->width, m_output_codec_context->height, 
                                                 AV_PIX_FMT_RGB24,
                                                 m_output_codec_context->width, m_output_codec_context->height, 
-                                                AV_PIX_FMT_YUV420P, SWS_BICUBIC, 0, 0, 0);
+                                                AV_PIX_FMT_YUV420P, SWS_BICUBIC, nullptr, nullptr, nullptr);
     }
 
     int inLinesize[1] = { 3 * m_output_codec_context->width };
     sws_scale(m_output_scale_context, (const uint8_t* const*)&buf, inLinesize, 0, m_output_codec_context->height,
               m_output_video_frame->data, m_output_video_frame->linesize);
+    PrepareFlipFrameJ420(m_output_video_frame);
     //TODO(P0): Switch m_frame to be m_input_video_frame so I don't end up using the presentation timestamp from
     //          an audio frame if I threadify the frame reading.
     m_output_video_frame->pts = m_frame->pts;
@@ -529,3 +541,32 @@ bool MediaContainerMgr::output_video_frame(uint8_t* buf) {
     return true;
 }
 
+bool MediaContainerMgr::finalize_output() {
+    AVPacket pkt;
+    av_init_packet(&pkt);
+    pkt.data = nullptr;
+    pkt.size = 0;
+
+    for (;;) {
+        avcodec_send_frame(m_output_codec_context, nullptr);
+        if (avcodec_receive_packet(m_output_codec_context, &pkt) == 0) {
+            av_interleaved_write_frame(m_output_format_context, &pkt);
+            printf("final push:\n");
+        } else {
+            break;
+        }
+    }
+
+    av_packet_unref(&pkt);
+
+    av_write_trailer(m_output_format_context);
+    if (!(m_output_format->flags & AVFMT_NOFILE)) {
+        int err = avio_close(m_output_format_context->pb);
+        if (err < 0) {
+            printf("Failed to close file. err: %d\n", err);
+            return false;
+        }
+    }
+
+    return true;
+}

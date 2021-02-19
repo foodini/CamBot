@@ -39,8 +39,11 @@ public:
 	float timestamp_to_seconds(uint64_t timestamp) const;
 	void render();
 
+	// Major thanks to "shi-yan" who helped make this possible:
+	// https://github.com/shi-yan/videosamples/blob/master/libavmp4encoding/main.cpp
 	bool init_video_output(const std::string& video_file_name, unsigned int width, unsigned int height);
 	bool output_video_frame(uint8_t* buf);
+	bool finalize_output();
 
 private:
 	AVFormatContext*   m_format_context;

@@ -142,6 +142,9 @@ int main()
 
         if (interaction_mgr->key_down(GLFW_KEY_ESCAPE)) {
             glfwSetWindowShouldClose(window, true);
+            if (recording) {
+                media_container_mgr.finalize_output();
+            }
             break;
         }
         if (interaction_mgr->key_down(GLFW_KEY_SPACE))
