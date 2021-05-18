@@ -14,6 +14,7 @@ void main()
     float cos_t = cos(angle);
     float remainder = mod(angle, 3.14159/2.0);
     float scale = sin(remainder) + cos(remainder);
+    //TODO(P0): compensate for the distortion when rotating by non-multiples of PI.
     gl_Position = vec4(- sin_t * aPos.y + cos_t * aPos.x, cos_t * aPos.y + sin_t * aPos.x, aPos.z, 1.0);
     gl_Position = vec4(scale * gl_Position.xy, 0.0, 1.0);
     ourColor = aColor;

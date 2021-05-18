@@ -17,8 +17,7 @@ extern "C" {
 
 class MediaContainerMgr {
 public:
-	glm::vec3 foo;
-	MediaContainerMgr(const std::string& infile, int debug_write_rate, const std::string& vert, const std::string& frag, 
+	MediaContainerMgr(const std::string& infile, const std::string& vert, const std::string& frag, 
 		              const glm::vec3* extents);
 	~MediaContainerMgr();
 	bool advance_frame();
@@ -34,10 +33,13 @@ public:
 	float in_elapsed() const;    // Time, in seconds, since beginning of video.
 	float in_duration() const;   // Length of video, in seconds.
 	int64_t in_end_timestamp() const { return m_format_context->duration; }
+	void rotation_angle(float angle) { m_rotation_angle = angle; }
+	float rotation_angle() { return m_rotation_angle;  }
 
 	unsigned long int get_frame_time() const;
 	float timestamp_to_seconds(uint64_t timestamp) const;
 	void render();
+	bool recording() { return m_recording; }
 
 	// Major thanks to "shi-yan" who helped make this possible:
 	// https://github.com/shi-yan/videosamples/blob/master/libavmp4encoding/main.cpp
@@ -47,17 +49,20 @@ public:
 
 private:
 	AVFormatContext*   m_format_context;
-	AVCodec*           m_codec;
-	AVCodecParameters* m_codec_parameters;
-	AVCodecContext*    m_codec_context;
+	AVCodec*           m_video_input_codec;
+	AVCodec*           m_audio_input_codec;
+	AVCodecParameters* m_video_codec_parameters;
+	AVCodecParameters* m_audio_codec_parameters;
+	AVCodecContext*    m_video_input_codec_context;
+	AVCodecContext*    m_audio_input_codec_context;
 	AVFrame*           m_frame;
 	AVPacket*          m_packet;
 	uint32_t           m_video_stream_index;
+	uint32_t           m_audio_stream_index;
 	uint32_t           m_height;
 	uint32_t           m_width;
 	uint32_t           m_ui_height;
-	int                m_debug_write_rate;
-	int                m_debug_write_countdown;
+	float              m_rotation_angle;
 	
 	unsigned int       m_yuv_textures[3];
 	Shader             m_shader;
@@ -66,18 +71,21 @@ private:
 
 	void init_rendering(const glm::vec3* extents);
 	int decode_packet();
-	void save_yellow_frame(unsigned char* buf, int wrap, char* filename);
 
 	// For writing the output video:
 	void free_output_assets();
+	bool                   m_recording;
 	AVOutputFormat*        m_output_format;
 	AVFormatContext*       m_output_format_context;
-	AVStream*              m_output_video_stream;
-	AVCodec*               m_output_codec;
-	AVCodecContext*        m_output_codec_context;
+	AVCodec*               m_output_video_codec;
+	AVCodecContext*        m_output_video_codec_context;
 	AVFrame*               m_output_video_frame;
 	SwsContext*            m_output_scale_context;
-	AVStream*              m_output_stream;
+	AVStream*              m_output_video_stream;
+	
+	AVCodec*               m_output_audio_codec;
+	AVStream*              m_output_audio_stream;
+	AVCodecContext*        m_output_audio_codec_context;
 };
 
 #endif

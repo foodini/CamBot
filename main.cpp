@@ -95,7 +95,7 @@ int main()
 
     ProjectFileManager project_file_mgr = ProjectFileManager();
 
-    MediaContainerMgr media_container_mgr(project_file_mgr.get_video_file_path(), 0, "3.3.shader.vert", "3.3.shader.frag", extents);
+    MediaContainerMgr media_container_mgr(project_file_mgr.get_video_file_path(), "3.3.shader.vert", "3.3.shader.frag", extents);
     FontManager font_manager("c:\\Windows\\Fonts\\courbd.ttf", 48, SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT);
     //TODO(P1) Hand the telemetry_mgr, instead of its vector, into the env_config.
     EnvConfig env_config(&media_container_mgr, &font_manager, &project_file_mgr, (float)SCR_WIDTH, (float)SCR_HEIGHT + (float)UI_HEIGHT, (float)UI_HEIGHT);
@@ -124,12 +124,12 @@ int main()
     interaction_mgr->watch_key(GLFW_KEY_L);
     interaction_mgr->watch_key(GLFW_KEY_S);
     interaction_mgr->watch_key(GLFW_KEY_R);
+    interaction_mgr->watch_key(GLFW_KEY_F);
 
     float frame_time = ffsw::elapsed();
     float prev_frame_time = frame_time;
     float duration_avg = -1.0;
     bool confirming_launch = false;
-    bool recording = false;
     // render loop
     // -----------
     while (!glfwWindowShouldClose(window))
@@ -142,9 +142,7 @@ int main()
 
         if (interaction_mgr->key_down(GLFW_KEY_ESCAPE)) {
             glfwSetWindowShouldClose(window, true);
-            if (recording) {
-                media_container_mgr.finalize_output();
-            }
+            media_container_mgr.finalize_output();
             break;
         }
         if (interaction_mgr->key_down(GLFW_KEY_SPACE))
@@ -157,6 +155,9 @@ int main()
             rev = true;
         if (interaction_mgr->key_down(GLFW_KEY_DOWN) || interaction_mgr->key_held(GLFW_KEY_DOWN) >= 0.25)
             env_config.telemetry_offset(env_config.telemetry_offset() + (paused ? 0.1f : 10.0f));
+        if (interaction_mgr->key_down(GLFW_KEY_F)) {
+            media_container_mgr.rotation_angle(media_container_mgr.rotation_angle() + 3.141592653);
+        }
         if (interaction_mgr->key_down(GLFW_KEY_L)) {
             if (confirming_launch) {
                 confirming_launch = false;
@@ -179,10 +180,7 @@ int main()
         if (interaction_mgr->key_down(GLFW_KEY_R)) {
             const std::string& video_file_name = 
                    project_file_mgr.get_project_file_path() + ".mp4"; //TODO(P2): trim off the proj's extension.
-            if (media_container_mgr.init_video_output(video_file_name, SCR_WIDTH, SCR_HEIGHT)) {
-                recording = true;
-            }
-
+            media_container_mgr.init_video_output(video_file_name, SCR_WIDTH, SCR_HEIGHT);
         }
         if (fwd) {
             media_container_mgr.advance_by(paused ? 1 : 100); 
@@ -233,11 +231,12 @@ int main()
         // glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
         // -------------------------------------------------------------------------------
         glfwSwapBuffers(window);
-        if (recording) {
+        if (media_container_mgr.recording()) {
             uint8_t* buf = new uint8_t[SCR_WIDTH * SCR_HEIGHT * 4];
             //std::memset(buf, 0, SCR_WIDTH * SCR_HEIGHT * 3);
             glReadPixels(0, UI_HEIGHT, SCR_WIDTH, SCR_HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, (void*)buf);
             media_container_mgr.output_video_frame(buf);
+            delete[] buf;
         }
         glfwPollEvents();
 

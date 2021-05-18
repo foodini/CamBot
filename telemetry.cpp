@@ -36,18 +36,22 @@ TelemetrySlice::TelemetrySlice(const std::string& line, float gps_altitude_offse
 	char decimal_point, unit, lat_dir, lon_dir, open_brace, close_brace;
 	int ms;
 
+	float baud;
+
 	std::istringstream ss(line);
 	ss.imbue(std::locale("en_US.utf-8"));
 	ss >> std::get_time(&m_timestruct, "%y.%m.%d %H:%M:%S") >> decimal_point >> ms
 		>> m_gps_lat >> lat_dir >> m_gps_lon >> lon_dir
-		//>> m_gps_alt >> unit
+		//>> m_gps_alt >> unit >> unit >> unit >> unit
 		>> m_temperature[0] >> unit >> m_alt[0] >> unit
 		>> m_temperature[1] >> unit >> m_alt[1] >> unit
 		>> m_temperature[2] >> unit >> m_alt[2] >> unit
-		>> unit >> unit >> open_brace >> m_accel.x >> m_accel.y >> m_accel.z >> close_brace
+		>> unit >> open_brace >> m_accel.x >> m_accel.y >> m_accel.z >> close_brace
 		>> unit >> open_brace >> m_gyro.x >> m_gyro.y >> m_gyro.z >> close_brace
-		>> m_speed_kts >> unit >> m_course_deg;
-
+		>> m_speed_kts >> unit >> m_course_deg >> unit >> unit
+		>> baud >> unit >> unit >> unit >> unit
+		>> baud >> unit >> unit >> unit >> unit
+		;
 	if (ss.fail()) {
 		throw "Unable to parse time.";
 	}

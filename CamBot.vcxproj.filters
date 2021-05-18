@@ -175,5 +175,8 @@
     <ClInclude Include="project_file_manager.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="media_container_manager.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

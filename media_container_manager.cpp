@@ -10,22 +10,22 @@
 
 //TODO(P1): height and width are floats some places and uint32_ts elsewhere.
 
-MediaContainerMgr::MediaContainerMgr(const std::string& infile, int debug_write_rate, const std::string& vert, const std::string& frag,
+MediaContainerMgr::MediaContainerMgr(const std::string& infile, const std::string& vert, const std::string& frag,
     const glm::vec3* extents) :
     m_video_stream_index(-1),
+    m_audio_stream_index(-1),
     m_height(0),
     m_width(0),
-    m_debug_write_rate(debug_write_rate),
-    m_debug_write_countdown(debug_write_rate),
+    m_rotation_angle(0.0),
     m_shader(vert.c_str(), frag.c_str()),
+    m_recording(false),
     m_output_format(nullptr),
     m_output_format_context(nullptr),
-    m_output_video_stream(nullptr),
-    m_output_codec(nullptr),
-    m_output_codec_context(nullptr),
+    m_output_video_codec(nullptr),
+    m_output_video_codec_context(nullptr),
     m_output_video_frame(nullptr),
     m_output_scale_context(nullptr),
-    m_output_stream(nullptr)
+    m_output_video_stream(nullptr)
 {
     // AVFormatContext holds header info from the format specified in the container:
     m_format_context = avformat_alloc_context();
@@ -61,30 +61,48 @@ MediaContainerMgr::MediaContainerMgr(const std::string& infile, int debug_write_
         if (local_codec_parameters->codec_type == AVMEDIA_TYPE_VIDEO) {
             if (m_video_stream_index == -1) {
                 m_video_stream_index = i;
-                m_codec = local_codec;
-                m_codec_parameters = local_codec_parameters;
+                m_video_input_codec = local_codec;
+                m_video_codec_parameters = local_codec_parameters;
             }
             m_height = local_codec_parameters->height;
             m_width = local_codec_parameters->width;
             printf("Video Codec: resolution %dx%d\n", m_width, m_height);
         }
         else if (local_codec_parameters->codec_type == AVMEDIA_TYPE_AUDIO) {
+            if (m_audio_stream_index == -1) {
+                m_audio_stream_index = i;
+                m_audio_input_codec = local_codec;
+                m_audio_codec_parameters = local_codec_parameters;
+            }
             printf("Audio Codec: %d channels, sample rate %d\n", local_codec_parameters->channels, local_codec_parameters->sample_rate);
         }
 
         printf("\tCodec %s ID %d bit_rate %lld\n", local_codec->name, local_codec->id, local_codec_parameters->bit_rate);
     }
 
-    m_codec_context = avcodec_alloc_context3(m_codec);
-    if (!m_codec_context) {
+    m_video_input_codec_context = avcodec_alloc_context3(m_video_input_codec);
+    if (!m_video_input_codec_context) {
         throw "ERROR failed to allocate memory for AVCodecContext";
     }
 
-    if (avcodec_parameters_to_context(m_codec_context, m_codec_parameters) < 0) {
+    if (avcodec_parameters_to_context(m_video_input_codec_context, m_video_codec_parameters) < 0) {
         throw "ERROR failed to copy codec params to codec context";
     }
 
-    if (avcodec_open2(m_codec_context, m_codec, NULL) < 0) {
+    if (avcodec_open2(m_video_input_codec_context, m_video_input_codec, NULL) < 0) {
+        throw "ERROR avcodec_open2 failed to open codec";
+    }
+
+    m_audio_input_codec_context = avcodec_alloc_context3(m_audio_input_codec);
+    if (!m_audio_input_codec_context) {
+        throw "ERROR failed to allocate memory for AVCodecContext";
+    }
+
+    if (avcodec_parameters_to_context(m_audio_input_codec_context, m_audio_codec_parameters) < 0) {
+        throw "ERROR failed to copy codec params to codec context";
+    }
+
+    if (avcodec_open2(m_audio_input_codec_context, m_audio_input_codec, NULL) < 0) {
         throw "ERROR avcodec_open2 failed to open codec";
     }
 
@@ -105,7 +123,7 @@ MediaContainerMgr::~MediaContainerMgr() {
     avformat_close_input(&m_format_context);
     av_packet_free(&m_packet);
     av_frame_free(&m_frame);
-    avcodec_free_context(&m_codec_context);
+    avcodec_free_context(&m_video_input_codec_context);
 
     glDeleteVertexArrays(1, &m_VAO);
     glDeleteBuffers(1, &m_VBO);
@@ -156,7 +174,7 @@ void MediaContainerMgr::init_rendering(const glm::vec3* extents) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     }
 
-    m_shader.use();
+    m_shader.use(); // ALL UNIFORMS MUST BE SET AFTER use() is called.
 
     glUniform1i(glGetUniformLocation(m_shader.ID, "texture0"), 0);
     glUniform1i(glGetUniformLocation(m_shader.ID, "texture1"), 1);
@@ -169,8 +187,9 @@ void MediaContainerMgr::render() {
     int height = (uint32_t)get_height();
     int width = (uint32_t)get_width();
 
+    m_shader.use(); // ALL UNIFORMS MUST BE SET AFTER use() is called.
     m_shader.setFloat("time", (float)get_presentation_timefloat());
-    m_shader.setFloat("angle", 0.0);
+    m_shader.setFloat("angle", m_rotation_angle);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_yuv_textures[0]);
@@ -186,37 +205,50 @@ void MediaContainerMgr::render() {
     glGenerateMipmap(GL_TEXTURE_2D);
 
     // render the tristrip
-    m_shader.use();
-
     glBindVertexArray(m_VAO);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
 }
 
 bool MediaContainerMgr::advance_frame() {
+    int ret; // Crappy naming, but I'm using ffmpeg's name for it.
     while (true) {
-        if (av_read_frame(m_format_context, m_packet) < 0) {
+        ret = av_read_frame(m_format_context, m_packet);
+        if (ret < 0) {
             // Do we actually need to unref the packet if it failed?
             av_packet_unref(m_packet);
+            if (ret == AVERROR_EOF) {
+                finalize_output();
+                return false;
+            }
             continue;
             //return false;
         }
         else {
+            int response = decode_packet();
+            if (response != 0) {
+                continue;
+            }
             if (m_packet->stream_index == m_video_stream_index) {
                 //printf("AVPacket->pts %" PRId64 "\n", m_packet->pts);
-                int response = decode_packet();
-                av_packet_unref(m_packet);
-                if (response != 0) {
-                    continue;
-                    //return false;
+            }
+            if (m_packet->stream_index == m_audio_stream_index) {
+                printf("m_packet->stream_index: %d\n", m_packet->stream_index);
+                printf("  m_packet->pts: %lld\n", m_packet->pts);
+                printf("  mpacket->size: %d\n", m_packet->size);
+                if (m_recording) {
+                    int err = 0;
+                    err = avcodec_send_packet(m_output_audio_codec_context, m_packet);
+
+                    if (err) {
+                        printf("  encoding error: %d\n", err);
+                        printf("    avcodec_is_open(m_output_audio_codec_context): %d\n", avcodec_is_open(m_output_audio_codec_context));
+                        printf("    av_codec_is_decoder(m_output_audio_codec_context->codec): %d\n", av_codec_is_decoder(m_output_audio_codec_context->codec));
+                    }
                 }
-                return true;
             }
-            else {
-                //printf("m_packet->stream_index: %d\n", m_packet->stream_index);
-                //printf("  m_packet->pts: %lld\n", m_packet->pts);
-                //printf("  mpacket->size: %d\n", m_packet->size);
-            }
+            av_packet_unref(m_packet);
+            return true;
         }
 
         // We're done with the packet (it's been unpacked to a frame), so deallocate & reset to defaults:
@@ -235,8 +267,21 @@ bool MediaContainerMgr::advance_frame() {
 int MediaContainerMgr::decode_packet() {
     // Supply raw packet data as input to a decoder
     // https://ffmpeg.org/doxygen/trunk/group__lavc__decoding.html#ga58bc4bf1e0ac59e27362597e467efff3
-    int response = avcodec_send_packet(m_codec_context, m_packet);
+    int response;
+    AVCodecContext* codec_context = nullptr;
+    if (m_packet->stream_index == m_video_stream_index) {
+        codec_context = m_video_input_codec_context;
+    }
+    if (m_packet->stream_index == m_audio_stream_index) {
+        return -1;
+        codec_context = m_audio_input_codec_context;
+    }
 
+    if (codec_context == nullptr) {
+        return -1;
+    }
+
+    response = avcodec_send_packet(codec_context, m_packet);
     if (response < 0) {
         char buf[256];
         av_strerror(response, buf, 256);
@@ -246,7 +291,7 @@ int MediaContainerMgr::decode_packet() {
 
     // Return decoded output data (into a frame) from a decoder
     // https://ffmpeg.org/doxygen/trunk/group__lavc__decoding.html#ga11e6542c4e66d3028668788a1a74217c
-    response = avcodec_receive_frame(m_codec_context, m_frame);
+    response = avcodec_receive_frame(codec_context, m_frame);
     if (response == AVERROR(EAGAIN) || response == AVERROR_EOF) {
         return response;
     } else if (response < 0) {
@@ -256,37 +301,17 @@ int MediaContainerMgr::decode_packet() {
         return response;
     } else {
         printf(
-            "Frame %d (type=%c, size=%d bytes) pts %lld key_frame %d [DTS %d]\n",
-            m_codec_context->frame_number,
+            "Stream %d, Frame %d (type=%c, size=%d bytes), pts %lld, key_frame %d, [DTS %d]\n",
+            m_packet->stream_index,
+            codec_context->frame_number,
             av_get_picture_type_char(m_frame->pict_type),
             m_frame->pkt_size,
             m_frame->pts,
             m_frame->key_frame,
             m_frame->coded_picture_number
         );
-
-        if (--m_debug_write_countdown == 0) {
-            m_debug_write_countdown = m_debug_write_rate;
-            char frame_filename[1024];
-            snprintf(frame_filename, sizeof(frame_filename), "%s-%d.pgm", "frame", m_codec_context->frame_number);
-            save_yellow_frame(m_frame->data[0], m_frame->linesize[0], frame_filename);
-        }
     }
     return 0;
-}
-
-void MediaContainerMgr::save_yellow_frame(unsigned char* buf, int wrap, char* filename)
-{
-    FILE* f;
-    f = fopen(filename, "w");
-    // writing the minimal required header for a pgm file format
-    // portable graymap format -> https://en.wikipedia.org/wiki/Netpbm_format#PGM_example
-    fprintf(f, "P5\n%d %d\n%d\n", m_width, m_height, 255);
-
-    // writing line by line
-    for (unsigned int i = 0; i < m_height; i++)
-        fwrite(buf + (uint64_t)i * wrap, 1, m_width, f);
-    fclose(f);
 }
 
 uint64_t MediaContainerMgr::get_presentation_timestamp() const { 
@@ -368,6 +393,10 @@ float MediaContainerMgr::timestamp_to_seconds(uint64_t timestamp) const {
 
 
 bool MediaContainerMgr::init_video_output(const std::string& video_file_name, unsigned int width, unsigned int height) {
+    if (m_recording)
+        return true;
+    m_recording = true;
+
     advance_to(0L);
 
     if (!(m_output_format = av_guess_format(nullptr, video_file_name.c_str(), nullptr))) {
@@ -381,54 +410,96 @@ bool MediaContainerMgr::init_video_output(const std::string& video_file_name, un
         return false;
     }
 
-    m_output_codec = avcodec_find_encoder(m_output_format->video_codec);
-    if (!m_output_codec) {
-        printf("Failed to create codec.\n");
+    //TODO(P0): Break out the video and audio inits into their own methods.
+    m_output_video_codec = avcodec_find_encoder(m_output_format->video_codec);
+    if (!m_output_video_codec) {
+        printf("Failed to create video codec.\n");
         return false;
     }
-
-    m_output_stream = avformat_new_stream(m_output_format_context, m_output_codec);
-    if (!m_output_stream) {
-        printf("Failed to find format.\n");
+    m_output_video_stream = avformat_new_stream(m_output_format_context, m_output_video_codec);
+    if (!m_output_video_stream) {
+        printf("Failed to find video format.\n");
         return false;
     } 
-
-    m_output_codec_context = avcodec_alloc_context3(m_output_codec);
-    if (!m_output_codec_context) {
-        printf("Failed to create codec context.\n");
+    m_output_video_codec_context = avcodec_alloc_context3(m_output_video_codec);
+    if (!m_output_video_codec_context) {
+        printf("Failed to create video codec context.\n");
         return(false);
     }
-
-    m_output_stream->codecpar->codec_id = m_output_format->video_codec;
-    m_output_stream->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
-    m_output_stream->codecpar->width = width;
-    m_output_stream->codecpar->height = height;
-    m_output_stream->codecpar->format = AV_PIX_FMT_YUV420P;
+    m_output_video_stream->codecpar->codec_id = m_output_format->video_codec;
+    m_output_video_stream->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
+    m_output_video_stream->codecpar->width = width;
+    m_output_video_stream->codecpar->height = height;
+    m_output_video_stream->codecpar->format = AV_PIX_FMT_YUV420P;
     // Use the same bit rate as the input stream.
-    m_output_stream->codecpar->bit_rate = m_format_context->streams[m_video_stream_index]->codecpar->bit_rate;
-    m_output_stream->avg_frame_rate = m_format_context->streams[m_video_stream_index]->avg_frame_rate;
-    avcodec_parameters_to_context(m_output_codec_context, m_output_stream->codecpar);
-    m_output_codec_context->time_base = m_format_context->streams[m_video_stream_index]->time_base;
+    m_output_video_stream->codecpar->bit_rate = m_format_context->streams[m_video_stream_index]->codecpar->bit_rate;
+    m_output_video_stream->avg_frame_rate = m_format_context->streams[m_video_stream_index]->avg_frame_rate;
+    avcodec_parameters_to_context(m_output_video_codec_context, m_output_video_stream->codecpar);
+    m_output_video_codec_context->time_base = m_format_context->streams[m_video_stream_index]->time_base;
     
+    //EXPERIMENTAL: (Does this need to be set?)
+    m_output_video_stream->time_base = m_format_context->streams[m_video_stream_index]->time_base;
+
     //TODO(P1): Set these to match the input stream?
-    m_output_codec_context->max_b_frames = 2;
-    m_output_codec_context->gop_size = 12;
-    m_output_codec_context->framerate = m_format_context->streams[m_video_stream_index]->r_frame_rate;
+    m_output_video_codec_context->max_b_frames = 2;
+    m_output_video_codec_context->gop_size = 12;
+    m_output_video_codec_context->framerate = m_format_context->streams[m_video_stream_index]->r_frame_rate;
     //m_output_codec_context->refcounted_frames = 0;
-    if (m_output_stream->codecpar->codec_id == AV_CODEC_ID_H264) {
-        av_opt_set(m_output_codec_context, "preset", "ultrafast", 0);
-    } else if (m_output_stream->codecpar->codec_id == AV_CODEC_ID_H265) {
-        av_opt_set(m_output_codec_context, "preset", "ultrafast", 0);
+    if (m_output_video_stream->codecpar->codec_id == AV_CODEC_ID_H264) {
+        av_opt_set(m_output_video_codec_context, "preset", "ultrafast", 0);
+    } else if (m_output_video_stream->codecpar->codec_id == AV_CODEC_ID_H265) {
+        av_opt_set(m_output_video_codec_context, "preset", "ultrafast", 0);
     } else {
-        av_opt_set_int(m_output_codec_context, "lossless", 1, 0);
+        av_opt_set_int(m_output_video_codec_context, "lossless", 1, 0);
+    }
+    avcodec_parameters_from_context(m_output_video_stream->codecpar, m_output_video_codec_context);
+
+#define ATTEMPT_AUDIO
+#ifdef ATTEMPT_AUDIO
+    m_output_audio_codec = avcodec_find_encoder(m_output_format->audio_codec);
+    if (!m_output_audio_codec) {
+        printf("Failed to create audio codec.\n");
+        return false;
     }
 
-    avcodec_parameters_from_context(m_output_stream->codecpar, m_output_codec_context);
+    m_output_audio_stream = avformat_new_stream(m_output_format_context, m_output_audio_codec);
+    if (!m_output_audio_stream) {
+        printf("Failed to find audio format.\n");
+        return false;
+    }
+    m_output_audio_codec_context = avcodec_alloc_context3(m_output_audio_codec);
+    if (!m_output_audio_codec_context) {
+        printf("Failed to create audio codec context.\n");
+        return(false);
+    }
+    m_output_audio_codec_context->bit_rate = m_format_context->streams[m_audio_stream_index]->codecpar->bit_rate;
+    m_output_audio_codec_context->sample_fmt = AV_SAMPLE_FMT_S16;
+    m_output_audio_codec_context->sample_rate = m_format_context->streams[m_audio_stream_index]->codecpar->sample_rate;
+    m_output_audio_codec_context->channel_layout = m_format_context->streams[m_audio_stream_index]->codecpar->channel_layout;
+    m_output_audio_codec_context->channels = m_format_context->streams[m_audio_stream_index]->codecpar->channels;
+
+    m_output_audio_stream->codecpar->codec_id = m_output_format->audio_codec;
+    m_output_audio_stream->codecpar->codec_type = AVMEDIA_TYPE_AUDIO;
+    m_output_audio_stream->codecpar->format = m_format_context->streams[m_audio_stream_index]->codecpar->format;
+    m_output_audio_stream->codecpar->bit_rate = m_format_context->streams[m_audio_stream_index]->codecpar->bit_rate;
+    m_output_audio_stream->codecpar->sample_rate = m_format_context->streams[m_audio_stream_index]->codecpar->sample_rate;
+    m_output_audio_stream->codecpar->channels = m_format_context->streams[m_audio_stream_index]->codecpar->channels;
+    m_output_audio_stream->codecpar->channel_layout = m_format_context->streams[m_audio_stream_index]->codecpar->channel_layout;
+    m_output_audio_stream->avg_frame_rate = m_format_context->streams[m_audio_stream_index]->avg_frame_rate;
+    avcodec_parameters_to_context(m_output_audio_codec_context, m_output_audio_stream->codecpar);
+    m_output_audio_codec_context->time_base = m_format_context->streams[m_audio_stream_index]->time_base;
+
+    err = avcodec_open2(m_output_audio_codec_context, m_output_audio_codec, nullptr);
+    if (err < 0) {
+        printf("Failed to open output video codec.\n");
+        return false;
+    }
+#endif //ATTEMPT_AUDIO
 
     //TODO(P2): Free assets that have been allocated.
-    err = avcodec_open2(m_output_codec_context, m_output_codec, nullptr);
+    err = avcodec_open2(m_output_video_codec_context, m_output_video_codec, nullptr);
     if (err < 0) {
-        printf("Failed to open codec.\n");
+        printf("Failed to open output video codec.\n");
         return false;
     }
 
@@ -452,6 +523,7 @@ bool MediaContainerMgr::init_video_output(const std::string& video_file_name, un
 }
 
 
+//TODO(P2): make this a member. (Thanks to https://emvlo.wordpress.com/2016/03/10/sws_scale/)
 void PrepareFlipFrameJ420(AVFrame* pFrame) {
     for (int i = 0; i < 4; i++) {
         if (i)
@@ -473,8 +545,8 @@ bool MediaContainerMgr::output_video_frame(uint8_t* buf) {
     if (!m_output_video_frame) {
         m_output_video_frame = av_frame_alloc();
         m_output_video_frame->format = AV_PIX_FMT_YUV420P;
-        m_output_video_frame->width = m_output_codec_context->width;
-        m_output_video_frame->height = m_output_codec_context->height;
+        m_output_video_frame->width = m_output_video_codec_context->width;
+        m_output_video_frame->height = m_output_video_codec_context->height;
         err = av_frame_get_buffer(m_output_video_frame, 32);
         if (err < 0) {
             printf("Failed to allocate output frame.\n");
@@ -486,22 +558,22 @@ bool MediaContainerMgr::output_video_frame(uint8_t* buf) {
         //TODO(P1): Do this in hardware? It's a lot of work to buy back a few seconds of processing time. If
         //          anyone else takes an interest in the project, it'll be worth it, but it may never save me
         //          as much time as it costs.
-        m_output_scale_context = sws_getContext(m_output_codec_context->width, m_output_codec_context->height, 
+        m_output_scale_context = sws_getContext(m_output_video_codec_context->width, m_output_video_codec_context->height, 
                                                 AV_PIX_FMT_RGB24,
-                                                m_output_codec_context->width, m_output_codec_context->height, 
+                                                m_output_video_codec_context->width, m_output_video_codec_context->height, 
                                                 AV_PIX_FMT_YUV420P, SWS_BICUBIC, nullptr, nullptr, nullptr);
     }
 
-    int inLinesize[1] = { 3 * m_output_codec_context->width };
-    sws_scale(m_output_scale_context, (const uint8_t* const*)&buf, inLinesize, 0, m_output_codec_context->height,
+    int inLinesize[1] = { 3 * m_output_video_codec_context->width };
+    sws_scale(m_output_scale_context, (const uint8_t* const*)&buf, inLinesize, 0, m_output_video_codec_context->height,
               m_output_video_frame->data, m_output_video_frame->linesize);
     PrepareFlipFrameJ420(m_output_video_frame);
     //TODO(P0): Switch m_frame to be m_input_video_frame so I don't end up using the presentation timestamp from
     //          an audio frame if I threadify the frame reading.
     m_output_video_frame->pts = m_frame->pts;
-    printf("Output PTS: %d, time_base: %d/%d\n", m_output_video_frame->pts,
-        m_output_codec_context->time_base.num, m_output_codec_context->time_base.den);
-    err = avcodec_send_frame(m_output_codec_context, m_output_video_frame);
+    printf("Output PTS: %lld, time_base: %d/%d\n", m_output_video_frame->pts,
+        m_output_video_codec_context->time_base.num, m_output_video_codec_context->time_base.den);
+    err = avcodec_send_frame(m_output_video_codec_context, m_output_video_frame);
     if (err < 0) {
         printf("  ERROR sending new video frame output: ");
         switch (err) {
@@ -528,9 +600,9 @@ bool MediaContainerMgr::output_video_frame(uint8_t* buf) {
     pkt.size = 0;
     pkt.flags |= AV_PKT_FLAG_KEY;
     int ret = 0;
-    if ((ret = avcodec_receive_packet(m_output_codec_context, &pkt)) == 0) {
+    if ((ret = avcodec_receive_packet(m_output_video_codec_context, &pkt)) == 0) {
         static int counter = 0;
-        printf("pkt.key: 0x%08x, pkt.size: %d, counter:\n", pkt.flags & AV_PKT_FLAG_KEY, pkt.size, counter++);
+        printf("pkt.key: 0x%08x, pkt.size: %d, counter: %d\n", pkt.flags & AV_PKT_FLAG_KEY, pkt.size, counter++);
         uint8_t* size = ((uint8_t*)pkt.data);
         printf("sizes: %d %d %d %d %d %d %d %d %d\n", size[0], size[1], size[2], size[2], size[3], size[4], size[5], size[6], size[7]);
         av_interleaved_write_frame(m_output_format_context, &pkt);
@@ -542,15 +614,20 @@ bool MediaContainerMgr::output_video_frame(uint8_t* buf) {
 }
 
 bool MediaContainerMgr::finalize_output() {
+    if (!m_recording)
+        return true;
+
     AVPacket pkt;
     av_init_packet(&pkt);
     pkt.data = nullptr;
     pkt.size = 0;
 
     for (;;) {
-        avcodec_send_frame(m_output_codec_context, nullptr);
-        if (avcodec_receive_packet(m_output_codec_context, &pkt) == 0) {
+        avcodec_send_frame(m_output_video_codec_context, nullptr);
+        if (avcodec_receive_packet(m_output_video_codec_context, &pkt) == 0) {
+#if true
             av_interleaved_write_frame(m_output_format_context, &pkt);
+#endif
             printf("final push:\n");
         } else {
             break;

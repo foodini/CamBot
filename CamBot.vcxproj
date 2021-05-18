@@ -195,6 +195,7 @@
     <ClInclude Include="Header.h" />
     <ClInclude Include="interaction_manager.h" />
     <ClInclude Include="lines.h" />
+    <ClInclude Include="media_container_manager.h" />
     <ClInclude Include="project_file_manager.h" />
     <ClInclude Include="stb_image.h" />
     <ClInclude Include="telemetry.h" />
