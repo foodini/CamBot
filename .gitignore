@@ -1,1 +1,6 @@
 x64/Debug/**
+*.mp4
+*.MP4
+*.ppm
+*.buf
+*.swp
