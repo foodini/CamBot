@@ -106,9 +106,14 @@ MediaContainerMgr::MediaContainerMgr(const std::string& infile, const std::strin
         throw "ERROR avcodec_open2 failed to open codec";
     }
 
-    m_frame = av_frame_alloc();
-    if (!m_frame) {
-        throw "ERROR failed to allocate AVFrame memory";
+    m_last_video_frame = av_frame_alloc();
+    if (!m_last_video_frame) {
+        throw "ERROR failed to allocate video AVFrame memory";
+    }
+
+    m_last_audio_frame = av_frame_alloc();
+    if (!m_last_video_frame) {
+        throw "ERROR failed to allocate audio AVFrame memory";
     }
 
     m_packet = av_packet_alloc();
@@ -122,7 +127,7 @@ MediaContainerMgr::MediaContainerMgr(const std::string& infile, const std::strin
 MediaContainerMgr::~MediaContainerMgr() {
     avformat_close_input(&m_format_context);
     av_packet_free(&m_packet);
-    av_frame_free(&m_frame);
+    av_frame_free(&m_last_video_frame);
     avcodec_free_context(&m_video_input_codec_context);
 
     glDeleteVertexArrays(1, &m_VAO);
@@ -193,15 +198,15 @@ void MediaContainerMgr::render() {
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_yuv_textures[0]);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, m_frame->data[0]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, m_last_video_frame->data[0]);
     glGenerateMipmap(GL_TEXTURE_2D);
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, m_yuv_textures[1]);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width / 2, height / 2, 0, GL_RED, GL_UNSIGNED_BYTE, m_frame->data[1]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width / 2, height / 2, 0, GL_RED, GL_UNSIGNED_BYTE, m_last_video_frame->data[1]);
     glGenerateMipmap(GL_TEXTURE_2D);
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, m_yuv_textures[2]);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width / 2, height / 2, 0, GL_RED, GL_UNSIGNED_BYTE, m_frame->data[2]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width / 2, height / 2, 0, GL_RED, GL_UNSIGNED_BYTE, m_last_video_frame->data[2]);
     glGenerateMipmap(GL_TEXTURE_2D);
 
     // render the tristrip
@@ -229,26 +234,28 @@ bool MediaContainerMgr::advance_frame() {
             if (response != 0) {
                 continue;
             }
-            if (m_packet->stream_index == m_video_stream_index) {
-                //printf("AVPacket->pts %" PRId64 "\n", m_packet->pts);
-            }
             if (m_packet->stream_index == m_audio_stream_index) {
                 printf("m_packet->stream_index: %d\n", m_packet->stream_index);
                 printf("  m_packet->pts: %lld\n", m_packet->pts);
                 printf("  mpacket->size: %d\n", m_packet->size);
                 if (m_recording) {
                     int err = 0;
-                    err = avcodec_send_packet(m_output_audio_codec_context, m_packet);
+                    err = av_write_frame(m_output_format_context, m_packet);
 
                     if (err) {
                         printf("  encoding error: %d\n", err);
                         printf("    avcodec_is_open(m_output_audio_codec_context): %d\n", avcodec_is_open(m_output_audio_codec_context));
-                        printf("    av_codec_is_decoder(m_output_audio_codec_context->codec): %d\n", av_codec_is_decoder(m_output_audio_codec_context->codec));
+                        printf("    av_codec_is_encoder(m_output_audio_codec_context->codec): %d\n", av_codec_is_encoder(m_output_audio_codec_context->codec));
                     }
                 }
+
+                continue;
             }
             av_packet_unref(m_packet);
-            return true;
+            if (m_packet->stream_index == m_video_stream_index) {
+                //printf("AVPacket->pts %" PRId64 "\n", m_packet->pts);
+                return true;
+            }
         }
 
         // We're done with the packet (it's been unpacked to a frame), so deallocate & reset to defaults:
@@ -267,14 +274,17 @@ bool MediaContainerMgr::advance_frame() {
 int MediaContainerMgr::decode_packet() {
     // Supply raw packet data as input to a decoder
     // https://ffmpeg.org/doxygen/trunk/group__lavc__decoding.html#ga58bc4bf1e0ac59e27362597e467efff3
-    int response;
+    int             response;
     AVCodecContext* codec_context = nullptr;
+    AVFrame*        frame         = nullptr;
+
     if (m_packet->stream_index == m_video_stream_index) {
         codec_context = m_video_input_codec_context;
+        frame = m_last_video_frame;
     }
     if (m_packet->stream_index == m_audio_stream_index) {
-        return -1;
         codec_context = m_audio_input_codec_context;
+        frame = m_last_audio_frame;
     }
 
     if (codec_context == nullptr) {
@@ -291,7 +301,7 @@ int MediaContainerMgr::decode_packet() {
 
     // Return decoded output data (into a frame) from a decoder
     // https://ffmpeg.org/doxygen/trunk/group__lavc__decoding.html#ga11e6542c4e66d3028668788a1a74217c
-    response = avcodec_receive_frame(codec_context, m_frame);
+    response = avcodec_receive_frame(codec_context, frame);
     if (response == AVERROR(EAGAIN) || response == AVERROR_EOF) {
         return response;
     } else if (response < 0) {
@@ -304,19 +314,19 @@ int MediaContainerMgr::decode_packet() {
             "Stream %d, Frame %d (type=%c, size=%d bytes), pts %lld, key_frame %d, [DTS %d]\n",
             m_packet->stream_index,
             codec_context->frame_number,
-            av_get_picture_type_char(m_frame->pict_type),
-            m_frame->pkt_size,
-            m_frame->pts,
-            m_frame->key_frame,
-            m_frame->coded_picture_number
+            av_get_picture_type_char(frame->pict_type),
+            frame->pkt_size,
+            frame->pts,
+            frame->key_frame,
+            frame->coded_picture_number
         );
     }
     return 0;
 }
 
 uint64_t MediaContainerMgr::get_presentation_timestamp() const { 
-    if (m_frame)
-        return m_frame->pts;
+    if (m_last_video_frame)
+        return m_last_video_frame->pts;
     else
         return 0;
 }
@@ -331,7 +341,7 @@ double MediaContainerMgr::get_presentation_timefloat() const {
 
 float MediaContainerMgr::in_parametric() const {
     if (m_format_context)
-        return (float)m_frame->pts / m_format_context->streams[m_video_stream_index]->duration;
+        return (float)m_last_video_frame->pts / m_format_context->streams[m_video_stream_index]->duration;
     else
         return 0.0;
 }
@@ -357,7 +367,7 @@ bool MediaContainerMgr::advance_to(int64_t timestamp) {
     av_seek_frame(m_format_context, m_video_stream_index, timestamp, AVSEEK_FLAG_BACKWARD);
     do {
         advance_frame();
-    } while (m_frame->pts < timestamp);
+    } while (m_last_video_frame->pts < timestamp);
 
     return true;
 }
@@ -494,6 +504,7 @@ bool MediaContainerMgr::init_video_output(const std::string& video_file_name, un
         printf("Failed to open output video codec.\n");
         return false;
     }
+
 #endif //ATTEMPT_AUDIO
 
     //TODO(P2): Free assets that have been allocated.
@@ -570,7 +581,7 @@ bool MediaContainerMgr::output_video_frame(uint8_t* buf) {
     PrepareFlipFrameJ420(m_output_video_frame);
     //TODO(P0): Switch m_frame to be m_input_video_frame so I don't end up using the presentation timestamp from
     //          an audio frame if I threadify the frame reading.
-    m_output_video_frame->pts = m_frame->pts;
+    m_output_video_frame->pts = m_last_video_frame->pts;
     printf("Output PTS: %lld, time_base: %d/%d\n", m_output_video_frame->pts,
         m_output_video_codec_context->time_base.num, m_output_video_codec_context->time_base.den);
     err = avcodec_send_frame(m_output_video_codec_context, m_output_video_frame);

@@ -48,12 +48,6 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 
 int main()
 {
-    std::string test_files[3][2] = {
-        "c:\\Users\\foodi\\Videos\\VIRB\\VIRB_0347.mp4", "11222122.log",
-        "VIRB_0354.mp4",                                 "12292234.log",
-        "VIRB0355.mp4",                                  "12312359.log"
-    };
-
     // glfw: initialize and configure
     // ------------------------------
     glfwInit();

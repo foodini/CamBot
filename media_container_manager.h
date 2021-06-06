@@ -55,7 +55,8 @@ private:
 	AVCodecParameters* m_audio_codec_parameters;
 	AVCodecContext*    m_video_input_codec_context;
 	AVCodecContext*    m_audio_input_codec_context;
-	AVFrame*           m_frame;
+	AVFrame*           m_last_video_frame;
+	AVFrame*           m_last_audio_frame;
 	AVPacket*          m_packet;
 	uint32_t           m_video_stream_index;
 	uint32_t           m_audio_stream_index;
@@ -86,6 +87,7 @@ private:
 	AVCodec*               m_output_audio_codec;
 	AVStream*              m_output_audio_stream;
 	AVCodecContext*        m_output_audio_codec_context;
+	AVFormatContext*       m_output_audio_format_context;
 };
 
 #endif
