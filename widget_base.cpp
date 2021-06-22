@@ -34,7 +34,8 @@ void WidgetBase::render(Shader& shader) {
 	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3*sizeof(float)));
 	glEnableVertexAttribArray(1);
 
-	glm::mat4 projection = glm::ortho(0.0f, static_cast<float>(env_config->screen_width()), 0.0f, static_cast<float>(env_config->screen_height()));
+	//glm::mat4 projection = glm::ortho(0.0f, static_cast<float>(env_config->screen_width()), 0.0f, static_cast<float>(env_config->screen_height()));
+	glm::mat4 projection = glm::ortho(0.0f, 1.0f, 0.0f, 1.0f);
 
 	glUniformMatrix4fv(glGetUniformLocation(shader.ID, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 

@@ -29,38 +29,6 @@ protected:
 private:
 };
 
-class Space {
-public:
-	typedef std::pair<int32_t, int32_t> SpatialIndex;
-
-	Space(float tile_size);
-	~Space();
-
-	void                polygonalize(TelemetrySlice& slice, uint32_t index, uint32_t num_slices);
-	glm::vec2           get_current_coords();
-	SpatialIndex        get_current_gridref();
-	glm::vec2           latlon_to_coords(float lat, float lon);
-	SpatialIndex        latlon_to_gridref(float lat, float lon);
-	std::vector<float>* get_poly_verts(const SpatialIndex& spatial_index);
-
-
-	std::pair<float*, uint32_t>              get_course_buffer(Space::SpatialIndex spatial_index);
-	std::vector<std::pair<float*, uint32_t>> get_course_buffers();
-
-protected:
-	SpatialIndex        coords_to_gridref(const glm::vec2& xy_coords);
-	void                push_verts(std::vector<float>* vert_vect, const glm::vec2& p1, const glm::vec2& right, float climb_rate, bool degenerate);
-
-private:
-	std::unordered_map<SpatialIndex, std::vector<float>*, pair_hash> m_poly_vects;
-
-	float      m_tile_size;
-	float      m_center_lat;
-	float      m_center_lon;
-	float      m_line_width;
-	glm::vec2  m_last_right;
-};
-
 class MapWidget : public WidgetBase {
 public:
 	//TODO(P1): make width, height, pos all part of vec2s.

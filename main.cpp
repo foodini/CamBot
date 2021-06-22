@@ -87,18 +87,18 @@ int main()
     extents[2] = glm::vec3(-1.0, 1.0, 0.0);
     extents[3] = glm::vec3(1.0, 1.0, 0.0);
 
-    ProjectFileManager project_file_mgr = ProjectFileManager();
+    ProjectFileManager project_file_mgr;
 
     MediaContainerMgr media_container_mgr(project_file_mgr.get_video_file_path(), "3.3.shader.vert", "3.3.shader.frag", extents);
     FontManager font_manager("c:\\Windows\\Fonts\\courbd.ttf", 48, SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT);
     //TODO(P1) Hand the telemetry_mgr, instead of its vector, into the env_config.
     EnvConfig env_config(&media_container_mgr, &font_manager, &project_file_mgr, (float)SCR_WIDTH, (float)SCR_HEIGHT + (float)UI_HEIGHT, (float)UI_HEIGHT);
 
-    DateTimeWidget date_time_widget(182.0, 56.0, SCR_WIDTH - 187.0, SCR_HEIGHT + UI_HEIGHT - 61.0);
-    MediaScrubWidget media_scrub_widget(SCR_WIDTH - 20.0, 20.0, 10.0, UI_HEIGHT - 5.0 - 20.0);
+    DateTimeWidget date_time_widget(.12, .05, 1.0-.12-.005, 1.0-.05-.005);
+    MediaScrubWidget media_scrub_widget(0.98, 0.02, 0.01, 0.0825);
 
-    MapWidget map_widget(175.0, 175.0, SCR_WIDTH - 25.0 - 5.0 - 175.0 - 5.0, UI_HEIGHT + 5.0);
-    ClimbWidget climb_widget(25.0, 175.0, SCR_WIDTH - 25.0 - 5.0, UI_HEIGHT + 5.0);
+    MapWidget map_widget(.1, .1*SCR_WIDTH/(SCR_HEIGHT+UI_HEIGHT), .8675, .12);
+    ClimbWidget climb_widget(.02, .1 * SCR_WIDTH / (SCR_HEIGHT + UI_HEIGHT), .9725, .12);
     GraphWidget graph_widget(300.0, 100.0, 5.0, UI_HEIGHT + 5.0);
     //TODO(P0): This is dumb. Have each widget know whether it needs a poly call. The TelemetryMgr can call all widgets and
     //construct the list of the ones that need data.

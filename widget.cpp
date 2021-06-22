@@ -50,7 +50,7 @@ void MediaScrubWidget::handle_input() {
 	if (interaction_mgr->mouse_button_down()) {
 		if (interaction_mgr->mouse_x_pos() >= m_x_pos && interaction_mgr->mouse_x_pos() < m_x_pos + m_width &&
 			interaction_mgr->mouse_y_pos() >= m_y_pos && interaction_mgr->mouse_y_pos() < m_y_pos + m_height) {
-			float parametric = (interaction_mgr->mouse_x_pos() - m_x_pos) / (m_width - 1.0f);
+ 			float parametric = (interaction_mgr->mouse_x_pos() - m_x_pos) / m_width;
 			EnvConfig::instance->advance_to_parametric(parametric);
 		}
 	}
@@ -77,181 +77,6 @@ void MediaScrubWidget::render() {
 	env_config->font_mgr->add_string(buf, 0, .33f, glm::vec2(m_x_pos + 5.0, m_y_pos + 5.0), glm::vec3(1.0, 1.0, 1.0), 1.0f);
 }
 
-Space::Space(float tile_size) :
-	m_poly_vects(),
-	m_tile_size(tile_size),
-	m_center_lat(nan("")),
-	m_center_lon(nan("")),
-	m_line_width(5.0),
-	m_last_right(glm::vec2(1.0, 0.0))
-{
-}
-
-Space::~Space() {
-	// TODO(P0): destroy all the poly bufs
-}
-
-glm::vec2 Space::latlon_to_coords(float lat, float lon) {
-	double dist_x = ((double)lon - m_center_lon) / 90.0 * 10000000.0;
-	dist_x *= cos(M_PI / 2.0 * lat / 90.0);
-	double dist_y = ((double)lat - m_center_lat) / 90.0 * 10000000.0;
-
-	return glm::vec2(dist_x, dist_y);
-}
-
-Space::SpatialIndex Space::coords_to_gridref(const glm::vec2& xy_coords) {
-	SpatialIndex retval;
-	retval.first = xy_coords.x / m_tile_size;
-	if (xy_coords.x < 0.0)
-		retval.first -= 1;
-	retval.second = xy_coords.y / m_tile_size;
-	if (xy_coords.y < 0.0)
-		retval.second -= 1;
-
-	return retval;
-}
-
-Space::SpatialIndex Space::latlon_to_gridref(float lat, float lon) {
-
-	return coords_to_gridref(latlon_to_coords(lat, lon));
-}
-
-std::pair<float*, uint32_t> Space::get_course_buffer(Space::SpatialIndex spatial_index) {
-	//TODO(P2) Better way to get the length that allows delete of poly_vects?
-	std::pair<float*, uint32_t> retval;
-	auto vects = m_poly_vects.find(spatial_index);
-	if (vects == m_poly_vects.end()) {
-		retval.first = nullptr;
-		retval.second = 0;
-	}
-	else {
-		retval.first = m_poly_vects.find(spatial_index)->second->data();
-		retval.second = m_poly_vects.find(spatial_index)->second->size();
-	}
-	return retval;
-}
-
-std::vector<float>* Space::get_poly_verts(const SpatialIndex& spatial_index) {
-	std::vector<float>* vert_vect;
-	auto poly_vect_find = m_poly_vects.find(spatial_index);
-	if (poly_vect_find == m_poly_vects.end()) {
-		vert_vect = new std::vector<float>;
-		m_poly_vects[spatial_index] = vert_vect;
-	}
-	else {
-		vert_vect = poly_vect_find->second;
-	}
-	return vert_vect;
-}
-
-void Space::push_verts(std::vector<float>* vert_vect, const glm::vec2& p1, const glm::vec2& right, float climb_rate, bool degenerate) {
-	glm::vec2 vert0 = p1 - right;
-	glm::vec2 vert1 = p1 + right;
-	if (degenerate) {
-		for (uint32_t i = 0; i < 4; i++) {
-			// Push the last 4 values onto the vector again.
-			vert_vect->push_back((*vert_vect)[vert_vect->size() - 4]);
-		}
-		vert_vect->push_back(vert0.x);
-		vert_vect->push_back(vert0.y);
-		vert_vect->push_back(0.0);
-		vert_vect->push_back(climb_rate);
-	}
-	vert_vect->push_back(vert0.x);
-	vert_vect->push_back(vert0.y);
-	vert_vect->push_back(0.0);
-	vert_vect->push_back(climb_rate);
-	vert_vect->push_back(vert1.x);
-	vert_vect->push_back(vert1.y);
-	vert_vect->push_back(1.0);
-	vert_vect->push_back(climb_rate);
-}
-
-
-void Space::polygonalize(TelemetrySlice& slice, uint32_t index, uint32_t num_slices) {
-	if (index == 0) {
-		m_center_lat = slice.m_gps_lat;
-		m_center_lon = slice.m_gps_lon;
-	}
-
-	if (index < 2 || num_slices < 3)
-		return;
-
-	TelemetryMgr& telemetry_mgr = *TelemetryMgr::instance;
-
-	glm::vec2 p0 = latlon_to_coords(telemetry_mgr[index - 2].m_gps_lat, telemetry_mgr[index - 2].m_gps_lon);
-	SpatialIndex s0 = coords_to_gridref(p0);
-	glm::vec2 p1 = latlon_to_coords(telemetry_mgr[index - 1].m_gps_lat, telemetry_mgr[index - 1].m_gps_lon);
-	SpatialIndex s1 = coords_to_gridref(p1);
-	glm::vec2 p2 = latlon_to_coords(telemetry_mgr[index].m_gps_lat, telemetry_mgr[index].m_gps_lon);
-	SpatialIndex s2 = coords_to_gridref(p2);
-
-	glm::vec2 d01 = p1 - p0;
-	glm::vec2 d12 = p2 - p1;
-	glm::vec2 avg_direction = d12 + d01;
-	glm::vec2 right;
-	if (glm::length(avg_direction) < 0.001) {
-		right = m_last_right;
-	}
-	else {
-		right = glm::normalize(glm::vec2(avg_direction.y, -avg_direction.x));
-		m_last_right = right;
-	}
-	right *= m_line_width / 2.0;
-
-	float climb_rate = slice.m_climb_rate[1];
-
-	std::vector<float>* vert_vect0 = get_poly_verts(s0);
-	std::vector<float>* vert_vect1 = get_poly_verts(s1);
-	if (s0 != s1) {
-		// The last pair of points went in a different gridref. We have to start over.
-		// either this is a new gridref, in which case we just drop the points in, or it's
-		// an old one, in which case, we have to generate a degenerate poly to move to the
-		// new location.
-		if (vert_vect0->size() > 0) {
-			push_verts(vert_vect0, p1, right, climb_rate, false);
-		}
-		if (vert_vect1->size() == 0) {
-			push_verts(vert_vect1, p1, right, climb_rate, false);
-		}
-		else {
-			push_verts(vert_vect1, p1, right, climb_rate, true);
-		}
-	}
-	else {
-		push_verts(vert_vect1, p1, right, climb_rate, false);
-	}
-}
-
-std::vector<std::pair<float*, uint32_t>> Space::get_course_buffers() {
-	std::vector<std::pair<float*, uint32_t>> retval;
-
-	const TelemetrySlice& slice = EnvConfig::instance->telemetry_slice();
-	Space::SpatialIndex center_spatial_index = latlon_to_gridref(slice.m_gps_lat, slice.m_gps_lon);
-	for (int dx = -1; dx <= 1; dx++) {
-		for (int dy = -1; dy <= 1; dy++) {
-			Space::SpatialIndex si(center_spatial_index.first + dx, center_spatial_index.second + dy);
-			std::pair<float*, uint32_t> verts = get_course_buffer(si);
-			
-			if (verts.second > 2) {
-				retval.push_back(verts);
-			}
-		}
-	}
-	return retval;
-}
-
-glm::vec2 Space::get_current_coords() {
-	TelemetrySlice current_slice = (*TelemetryMgr::instance)[EnvConfig::instance->telemetry_index()];
-	return latlon_to_coords(current_slice.m_gps_lat, current_slice.m_gps_lon);
-}
-
-Space::SpatialIndex Space::get_current_gridref() {
-	TelemetrySlice current_slice = (*TelemetryMgr::instance)[EnvConfig::instance->telemetry_index()];
-	return latlon_to_gridref(current_slice.m_gps_lat, current_slice.m_gps_lon);
-}
-
-
 MapWidget::MapWidget(float width, float height, float x_pos, float y_pos) :
 	WidgetBase(width, height, x_pos, y_pos, "map_widget.vert", "map_widget.frag"),
 	m_shader_course("map_widget_1_course.vert", "map_widget_1_course.frag"),
@@ -275,8 +100,6 @@ glm::vec2 MapWidget::latlon_to_coords(float lat, float lon) {
 
 	return glm::vec2(dist_x, dist_y);
 }
-
-
 
 void MapWidget::polygonalize(TelemetrySlice& slice, uint32_t index, uint32_t num_slices) {
 	TelemetryMgr& telemetry_mgr = *TelemetryMgr::instance;
@@ -328,7 +151,9 @@ void set_map_widget_vertex_attrib_pointers() {
 void MapWidget::render_course() {
 	const EnvConfig* env_config = EnvConfig::instance;
 
-	glm::mat4 projection = glm::ortho(0.0f, env_config->screen_width(), 0.0f, env_config->screen_height());
+	// TODO(P0): THIS MAY NOT BE THE CORRECT PROJECTION. The "square" on the screen is not square in canonical screen space.
+	//           It's dependent upon the aspect ratio of the entire window.
+	glm::mat4 projection = glm::ortho(0.0f, 1.0f, 0.0f, 1.0f);
 	glm::vec4 min_clip(m_x_pos, m_y_pos, 0.0f, 1.0f);
 	glm::vec4 max_clip(m_x_pos + m_width, m_y_pos + m_height, 0.0f, 1.0f);
 	min_clip = projection * min_clip;
