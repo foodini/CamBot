@@ -21,16 +21,18 @@ void DateTimeWidget::render() {
 	m_shader.use();
 	WidgetBase::render(m_shader);
 
+	float float_vert_quarters = m_height / 4.0;
+
 	char buf[50];
 	const TelemetrySlice& ts = env_config->telemetry_slice();
 	sprintf(buf, "Date:   %04d.%02d.%02d", ts.year(), ts.month(), ts.day());
-	env_config->font_mgr->add_string(buf, 0, .33, glm::vec2(m_x_pos + 5.0, m_y_pos + 39.0), glm::vec3(1.0, 1.0, 1.0), 1);
+	env_config->font_mgr->add_string(buf, 0, .33, glm::vec2(m_x_pos + 0.01, m_y_pos + float_vert_quarters * 3.0), glm::vec3(1.0, 1.0, 1.0), 0.001);
 	sprintf(buf, "Time:     %02d:%02d:%02d", ts.hour(), ts.minute(), ts.second());
-	env_config->font_mgr->add_string(buf, 0, .33, glm::vec2(m_x_pos + 5.0, m_y_pos + 22.0), glm::vec3(1.0, 1.0, 1.0), 1);
+	env_config->font_mgr->add_string(buf, 0, .33, glm::vec2(m_x_pos + 0.01, m_y_pos + float_vert_quarters * 2.0), glm::vec3(1.0, 1.0, 1.0), 0.001);
 	float total_sec = env_config->flight_time();
 	strcpy(buf, total_sec >= 0.0 ? "Duration +" : "Duration -");
 	ffsw::make_time(&buf[strlen(buf)], total_sec, false);
-	env_config->font_mgr->add_string(buf, 0, .33, glm::vec2(m_x_pos + 5.0, m_y_pos + 5.0), glm::vec3(1.0, 1.0, 1.0), 1);
+	env_config->font_mgr->add_string(buf, 0, .33, glm::vec2(m_x_pos + 0.01, m_y_pos + float_vert_quarters * 1.0), glm::vec3(1.0, 1.0, 1.0), 0.001);
 }
 
 
@@ -152,8 +154,9 @@ void MapWidget::render_course() {
 	const EnvConfig* env_config = EnvConfig::instance;
 
 	// TODO(P0): THIS MAY NOT BE THE CORRECT PROJECTION. The "square" on the screen is not square in canonical screen space.
-	//           It's dependent upon the aspect ratio of the entire window.
-	glm::mat4 projection = glm::ortho(0.0f, 1.0f, 0.0f, 1.0f);
+	//           It's dependent upon the aspect ratio of the entire window. I suspect that the projection is correct, but it
+	//           needs to be checked.
+	glm::mat4 projection = glm::ortho(-1.0f, 1.0f, -1.0f, 1.0f);
 	glm::vec4 min_clip(m_x_pos, m_y_pos, 0.0f, 1.0f);
 	glm::vec4 max_clip(m_x_pos + m_width, m_y_pos + m_height, 0.0f, 1.0f);
 	min_clip = projection * min_clip;
@@ -237,20 +240,25 @@ void GraphWidget::update_graph_to_screen_projection() {
 	EnvConfig* env_config = EnvConfig::instance;
 	float min_x = m_alt_body_vect[0];
 	float max_x = m_alt_body_vect[m_alt_body_vect.size() - 2];
+
+	// move the point at <0.0, m_below_min_alt> to <0.0, 0.0>:
 	glm::mat4 projection = glm::mat4(1.0f);
-	projection = glm::translate(projection, glm::vec3(-min_x, -m_below_min_alt, 0.0));
-	float relative_height = m_height / env_config->screen_height();
-	float relative_width = m_width / env_config->screen_width();
-	glm::mat4 scale = glm::scale(glm::mat4(1.0f), glm::vec3(
-		2.0f * relative_width / (max_x - min_x),
-		2.0f * relative_height / (m_alt_max - m_below_min_alt),
-		1.0));
+	glm::mat4 xlate = glm::translate(
+		glm::mat4(1.0f),
+		glm::vec3(-min_x, -m_below_min_alt, 0.0)
+	);
+	projection = xlate * projection;
+	glm::mat4 scale = glm::scale(
+		glm::mat4(1.0f),
+		glm::vec3(m_width/(1.0 + max_x - min_x), m_height/(m_alt_max - m_below_min_alt), 1.0)
+	);
 	projection = scale * projection;
-	float bottom_gap = 2.0f * m_y_pos / env_config->screen_height();
-	float left_gap = 2.0f * m_x_pos / env_config->screen_width();
-	glm::mat4 xlate = glm::translate(glm::mat4(1.0f), glm::vec3(-1.0f + left_gap, -1.0f + bottom_gap, 0.0));
+	glm::mat4 xlate2 = glm::translate(
+		glm::mat4(1.0f),
+		glm::vec3(m_x_pos, m_y_pos, 0.0)
+	);
 	
-	m_graph_to_screen_projection = xlate * projection;
+	m_graph_to_screen_projection = xlate2 * projection;
 }
 
 void GraphWidget::polygonalize(TelemetrySlice& slice, uint32_t index, uint32_t num_slices) {
@@ -269,7 +277,7 @@ void GraphWidget::polygonalize(TelemetrySlice& slice, uint32_t index, uint32_t n
 		m_next_index = 0.0f;
 	}
 
-	float stride = num_slices / (m_width * 2.0); // Doubling in case we get some antialiasing help.
+	float stride = num_slices / (env_config->screen_width() * m_width * 2.0); // Doubling in case we get some antialiasing help.
 	if ((float)index >= m_next_index) {
 		// TODO(P1): This is O(n^2) with an average runtime around O(n). Maybe only do the adjustment every n seconds?
 		if (slice.m_alt[1] < m_alt_min || slice.m_alt[1] > m_alt_max) {
@@ -318,6 +326,9 @@ void GraphWidget::render_alt_body() {
 	// The first value is the ID of the attribute in the shader layout
 	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)(0 * sizeof(float)));  //xy
 	glEnableVertexAttribArray(0);
+
+	glm::vec4 test_point(m_next_index/2.0, (m_alt_max + m_alt_min) / 2.0f, 1.0, 1.0);
+	test_point = test_point * m_graph_to_screen_projection;
 
 	// Draw the body.
 	glBufferData(GL_ARRAY_BUFFER, sizeof(float) * m_alt_body_vect.size(), m_alt_body_vect.data(), GL_STATIC_DRAW);

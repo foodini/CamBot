@@ -65,8 +65,8 @@ void InteractionMgr::tick(GLFWwindow* window) {
 	const EnvConfig* env_config = EnvConfig::instance;
 	x_pos /= env_config->screen_width();
 	y_pos /= env_config->screen_height();
-	m_mouse_x_pos = (float)x_pos;
-	m_mouse_y_pos = 1.0f - (float)y_pos;
+	m_mouse_x_pos = -1.0 + 2.0 * (float)x_pos;
+	m_mouse_y_pos = 1.0f - 2.0 * (float)y_pos;
 
 	int mouse_button = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
 	if (mouse_button == GLFW_PRESS) {

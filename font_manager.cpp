@@ -2,6 +2,7 @@
 #include "glm/gtc/matrix_transform.hpp"
 #include "glm/gtc/type_ptr.hpp"
 
+#include "env_config.h"
 #include "font_manager.h"
 
 FontManager::FontManager(const char * font_file, int size, int screen_width, int screen_height) :
@@ -98,10 +99,13 @@ void FontManager::render() {
 }
 
 void FontManager::render_string(const std::string & str, float scale, const glm::vec2 & pos, const glm::vec3 & color) {
+    const EnvConfig* env_config = EnvConfig::instance;
+    
     glUniform3f(glGetUniformLocation(m_shader.ID, "textColor"), color.r, color.g, color.b);
 
-    float x = pos.x;
-    float y = pos.y;
+    glm::vec4 xformed_pos = env_config->screen_to_pixel_space_projection() * glm::vec4(pos, 0.0f, 1.0f);
+    float x = xformed_pos.x;
+    float y = xformed_pos.y;
 
     std::string::const_iterator c;
     for (c = str.begin(); c != str.end(); c++) {

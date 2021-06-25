@@ -44,6 +44,18 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
     // make sure the viewport matches the new window dimensions; note that width and 
     // height will be significantly larger than specified on retina displays.
     glViewport(0, 0, width, height);
+
+    //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    //
+    // Somehow, we need to figure out the new size of the media and the UI. I would like to prevent
+    // manual resizing & replace w/ a couple simple fractions; 1/2, 3/4, etc.
+    //
+    // MAKE SURE YOU TELL EnvConfig ABOUT THE CHANGE AND HAVE IT CALL recompute_projections().
+    //
+    //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+
 }
 
 int main()
@@ -94,12 +106,12 @@ int main()
     //TODO(P1) Hand the telemetry_mgr, instead of its vector, into the env_config.
     EnvConfig env_config(&media_container_mgr, &font_manager, &project_file_mgr, (float)SCR_WIDTH, (float)SCR_HEIGHT + (float)UI_HEIGHT, (float)UI_HEIGHT);
 
-    DateTimeWidget date_time_widget(.12, .05, 1.0-.12-.005, 1.0-.05-.005);
-    MediaScrubWidget media_scrub_widget(0.98, 0.02, 0.01, 0.0825);
+    DateTimeWidget date_time_widget(.24, .1, 1.0-.24-.015, 1.0-.1-.01);
+    MediaScrubWidget media_scrub_widget(1.96, 0.04, -.98, -.835);
 
-    MapWidget map_widget(.1, .1*SCR_WIDTH/(SCR_HEIGHT+UI_HEIGHT), .8675, .12);
-    ClimbWidget climb_widget(.02, .1 * SCR_WIDTH / (SCR_HEIGHT + UI_HEIGHT), .9725, .12);
-    GraphWidget graph_widget(300.0, 100.0, 5.0, UI_HEIGHT + 5.0);
+    MapWidget map_widget(.35, .35*SCR_WIDTH/(SCR_HEIGHT+UI_HEIGHT), 0.6, -0.765);
+    ClimbWidget climb_widget(.02, .35 * SCR_WIDTH / (SCR_HEIGHT + UI_HEIGHT), 0.9625, -0.765);
+    GraphWidget graph_widget(.5, .2, -0.99, -1.0 + .24);
     //TODO(P0): This is dumb. Have each widget know whether it needs a poly call. The TelemetryMgr can call all widgets and
     //construct the list of the ones that need data.
     std::vector<WidgetBase*> polygonalized_widgets;

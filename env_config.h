@@ -47,7 +47,11 @@ public:
 	MediaContainerMgr*      media_mgr;
 	ProjectFileManager*     project_file_mgr;
 
+	const glm::mat4& screen_to_pixel_space_projection() const { return m_screen_to_pixel_space_projection; }
+	const glm::mat4& pixel_to_screen_space_projection() const { return m_pixel_to_screen_space_projection; }
+
 private:
+	void                    recompute_projections();
 	float                   m_launch_time;
 
 	uint64_t                m_media_pts_start;
@@ -57,4 +61,7 @@ private:
 	float                   m_screen_width;
 	float                   m_screen_height;
 	float                   m_ui_height;
+
+	glm::mat4               m_screen_to_pixel_space_projection;
+	glm::mat4               m_pixel_to_screen_space_projection;
 };

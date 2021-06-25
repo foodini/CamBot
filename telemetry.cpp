@@ -130,7 +130,9 @@ void TelemetryMgr::parse_telemetry_file(const std::string& path, std::vector<Wid
 	float gps_altitude_offset = 0.0;
 	for (auto i = lines.begin(); i != lines.end(); index++, i++) {
 		TelemetrySlice slice = TelemetrySlice(*i, gps_altitude_offset);
-		if (index == 0) {
+
+		// TODO(P1): work out what to do about correcting for barometric uncertainty using gps.
+		if (false && index == 0) {
 			gps_altitude_offset = slice.m_gps_alt - slice.m_alt[1];
 			slice = TelemetrySlice(*i, gps_altitude_offset);
 		}
