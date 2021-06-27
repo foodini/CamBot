@@ -201,12 +201,20 @@ int main()
         font_manager.update_time(media_container_mgr.get_presentation_timestamp());
 
         if (confirming_launch) {
-            glm::vec3 yellow(1.0, 0.2, 1.0);
-            font_manager.format(0, 0.5, glm::vec2(10.0, 10.0), yellow, 2.0, "Press L again to confirm launch @ this frame");
+            glm::vec3 yellow(1.0, 1.0, 0.2);
+            font_manager.add_string(
+                StringAndProperties(
+                    ffsw::format("Press L again to confirm launch @ this frame"),
+                    0, glm::vec2(0.0, 0.0), yellow, 0.5, 2.0,
+                    StringAndProperties::V_ALIGN::V_CENTER, StringAndProperties::H_ALIGN::H_CENTER));
         }
         float x = interaction_mgr->mouse_x_pos();
         float y = interaction_mgr->mouse_y_pos();
-        font_manager.format(0, 1.0, glm::vec2(x, y), glm::vec3(1.0, 1.0, 1.0), 2.0, "(%.1f,%.1f)", x, y);
+        font_manager.add_string(
+            StringAndProperties(
+                ffsw::format("(%.3f,%.3f)", x, y),
+                0, glm::vec2(x, y), glm::vec3(1.0, 1.0, 1.0), 1.0, 2.0,
+                StringAndProperties::V_ALIGN::V_CENTER, StringAndProperties::H_ALIGN::H_CENTER));
 
         frame_time = ffsw::elapsed();
         float duration = frame_time - prev_frame_time;
@@ -218,8 +226,10 @@ int main()
             duration_avg = 0.95f * duration_avg + 0.05f * duration;
         }
         
-        font_manager.format(0, 1.0, glm::vec2(22.0, 22.0), glm::vec3(1.0, 1.0, 1.0), 3.0, "mph: %9.2lf", telemetry_mgr[env_config.telemetry_index()].speed_mph());
-        font_manager.format(0, 1.0, glm::vec2(22.0, 62.0), glm::vec3(1.0, 1.0, 1.0), 3.0, "tel_ind: %d", env_config.telemetry_index());
+        font_manager.add_string(
+            StringAndProperties(
+                ffsw::format("tel_ind: %d", env_config.telemetry_index()),
+                0, glm::vec2(-.98, -.98), glm::vec3(1.0, 1.0, 1.0), 1.0, 3.0));
 
         // render
         // ------

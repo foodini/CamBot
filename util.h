@@ -16,4 +16,5 @@ namespace ffsw {
 	void  sleep(uint32_t milliseconds);
 
 	std::string file_dialog(const wchar_t* extension);
+	std::string format(const char* fmt, ...);
 }

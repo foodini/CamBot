@@ -8,7 +8,8 @@
 FontManager::FontManager(const char * font_file, int size, int screen_width, int screen_height) :
     m_shader("text.vert", "text.frag"),
     m_strings(),
-    m_time(0)
+    m_time(0),
+    m_size(size)
 {
     glm::mat4 projection = glm::ortho(0.0f, static_cast<float>(screen_width), 0.0f, static_cast<float>(screen_height));
     m_shader.use();
@@ -90,75 +91,81 @@ void FontManager::render() {
     glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(m_VAO);
 
-    for (auto i : m_strings) {
-        render_string(std::get<FM_TUPLE_STR>(i), std::get<FM_TUPLE_SCALE>(i), std::get<FM_TUPLE_POS>(i), std::get<FM_TUPLE_COL>(i));
+    for (auto string_and_properties : m_strings) {
+        render_string(string_and_properties);
     }
 
     glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-void FontManager::render_string(const std::string & str, float scale, const glm::vec2 & pos, const glm::vec3 & color) {
+void FontManager::render_string(const StringAndProperties& sap) {
     const EnvConfig* env_config = EnvConfig::instance;
     
-    glUniform3f(glGetUniformLocation(m_shader.ID, "textColor"), color.r, color.g, color.b);
+    glUniform3f(glGetUniformLocation(m_shader.ID, "textColor"), sap.color.r, sap.color.g, sap.color.b);
 
-    glm::vec4 xformed_pos = env_config->screen_to_pixel_space_projection() * glm::vec4(pos, 0.0f, 1.0f);
-    float x = xformed_pos.x;
-    float y = xformed_pos.y;
+    glm::vec4 xformed_pos = env_config->screen_to_pixel_space_projection() * glm::vec4(sap.pos, 0.0f, 1.0f);
+    float x = xformed_pos.x - sap.dropshadow;
+    float y = xformed_pos.y + sap.dropshadow;
+
+    float v_offset = 0.0;
+    if (sap.v_align == StringAndProperties::V_ALIGN::V_CENTER)
+        v_offset = -sap.scale * m_size / 2.0;
+    if (sap.v_align == StringAndProperties::V_ALIGN::V_TOP)
+        v_offset = -sap.scale * m_size;
+
+    float h_offset = 0.0;
+    if (sap.h_align == StringAndProperties::H_ALIGN::H_CENTER)
+        h_offset = -get_string_width(sap.str) * sap.scale * 0.5;
+    if (sap.h_align == StringAndProperties::H_ALIGN::H_RIGHT)
+        h_offset = -get_string_width(sap.str) * sap.scale;
 
     std::string::const_iterator c;
-    for (c = str.begin(); c != str.end(); c++) {
+    for (c = sap.str.begin(); c != sap.str.end(); c++) {
         FontManager::Character ch = get_character_struct(*c);
 
-        float xpos = x + ch.Bearing.x * scale;
-        float ypos = y - (ch.Size.y - ch.Bearing.y) * scale;
+        float xpos = x + ch.Bearing.x * sap.scale;
+        float ypos = y - (ch.Size.y - ch.Bearing.y) * sap.scale;
 
-        float w = ch.Size.x * scale;
-        float h = ch.Size.y * scale;
+        float w = ch.Size.x * sap.scale;
+        float h = ch.Size.y * sap.scale;
         float vertices[6][4] = {
-            { xpos,     ypos + h,   0.0f, 0.0f },
-            { xpos,     ypos,       0.0f, 1.0f },
-            { xpos + w, ypos,       1.0f, 1.0f },
+            { xpos + h_offset,     ypos + v_offset + h,   0.0f, 0.0f },
+            { xpos + h_offset,     ypos + v_offset,       0.0f, 1.0f },
+            { xpos + h_offset + w, ypos + v_offset,       1.0f, 1.0f },
 
-            { xpos,     ypos + h,   0.0f, 0.0f },
-            { xpos + w, ypos,       1.0f, 1.0f },
-            { xpos + w, ypos + h,   1.0f, 0.0f }
+            { xpos + h_offset,     ypos + v_offset + h,   0.0f, 0.0f },
+            { xpos + h_offset + w, ypos + v_offset,       1.0f, 1.0f },
+            { xpos + h_offset + w, ypos + v_offset + h,   1.0f, 0.0f }
         };
         glBindTexture(GL_TEXTURE_2D, ch.TextureID);
         glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
         glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glDrawArrays(GL_TRIANGLES, 0, 6);
-        x += (ch.Advance >> 6) * scale;
+        x += (ch.Advance >> 6) * sap.scale;
     }
 }
 
-// TODO: non-const, ownership-transfer version.
-void FontManager::add_string(const std::string& str, int ttl, float scale, const glm::vec2& pos, const glm::vec3& color, float dropshadow)  {
-    if (dropshadow > 0.0) {
-        add_string(str, ttl, scale, pos + glm::vec2(dropshadow, -dropshadow), glm::vec3(0.0, 0.0, 0.0), 0.0);
+float FontManager::get_string_width(const std::string& str) {
+    std::string::const_iterator c;
+    float width = 0.0;
+    for (c = str.begin(); c != str.end(); c++) {
+        FontManager::Character ch = get_character_struct(*c);
+        width += (ch.Advance >> 6);
     }
-
-    auto str_copy = str;
-    auto pos_copy = pos;
-    auto color_copy = color;
-    t_string queue_obj(str_copy, ttl, scale, pos_copy, color_copy);
-    m_strings.push_back(queue_obj);
+    return width;
 }
 
-void FontManager::format(int ttl, float scale, const glm::vec2& pos, const glm::vec3& color, float dropshadow, const char* fmt, ...) {
-    const int buflen = 1024 * 16;
-    char buf[buflen];
-    va_list argptr;
-    va_start(argptr, fmt);
-    size_t size = vsprintf(buf, fmt, argptr);
-    va_end(argptr);
-    if (size >= buflen) {
-        sprintf(buf, "formatted string too long for buffer. (size = %lld)", size);
-        throw buf;
+void FontManager::add_string(const StringAndProperties& sap) {
+    if (sap.dropshadow > 0.0) {
+        StringAndProperties sap_copy = sap;
+        sap_copy.dropshadow = 0.0;
+        sap_copy.color = glm::vec3(0.0, 0.0, 0.0);
+        m_strings.push_back(sap_copy);
     }
-    add_string(buf, ttl, scale, pos, color, dropshadow);
+
+    m_strings.push_back(sap);
 }
 
 
@@ -168,10 +175,10 @@ void FontManager::update_time(uint64_t timestamp) {
 }
 
 void FontManager::purge_expired_strings() {
-    auto i = m_strings.begin();
-    while (i != m_strings.end()) {
+    auto sap = m_strings.begin();
+    while (sap != m_strings.end()) {
         bool erase = false;
-        int ttl = std::get<FM_TUPLE_TTL>(*i);
+        int ttl = sap->ttl;
 
         if (ttl == 0 || (ttl > 0 && (unsigned long long)ttl < m_time)) {
             erase = true;
@@ -179,8 +186,8 @@ void FontManager::purge_expired_strings() {
 
         // You can't erase the current iterator location. You have to move to the next
         // bucket, THEN erase the previous one.
-        auto prev = i;
-        ++i;
+        auto prev = sap;
+        ++sap;
         if (erase) {
             m_strings.erase(prev);
         }

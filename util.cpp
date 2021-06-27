@@ -108,3 +108,19 @@ std::string ffsw::file_dialog(const wchar_t* extension) {
 		return std::string("");
 	}
 }
+
+// TODO(P2): C++20 allows std::format("%d", 12345); Use it wherever possible, but keep this for everyone else?
+std::string ffsw::format(const char* fmt, ...) {
+	const int buflen = 1024 * 16;
+	char buf[buflen];
+	va_list argptr;
+	va_start(argptr, fmt);
+	size_t size = vsprintf(buf, fmt, argptr);
+	va_end(argptr);
+	if (size >= buflen) {
+		sprintf(buf, "formatted string too long for buffer. (size = %lld)", size);
+		throw buf;
+	}
+
+	return std::string(buf);
+}

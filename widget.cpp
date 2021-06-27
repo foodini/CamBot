@@ -21,18 +21,27 @@ void DateTimeWidget::render() {
 	m_shader.use();
 	WidgetBase::render(m_shader);
 
-	float float_vert_quarters = m_height / 4.0;
-
 	char buf[50];
 	const TelemetrySlice& ts = env_config->telemetry_slice();
-	sprintf(buf, "Date:   %04d.%02d.%02d", ts.year(), ts.month(), ts.day());
-	env_config->font_mgr->add_string(buf, 0, .33, glm::vec2(m_x_pos + 0.01, m_y_pos + float_vert_quarters * 3.0), glm::vec3(1.0, 1.0, 1.0), 0.001);
-	sprintf(buf, "Time:     %02d:%02d:%02d", ts.hour(), ts.minute(), ts.second());
-	env_config->font_mgr->add_string(buf, 0, .33, glm::vec2(m_x_pos + 0.01, m_y_pos + float_vert_quarters * 2.0), glm::vec3(1.0, 1.0, 1.0), 0.001);
+	env_config->font_mgr->add_string(
+		StringAndProperties(
+			ffsw::format("Date:   %04d.%02d.%02d", ts.year(), ts.month(), ts.day()),
+			0, glm::vec2(m_x_pos + 0.01, m_y_pos + m_height * 0.8), glm::vec3(1.0, 1.0, 1.0), 0.33, 1.0,
+			StringAndProperties::V_ALIGN::V_CENTER, StringAndProperties::H_ALIGN::H_LEFT));
+	env_config->font_mgr->add_string(
+		StringAndProperties(
+			ffsw::format("Time:     %02d:%02d:%02d", ts.hour(), ts.minute(), ts.second()),
+			0, glm::vec2(m_x_pos + 0.01, m_y_pos + m_height * 0.5), glm::vec3(1.0, 1.0, 1.0), 0.33, 1.0,
+			StringAndProperties::V_ALIGN::V_CENTER, StringAndProperties::H_ALIGN::H_LEFT));
+
 	float total_sec = env_config->flight_time();
 	strcpy(buf, total_sec >= 0.0 ? "Duration +" : "Duration -");
 	ffsw::make_time(&buf[strlen(buf)], total_sec, false);
-	env_config->font_mgr->add_string(buf, 0, .33, glm::vec2(m_x_pos + 0.01, m_y_pos + float_vert_quarters * 1.0), glm::vec3(1.0, 1.0, 1.0), 0.001);
+	env_config->font_mgr->add_string(
+		StringAndProperties(
+			buf, 
+			0, glm::vec2(m_x_pos + 0.01, m_y_pos + m_height * 0.2), glm::vec3(1.0, 1.0, 1.0), 0.33, 1.0,
+			StringAndProperties::V_ALIGN::V_CENTER, StringAndProperties::H_ALIGN::H_LEFT));
 }
 
 
@@ -76,7 +85,11 @@ void MediaScrubWidget::render() {
 	ffsw::make_time(buf, env_config->media_in_elapsed(), true);
 	strcpy(&buf[strlen(buf)], " / ");
 	ffsw::make_time(&buf[strlen(buf)], env_config->media_in_duration(), true);
-	env_config->font_mgr->add_string(buf, 0, .33f, glm::vec2(m_x_pos + 5.0, m_y_pos + 5.0), glm::vec3(1.0, 1.0, 1.0), 1.0f);
+	env_config->font_mgr->add_string(
+		StringAndProperties(
+			std::string(buf),
+			0, glm::vec2(m_x_pos + 0.005, m_y_pos + m_height * 0.5), glm::vec3(1.0, 1.0, 1.0), 0.33f, 1.0f,
+			StringAndProperties::V_ALIGN::V_CENTER));
 }
 
 MapWidget::MapWidget(float width, float height, float x_pos, float y_pos) :
@@ -177,12 +190,14 @@ void MapWidget::render_course() {
 	float widget_dimension_scale = max_clip.x - min_clip.x;
 	glm::vec3 scale_vec(0.01 * last_speed_scale * widget_dimension_scale);  // 0.01 to make the widget 200m tall when pilot stationary.
 	projection = glm::scale(identity, scale_vec) * projection;
-	env_config->font_mgr->format(0, 0.5, glm::vec2(10.0f, 400.0f), glm::vec3(1, 1, 1), 2.0, "scale: %f", last_speed_scale);
+	env_config->font_mgr->add_string(
+		StringAndProperties(
+			ffsw::format("scale: %f", last_speed_scale),
+			0, glm::vec2(m_x_pos, m_y_pos + m_height), glm::vec3(1, 1, 1), 0.5, 2.0));
 
 	// Recenter the draw over the center of the widget
 	glm::mat4 xlate = glm::translate(identity, glm::vec3((max_clip.x + min_clip.x) / 2.0f, (max_clip.y + min_clip.y) / 2.0f, 0.0f));
 	projection = xlate * projection;
-
 
 	// YOU MUST use() the shader before setting its uniforms. I'm wondering if use() clears out any existing uniforms.
 	m_shader_course.use();
@@ -208,12 +223,25 @@ void MapWidget::render() {
 	const EnvConfig* env_config = EnvConfig::instance;
 
 	const TelemetrySlice& ts = env_config->telemetry_slice();
-	env_config->font_mgr->format(0, 0.33f, glm::vec2(m_x_pos + 3.0, m_y_pos + 3.0), glm::vec3(1.0, 1.0, 1.0), 1.5, "%4.1fmph", ts.speed_mph());
-	// TODO(P2): right-justified fonts.
-	env_config->font_mgr->format(0, 0.33f, glm::vec2(m_x_pos + m_width - 40.0f, m_y_pos + 3.0f), glm::vec3(1.0, 1.0, 1.0), 1.5, "%3.0f", ts.m_course_deg);
-	env_config->font_mgr->format(0, 0.25f, glm::vec2(m_x_pos + m_width - 10.0f, m_y_pos + 8.0f), glm::vec3(1.0, 1.0, 1.0), 1.5, "o");
-	env_config->font_mgr->format(0, 0.33f, glm::vec2(m_x_pos + m_width - 90.0f, m_y_pos + m_height - 12.0f), glm::vec3(1, 1, 1), 1.5, "%+6.1ffpm", ts.m_climb_rate[1]);
-
+	env_config->font_mgr->add_string(
+		StringAndProperties(
+			ffsw::format("%5.1fmph", ts.speed_mph()),
+			0, glm::vec2(m_x_pos, m_y_pos), glm::vec3(1.0, 1.0, 1.0), 0.33, 1.5));
+	env_config->font_mgr->add_string(
+		StringAndProperties(
+			ffsw::format("%3.0f ", ts.m_course_deg),
+			0, glm::vec2(m_x_pos + m_width, m_y_pos), glm::vec3(1.0, 1.0, 1.0), 0.33, 1.5,
+			StringAndProperties::V_ALIGN::V_BOTTOM, StringAndProperties::H_ALIGN::H_RIGHT));
+	env_config->font_mgr->add_string(
+		StringAndProperties(
+			"o",
+			0, glm::vec2(m_x_pos + m_width, m_y_pos + 0.005), glm::vec3(1.0, 1.0, 1.0), 0.25, 1.5,
+			StringAndProperties::V_ALIGN::V_BOTTOM, StringAndProperties::H_ALIGN::H_RIGHT));
+	env_config->font_mgr->add_string(
+		StringAndProperties(
+			ffsw::format("%+6.1ffpm", ts.m_climb_rate[1]),
+			0, glm::vec2(m_x_pos, m_y_pos + m_height), glm::vec3(1, 1, 1), 0.33, 1.5,
+			StringAndProperties::V_ALIGN::V_TOP, StringAndProperties::H_ALIGN::H_LEFT));
 }
 
 GraphWidget::GraphWidget(float width, float height, float x_pos, float y_pos) :
