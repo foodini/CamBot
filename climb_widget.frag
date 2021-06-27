@@ -5,8 +5,9 @@ in vec2 uv;
 
 uniform vec3 climb_rates;
 
-//TODO(P0): there's got to be a #include for frag shaders. The color array and the Bezier 
-//          computation shouldn't be repeated here and in the course shader.
+//TODO(P1): there's got to be a #include for frag shaders. The color array and the Bezier 
+//          computation shouldn't be repeated here and in the course shader. I gather
+//          that it's not a pleasant process.
 
 const vec3 colors[4] = vec3[4](
     vec3(0.0, 0.0, 0.2),

@@ -22,6 +22,8 @@ public:
 	virtual ~WidgetBase();
 
 	virtual void handle_input() {}
+	virtual void render_mask();
+	virtual void render_border();
 	virtual void render(Shader& shader);
 	virtual void change_geometry(float width, float height, float x_pos, float y_pos);
 	virtual void polygonalize(TelemetrySlice& slice, uint32_t index, uint32_t num_slices) {};
@@ -36,6 +38,8 @@ protected:
 	float      m_y_pos;
 
 	Shader     m_shader;
+	Shader     m_mask_shader;
+	Shader     m_border_shader;
 	float      m_vertices[20]; //(x, y, z, u, v) * 4
 
 private:

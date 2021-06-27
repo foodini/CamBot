@@ -140,6 +140,18 @@
     <None Include="climb_widget.vert">
       <Filter>Resource Files</Filter>
     </None>
+    <None Include="mask_shader.frag">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="mask_shader.vert">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="border_shader.frag">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="border_shader.vert">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Header.h">

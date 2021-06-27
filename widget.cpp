@@ -18,8 +18,11 @@ DateTimeWidget::~DateTimeWidget() {
 void DateTimeWidget::render() {
 	const EnvConfig* env_config = EnvConfig::instance;
 
-	m_shader.use();
-	WidgetBase::render(m_shader);
+	WidgetBase::render_mask();
+	
+	//We only need the background mask for this widget.
+	//m_shader.use();
+	//WidgetBase::render(m_shader);
 
 	char buf[50];
 	const TelemetrySlice& ts = env_config->telemetry_slice();
@@ -70,15 +73,11 @@ void MediaScrubWidget::handle_input() {
 void MediaScrubWidget::render() {
 	const EnvConfig* env_config = EnvConfig::instance;
 
+	WidgetBase::render_mask();
+
 	// Uniform settings must happen after a use() call
 	m_shader.use();
-	m_shader.setFloat("xpos", m_x_pos);
-	m_shader.setFloat("ypos", m_y_pos);
-	m_shader.setFloat("width", m_width);
-	m_shader.setFloat("height", m_height);
-	m_shader.setFloat("time", env_config->media_in_elapsed());
 	m_shader.setFloat("time_parametric", env_config->time_parametric());
-
 	WidgetBase::render(m_shader);
 
 	char buf[50];
@@ -210,10 +209,12 @@ void MapWidget::render_course() {
 }
 
 void MapWidget::render() {
+	WidgetBase::render_mask();
+	
 	set_uniforms();
 	
-	m_shader.use();
-	WidgetBase::render(m_shader);
+	//m_shader.use();
+	//WidgetBase::render(m_shader);
 	
 	render_course();
 
@@ -411,8 +412,10 @@ void GraphWidget::render_pilot_position() {
 }
 
 void GraphWidget::render() {
-	m_shader.use(); 
-	WidgetBase::render(m_shader);
+	WidgetBase::render_mask();
+
+	//m_shader.use(); 
+	//WidgetBase::render(m_shader);
 
 	render_alt_body();
 	render_alt_outline();

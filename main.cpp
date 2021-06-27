@@ -244,6 +244,12 @@ int main()
         graph_widget.render();
         font_manager.render();
 
+        date_time_widget.render_border();
+        media_scrub_widget.render_border();
+        map_widget.render_border();
+        climb_widget.render_border();
+        graph_widget.render_border();
+
         // glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
         // -------------------------------------------------------------------------------
         glfwSwapBuffers(window);

@@ -165,6 +165,8 @@
   <ItemGroup>
     <None Include="3.3.shader.frag" />
     <None Include="3.3.shader.vert" />
+    <None Include="border_shader.frag" />
+    <None Include="border_shader.vert" />
     <None Include="climb_widget.frag" />
     <None Include="climb_widget.vert" />
     <None Include="date_time_widget.frag" />
@@ -185,6 +187,8 @@
     <None Include="map_widget_1_course.vert" />
     <None Include="map_widget_2_arrow.frag" />
     <None Include="map_widget_2_arrow.vert" />
+    <None Include="mask_shader.frag" />
+    <None Include="mask_shader.vert" />
     <None Include="media_scrub_widget.frag" />
     <None Include="media_scrub_widget.vert" />
     <None Include="text.frag" />
