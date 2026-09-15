@@ -46,6 +46,7 @@ public:
 	float speed_kph()  const { return m_speed_kts * 1.852f; }  // TODO(P1): precomp and store?
 
 	std::tm              m_timestruct;
+	int                  m_msec;
 	float                m_gps_lat;
 	float                m_gps_lon;
 	float                m_gps_alt;
@@ -57,6 +58,7 @@ public:
 	bool                 m_pulse;
 	float                m_speed_kts;
 	float                m_course_deg;
+	float                m_total_distance;
 };
 
 //TODO(P1): TelemetryMgr[x] should return the x-th TelemetrySlice - or a default one.

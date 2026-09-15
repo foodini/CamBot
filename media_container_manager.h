@@ -49,8 +49,8 @@ public:
 
 private:
 	AVFormatContext*   m_format_context;
-	AVCodec*           m_video_input_codec;
-	AVCodec*           m_audio_input_codec;
+	const AVCodec*     m_video_input_codec;
+	const AVCodec*     m_audio_input_codec;
 	AVCodecParameters* m_video_codec_parameters;
 	AVCodecParameters* m_audio_codec_parameters;
 	AVCodecContext*    m_video_input_codec_context;
@@ -76,15 +76,15 @@ private:
 	// For writing the output video:
 	void free_output_assets();
 	bool                   m_recording;
-	AVOutputFormat*        m_output_format;
+	AVOutputFormat*  m_output_format;
 	AVFormatContext*       m_output_format_context;
-	AVCodec*               m_output_video_codec;
+	const AVCodec*         m_output_video_codec;
 	AVCodecContext*        m_output_video_codec_context;
 	AVFrame*               m_output_video_frame;
 	SwsContext*            m_output_scale_context;
 	AVStream*              m_output_video_stream;
 	
-	AVCodec*               m_output_audio_codec;
+	const AVCodec*         m_output_audio_codec;
 	AVStream*              m_output_audio_stream;
 	AVCodecContext*        m_output_audio_codec_context;
 	AVFormatContext*       m_output_audio_format_context;

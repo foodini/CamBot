@@ -1,10 +1,8 @@
 #version 330 core
 out vec4 FragColor;
 
-in vec2 texCoord;
+in vec2 uv;
 
-uniform float time;
-uniform float time_parametric;
 uniform float course;
 uniform float speed;
 
@@ -26,10 +24,10 @@ void main() {
     FragColor = vec4(0.0, 0.0, 0.0, 0.0);
     vec2 flight_direction = vec2(cos(course), sin(course));  // Magically normalized
     vec2 right = vec2(sin(course), -cos(course));
-
-    vec2 pixel_direction = texCoord - 0.5;
-    float fwd_proj = dot(pixel_direction, flight_direction);
-    float right_proj = dot(pixel_direction, right);
+    float wing_scale_inverted = 1.5;
+    vec2 pixel_direction = uv - 0.5;
+    float fwd_proj = wing_scale_inverted * dot(pixel_direction, flight_direction);
+    float right_proj = wing_scale_inverted * dot(pixel_direction, right);
     float leading_edge = smax(fwd_proj + right_proj*LEAD_EDGE_SLOPE - CHORD_LEN, fwd_proj - right_proj*LEAD_EDGE_SLOPE - CHORD_LEN, 0.02);
     float trailing_edge = min((-fwd_proj) + right_proj*TRAIL_EDGE_SLOPE - CHORD_LEN, (-fwd_proj) - right_proj*TRAIL_EDGE_SLOPE - CHORD_LEN);
     float wing_shape = smax(trailing_edge, leading_edge, 0.07);

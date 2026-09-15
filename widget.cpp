@@ -29,12 +29,12 @@ void DateTimeWidget::render() {
 	env_config->font_mgr->add_string(
 		StringAndProperties(
 			ffsw::format("Date:   %04d.%02d.%02d", ts.year(), ts.month(), ts.day()),
-			0, glm::vec2(m_x_pos + 0.01, m_y_pos + m_height * 0.8), glm::vec3(1.0, 1.0, 1.0), 0.33, 1.0,
+			0, glm::vec2(m_x_pos + 0.01, m_y_pos + m_height * 0.8), glm::vec3(1.0, 1.0, 1.0), 0.5, 1.0,
 			StringAndProperties::V_ALIGN::V_CENTER, StringAndProperties::H_ALIGN::H_LEFT));
 	env_config->font_mgr->add_string(
 		StringAndProperties(
 			ffsw::format("Time:     %02d:%02d:%02d", ts.hour(), ts.minute(), ts.second()),
-			0, glm::vec2(m_x_pos + 0.01, m_y_pos + m_height * 0.5), glm::vec3(1.0, 1.0, 1.0), 0.33, 1.0,
+			0, glm::vec2(m_x_pos + 0.01, m_y_pos + m_height * 0.5), glm::vec3(1.0, 1.0, 1.0), 0.5, 1.0,
 			StringAndProperties::V_ALIGN::V_CENTER, StringAndProperties::H_ALIGN::H_LEFT));
 
 	float total_sec = env_config->flight_time();
@@ -43,7 +43,7 @@ void DateTimeWidget::render() {
 	env_config->font_mgr->add_string(
 		StringAndProperties(
 			buf, 
-			0, glm::vec2(m_x_pos + 0.01, m_y_pos + m_height * 0.2), glm::vec3(1.0, 1.0, 1.0), 0.33, 1.0,
+			0, glm::vec2(m_x_pos + 0.01, m_y_pos + m_height * 0.2), glm::vec3(1.0, 1.0, 1.0), 0.5, 1.0,
 			StringAndProperties::V_ALIGN::V_CENTER, StringAndProperties::H_ALIGN::H_LEFT));
 }
 
@@ -227,21 +227,21 @@ void MapWidget::render() {
 	env_config->font_mgr->add_string(
 		StringAndProperties(
 			ffsw::format("%5.1fmph", ts.speed_mph()),
-			0, glm::vec2(m_x_pos, m_y_pos), glm::vec3(1.0, 1.0, 1.0), 0.33, 1.5));
+			0, glm::vec2(m_x_pos, m_y_pos), glm::vec3(1.0, 1.0, 1.0), 0.5, 2.5));
 	env_config->font_mgr->add_string(
 		StringAndProperties(
 			ffsw::format("%3.0f ", ts.m_course_deg),
-			0, glm::vec2(m_x_pos + m_width, m_y_pos), glm::vec3(1.0, 1.0, 1.0), 0.33, 1.5,
+			0, glm::vec2(m_x_pos + m_width, m_y_pos), glm::vec3(1.0, 1.0, 1.0), 0.5, 2.5,
 			StringAndProperties::V_ALIGN::V_BOTTOM, StringAndProperties::H_ALIGN::H_RIGHT));
 	env_config->font_mgr->add_string(
 		StringAndProperties(
 			"o",
-			0, glm::vec2(m_x_pos + m_width, m_y_pos + 0.005), glm::vec3(1.0, 1.0, 1.0), 0.25, 1.5,
+			0, glm::vec2(m_x_pos + m_width, m_y_pos + 0.01), glm::vec3(1.0, 1.0, 1.0), 0.33, 2.5,
 			StringAndProperties::V_ALIGN::V_BOTTOM, StringAndProperties::H_ALIGN::H_RIGHT));
 	env_config->font_mgr->add_string(
 		StringAndProperties(
 			ffsw::format("%+6.1ffpm", ts.m_climb_rate[1]),
-			0, glm::vec2(m_x_pos, m_y_pos + m_height), glm::vec3(1, 1, 1), 0.33, 1.5,
+			0, glm::vec2(m_x_pos, m_y_pos + m_height), glm::vec3(1, 1, 1), 0.5, 2.5,
 			StringAndProperties::V_ALIGN::V_TOP, StringAndProperties::H_ALIGN::H_LEFT));
 }
 
@@ -420,6 +420,15 @@ void GraphWidget::render() {
 	render_alt_body();
 	render_alt_outline();
 	render_pilot_position();
+
+	EnvConfig* env_config = EnvConfig::instance;
+	const TelemetrySlice& ts = env_config->telemetry_slice();
+
+	env_config->font_mgr->add_string(
+		StringAndProperties(
+			ffsw::format("alt:%+6.0f'", ts.m_alt[1] * 3.28084),
+			0, glm::vec2(m_x_pos, m_y_pos + m_height), glm::vec3(1, 1, 1), 0.5, 2.0,
+			StringAndProperties::V_ALIGN::V_TOP, StringAndProperties::H_ALIGN::H_LEFT));
 }
 
 ClimbWidget::ClimbWidget(float width, float height, float x_pos, float y_pos) :

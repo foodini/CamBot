@@ -52,8 +52,7 @@ MediaContainerMgr::MediaContainerMgr(const std::string& infile, const std::strin
         printf("AVStream->start_time %" PRId64 "\n", m_format_context->streams[i]->start_time);
         printf("AVStream->duration %" PRId64 "\n", m_format_context->streams[i]->duration);
         printf("duration(s): %lf\n", (float)m_format_context->streams[i]->duration / m_format_context->streams[i]->time_base.den * m_format_context->streams[i]->time_base.num);
-        AVCodec* local_codec = NULL;
-        local_codec = avcodec_find_decoder(local_codec_parameters->codec_id);
+        const AVCodec* local_codec = avcodec_find_decoder(local_codec_parameters->codec_id);
         if (local_codec == NULL) {
             throw "ERROR unsupported codec!";
         }
@@ -218,6 +217,7 @@ void MediaContainerMgr::render() {
 bool MediaContainerMgr::advance_frame() {
     int ret; // Crappy naming, but I'm using ffmpeg's name for it.
     while (true) {
+        av_packet_unref(m_packet);
         ret = av_read_frame(m_format_context, m_packet);
         if (ret < 0) {
             // Do we actually need to unref the packet if it failed?
@@ -235,7 +235,7 @@ bool MediaContainerMgr::advance_frame() {
                 continue;
             }
             if (m_packet->stream_index == m_audio_stream_index) {
-                printf("m_packet->stream_index: %d\n", m_packet->stream_index);
+                printf("m_packet->stream_index: (m_audio_stream_index) %d\n", m_packet->stream_index);
                 printf("  m_packet->pts: %lld\n", m_packet->pts);
                 printf("  mpacket->size: %d\n", m_packet->size);
                 if (m_recording) {
@@ -251,7 +251,6 @@ bool MediaContainerMgr::advance_frame() {
 
                 continue;
             }
-            av_packet_unref(m_packet);
             if (m_packet->stream_index == m_video_stream_index) {
                 //printf("AVPacket->pts %" PRId64 "\n", m_packet->pts);
                 return true;
@@ -606,7 +605,7 @@ bool MediaContainerMgr::output_video_frame(uint8_t* buf) {
     }
 
     AVPacket pkt;
-    av_init_packet(&pkt);
+    // av_init_packet(&pkt);
     pkt.data = nullptr;
     pkt.size = 0;
     pkt.flags |= AV_PKT_FLAG_KEY;
@@ -629,7 +628,7 @@ bool MediaContainerMgr::finalize_output() {
         return true;
 
     AVPacket pkt;
-    av_init_packet(&pkt);
+//  av_init_packet(&pkt);
     pkt.data = nullptr;
     pkt.size = 0;
 

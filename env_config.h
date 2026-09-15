@@ -29,12 +29,15 @@ public:
 	float                   media_width()            const { return media_mgr->get_width(); }
 	float                   screen_height()          const { return m_screen_height; }
 	float                   screen_width()           const { return m_screen_width; }
+	//TODO(P0): The having telemetry-related stuff here was okay when the EnvConfig was meant to be the entire
+	//          interface to system state. The growing complexity means it's time to move these methods to
+	//          TelemetryMgr. Move m_telemetry_offset, while you're at it.
 	int32_t                 telemetry_index()        const;
 	const TelemetrySlice&   telemetry_slice()        const;
+	float                   telemetry_offset()       const { return m_telemetry_offset; }
 	float                   media_in_elapsed()       const; // Wall time passed since start of video.
 	float                   media_in_duration()      const; // Wall time length of video.
 	float                   media_out_elapsed()      const;
-	float                   telemetry_offset()       const { return m_telemetry_offset; }
 
 	// Current time, [0.0..1.0] from beginning to end of telemetry. Used by widgets to interpolate place
 	float                   time_parametric()        const;

@@ -67,10 +67,6 @@ int main()
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-#ifdef __APPLE__
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-#endif
-
     // glfw window creation
     // --------------------
     GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT, "LearnOpenGL", NULL, NULL);
@@ -106,12 +102,12 @@ int main()
     //TODO(P1) Hand the telemetry_mgr, instead of its vector, into the env_config.
     EnvConfig env_config(&media_container_mgr, &font_manager, &project_file_mgr, (float)SCR_WIDTH, (float)SCR_HEIGHT + (float)UI_HEIGHT, (float)UI_HEIGHT);
 
-    DateTimeWidget date_time_widget(.24, .1, 1.0-.24-.015, 1.0-.1-.01);
+    DateTimeWidget date_time_widget(.29, .18, 1.0-.29-.015, 1.0-.18-.01);
     MediaScrubWidget media_scrub_widget(1.96, 0.04, -.98, -.835);
 
     MapWidget map_widget(.35, .35*SCR_WIDTH/(SCR_HEIGHT+UI_HEIGHT), 0.6, -0.765);
     ClimbWidget climb_widget(.02, .35 * SCR_WIDTH / (SCR_HEIGHT + UI_HEIGHT), 0.9625, -0.765);
-    GraphWidget graph_widget(.5, .2, -0.99, -1.0 + .24);
+    GraphWidget graph_widget(.5, .3, -0.99, -1.0 + .24);
     //TODO(P0): This is dumb. Have each widget know whether it needs a poly call. The TelemetryMgr can call all widgets and
     //construct the list of the ones that need data.
     std::vector<WidgetBase*> polygonalized_widgets;
@@ -210,11 +206,18 @@ int main()
         }
         float x = interaction_mgr->mouse_x_pos();
         float y = interaction_mgr->mouse_y_pos();
+        /*
         font_manager.add_string(
             StringAndProperties(
                 ffsw::format("(%.3f,%.3f)", x, y),
                 0, glm::vec2(x, y), glm::vec3(1.0, 1.0, 1.0), 1.0, 2.0,
                 StringAndProperties::V_ALIGN::V_CENTER, StringAndProperties::H_ALIGN::H_CENTER));
+        */
+        font_manager.add_string(
+            StringAndProperties(
+                ffsw::format("%6.2fkm", env_config.telemetry_slice().m_total_distance),
+                0, glm::vec2(-.98, .98), glm::vec3(1.0, 1.0, 1.0), 1.0, 2.0,
+                StringAndProperties::V_ALIGN::V_TOP, StringAndProperties::H_ALIGN::H_LEFT));
 
         frame_time = ffsw::elapsed();
         float duration = frame_time - prev_frame_time;
@@ -245,10 +248,12 @@ int main()
         font_manager.render();
 
         date_time_widget.render_border();
+        /*
         media_scrub_widget.render_border();
         map_widget.render_border();
         climb_widget.render_border();
         graph_widget.render_border();
+        */
 
         // glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
         // -------------------------------------------------------------------------------

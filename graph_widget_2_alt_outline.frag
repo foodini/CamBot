@@ -1,7 +1,7 @@
 #version 330 core
 out vec4 FragColor;
 
-in vec2 gl_PointCoord;
+//in vec2 gl_PointCoord;
 
 void main() {
     vec2 pc = gl_PointCoord;

@@ -8,6 +8,7 @@
 #include <iostream>
 #include <locale>
 #include <iomanip>
+#include <json/json.h>
 #include <sstream>
 #include <vector>
 
@@ -25,10 +26,12 @@ TelemetrySlice::TelemetrySlice() :
 	m_speed_kts(0.0),
 	m_course_deg(0.0),
 	m_temperature{ 0.0, 0.0, 0.0 },
-	m_alt{ 0.0, 0.0, 0.0 }
+	m_alt{ 0.0, 0.0, 0.0 },
+	m_total_distance(0.0)
 {
 }
 
+//TODO(P2) init climb rate? (getting a warning that's worth looking at.)
 TelemetrySlice::TelemetrySlice(const std::string& line, float gps_altitude_offset) :
 	m_pulse(false),
 	m_gps_alt(-1000000.0f)
@@ -40,49 +43,77 @@ TelemetrySlice::TelemetrySlice(const std::string& line, float gps_altitude_offse
 
 	std::istringstream ss(line);
 	ss.imbue(std::locale("en_US.utf-8"));
-	ss >> std::get_time(&m_timestruct, "%y.%m.%d %H:%M:%S") >> decimal_point >> ms
-		>> m_gps_lat >> lat_dir >> m_gps_lon >> lon_dir
-		//>> m_gps_alt >> unit >> unit >> unit >> unit
-		>> m_temperature[0] >> unit >> m_alt[0] >> unit
-		>> m_temperature[1] >> unit >> m_alt[1] >> unit
-		>> m_temperature[2] >> unit >> m_alt[2] >> unit
-		>> unit >> open_brace >> m_accel.x >> m_accel.y >> m_accel.z >> close_brace
-		>> unit >> open_brace >> m_gyro.x >> m_gyro.y >> m_gyro.z >> close_brace
-		>> m_speed_kts >> unit >> m_course_deg >> unit >> unit
-		>> baud >> unit >> unit >> unit >> unit
-		>> baud >> unit >> unit >> unit >> unit
-		;
-	if (ss.fail()) {
-		throw "Unable to parse time.";
-	}
-	else {
-		if (lat_dir == 'S')
-			m_gps_lat = -m_gps_lat;
-		if (lon_dir == 'W')
-			m_gps_lon = -m_gps_lon;
+	
+	Json::Value root;
+	Json::CharReaderBuilder builder;
+	std::string errs;
 
-		//TODO(P0): Eventually, I need to have this adjust over time. The ambient barometric
-		//          pressure can change considerably over the course of a flight.
-		for (int alt_chan = 0; alt_chan < 3; alt_chan++)
-			m_alt[alt_chan] += gps_altitude_offset;
+	Json::parseFromStream(builder, ss, &root, &errs);
 
-		// Work out the difference between local and gmt. Remove twice that difference from the
-		// computed time to counter the fact that the conversion is taking us backward. Since
-		// the conversoin assumes we're giving it a local time and want a GMT out of it, it's 
-		// going the wrong direction. This will have bugs, especially if you're eding video
-		// on the other side of a DST change. 
-		m_timestruct.tm_isdst = -1; 
-		time_t local_epoch = mktime(&m_timestruct);     // Assumes that the input is LOCALTIME
-		std::tm* new_timestruct = gmtime(&local_epoch); // Output provided assumed input was GMT.
-		time_t diff_epoch = mktime(new_timestruct);
-		local_epoch -= 2*(diff_epoch - local_epoch);
-		std::tm* true_local = gmtime(&local_epoch);
+	unsigned int gps_date = root.get("gps_date", "19700101").asUInt();
+	double gps_time_d = root.get("gps_time", "0.0").asDouble();
+	unsigned int gps_time_i = (unsigned int)gps_time_d;
 
-		m_timestruct.tm_year = true_local->tm_year;
-		m_timestruct.tm_mon = true_local->tm_mon;
-		m_timestruct.tm_mday = true_local->tm_mday;
-		m_timestruct.tm_hour = true_local->tm_hour;
-	}
+	m_msec = (gps_time_d - gps_time_i) * 1000;
+
+	m_timestruct.tm_mday = gps_date % 100;
+	gps_date /= 100;
+	m_timestruct.tm_mon = (gps_date % 100) - 1;
+	gps_date /= 100;
+	m_timestruct.tm_year = gps_date - 1900;
+
+	m_timestruct.tm_sec = gps_time_i % 100;
+	gps_time_i /= 100;
+	m_timestruct.tm_min = gps_time_i % 100;
+	gps_time_i /= 100;
+	m_timestruct.tm_hour = gps_time_i;
+
+	m_gps_lat = root.get("gps_lat", "0.0").asFloat();
+	lat_dir = root.get("gps_lat_dir", "N").asString()[0];
+	if (lat_dir == 'S')
+		m_gps_lat = -m_gps_lat;
+	m_gps_lon = root.get("gps_lon", "0.0").asFloat();
+	lon_dir = root.get("gps_lon_dir", "E").asString()[0];
+	if (lon_dir == 'W')
+		m_gps_lon = -m_gps_lon;
+
+	m_gps_alt = root.get("gps_alt", "-1000000.0").asFloat();
+	m_speed_kts = root.get("gps_kts", "0.0").asFloat();
+	m_course_deg = root.get("gps_dir", "0.0").asFloat();
+	m_alt[0] = root.get("ch0_alt_m", "0.0").asFloat();
+	m_alt[1] = root.get("ctr_alt_m", "0.0").asFloat();
+	m_alt[2] = root.get("ch1_alt_m", "0.0").asFloat();
+	m_temperature[0] = root.get("ch0_temp_C", "0.0").asFloat();
+	m_temperature[1] = root.get("ctr_temp_C", "0.0").asFloat();
+	m_temperature[2] = root.get("ch1_temp_C", "0.0").asFloat();
+	m_accel.x = root.get("a_x", "0.0").asFloat();
+	m_accel.y = root.get("a_y", "0.0").asFloat();
+	m_accel.z = root.get("a_z", "0.0").asFloat();
+	m_gyro.x = root.get("r_x", "0.0").asFloat();
+	m_gyro.y = root.get("r_y", "0.0").asFloat();
+	m_gyro.z = root.get("r_z", "0.0").asFloat();
+
+	//TODO(P0): Eventually, I need to have this adjust over time. The ambient barometric
+	//          pressure can change considerably over the course of a flight.
+	for (int alt_chan = 0; alt_chan < 3; alt_chan++)
+		m_alt[alt_chan] += gps_altitude_offset;
+
+	// Work out the difference between local and gmt. Remove twice that difference from the
+	// computed time to counter the fact that the conversion is taking us backward. Since
+	// the conversoin assumes we're giving it a local time and want a GMT out of it, it's 
+	// going the wrong direction. This will have bugs, especially if you're eding video
+	// on the other side of a DST change. 
+	m_timestruct.tm_isdst = -1; 
+	time_t local_epoch = mktime(&m_timestruct);     // Assumes that the input is LOCALTIME
+	std::tm* new_timestruct = gmtime(&local_epoch); // Output provided assumed input was GMT.
+	time_t diff_epoch = mktime(new_timestruct);
+	local_epoch -= 2*(diff_epoch - local_epoch);
+	std::tm* true_local = gmtime(&local_epoch);
+
+	m_timestruct.tm_year = true_local->tm_year;
+	m_timestruct.tm_mon = true_local->tm_mon;
+	m_timestruct.tm_mday = true_local->tm_mday;
+	m_timestruct.tm_hour = true_local->tm_hour;
 }
 
 float TelemetrySlice::course_rad() const {
@@ -131,11 +162,17 @@ void TelemetryMgr::parse_telemetry_file(const std::string& path, std::vector<Wid
 	for (auto i = lines.begin(); i != lines.end(); index++, i++) {
 		TelemetrySlice slice = TelemetrySlice(*i, gps_altitude_offset);
 
-		// TODO(P1): work out what to do about correcting for barometric uncertainty using gps.
-		if (false && index == 0) {
-			gps_altitude_offset = slice.m_gps_alt - slice.m_alt[1];
-			slice = TelemetrySlice(*i, gps_altitude_offset);
+		if (index == 0) {
+			// TODO(P1): work out what to do about correcting for barometric uncertainty using gps.
+			// gps_altitude_offset = slice.m_gps_alt - slice.m_alt[1];
+			// slice = TelemetrySlice(*i, gps_altitude_offset);
+			slice.m_total_distance = 0.0;
+		} else {
+			slice.m_total_distance =
+				slice.speed_kph() / 36000.0f +
+				(*TelemetryMgr::instance)[index - 1].m_total_distance;
 		}
+
 		m_telemetry.push_back(slice);
 		if (index < climb_rate_index_lookback) {
 			//TODO(P3): fix this so each slice has a climb rate, instead of dropping the first n.
@@ -148,10 +185,10 @@ void TelemetryMgr::parse_telemetry_file(const std::string& path, std::vector<Wid
 				slice.m_climb_rate[channel] *= 60.0f * 3.28084f;
 			}
 		}
+
 		for (auto widget = widgets->begin(); widget != widgets->end(); widget++) {
 			(*widget)->polygonalize(slice, index, lines.size());
 		}
-
 	}
 	m_default_slice = m_telemetry[0];
 

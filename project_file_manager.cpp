@@ -15,7 +15,10 @@ ProjectFileManager::~ProjectFileManager() {
 }
 
 void ProjectFileManager::get_project() {
-	m_project_file_path = ffsw::file_dialog(L"ffsw");
+	// The .ffsw project file may or may not exist yet: the user can either pick an
+	// existing one to load, or type the name of a new one to create. must_exist=false is
+	// what allows that second case -- a path that doesn't exist yet is fine here.
+	m_project_file_path = ffsw::file_dialog(L"ffsw", L"Select or Name a CamBot Project File (*.ffsw)", false);
 
 	if (m_project_file_path == "") {
 		exit(1);
@@ -23,8 +26,19 @@ void ProjectFileManager::get_project() {
 
 	FILE* project_fd = fopen(m_project_file_path.c_str(), "r");
 	if (project_fd == NULL) {
-		m_video_file_path = ffsw::file_dialog(L"mp4");
-		m_telemetry_file_path = ffsw::file_dialog(L"telem;log");
+		// No project file exists at that path -- this is a brand new project. Gather its two
+		// real inputs from the user and write the .ffsw file out so it actually exists on disk
+		// (and can just be reloaded) next time.
+		m_video_file_path = ffsw::file_dialog(L"mp4", L"Locate GoPro Video File (*.mp4)");
+		m_telemetry_file_path = ffsw::file_dialog(L"telem;log", L"Locate Telemetry File (*.telem, *.log)");
+
+		if (m_video_file_path == "" || m_telemetry_file_path == "") {
+			exit(1);
+		}
+
+		m_launch_time = 0.0f;
+		m_telemetry_offset = 0.0f;
+		save_project();
 	} else {
 		char line[1024];
 		while (!feof(project_fd)) {

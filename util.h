@@ -15,6 +15,6 @@ namespace ffsw {
 	char* make_time(char* buf, float t, bool decimal);
 	void  sleep(uint32_t milliseconds);
 
-	std::string file_dialog(const wchar_t* extension);
+	std::string file_dialog(const wchar_t* extension, const wchar_t* title = nullptr, bool must_exist = true);
 	std::string format(const char* fmt, ...);
 }

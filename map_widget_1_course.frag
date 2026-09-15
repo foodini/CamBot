@@ -1,7 +1,7 @@
 #version 330 core
 out vec4 FragColor;
 
-in vec2 gl_PointCoord;
+//in vec2 gl_PointCoord;
 
 //TODO(P1): The climb_rate should be turned into a parametric on the user side, so they
 //          can adjust the min and max.
