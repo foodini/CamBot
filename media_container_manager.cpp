@@ -73,7 +73,7 @@ MediaContainerMgr::MediaContainerMgr(const std::string& infile, const std::strin
                 m_audio_input_codec = local_codec;
                 m_audio_codec_parameters = local_codec_parameters;
             }
-            printf("Audio Codec: %d channels, sample rate %d\n", local_codec_parameters->channels, local_codec_parameters->sample_rate);
+            printf("Audio Codec: %d channels, sample rate %d\n", local_codec_parameters->ch_layout.nb_channels, local_codec_parameters->sample_rate);
         }
 
         printf("\tCodec %s ID %d bit_rate %lld\n", local_codec->name, local_codec->id, local_codec_parameters->bit_rate);
@@ -310,14 +310,12 @@ int MediaContainerMgr::decode_packet() {
         return response;
     } else {
         printf(
-            "Stream %d, Frame %d (type=%c, size=%d bytes), pts %lld, key_frame %d, [DTS %d]\n",
+            "Stream %d, Frame %lld (type=%c), pts %lld, key_frame %d\n",
             m_packet->stream_index,
-            codec_context->frame_number,
+            codec_context->frame_num,
             av_get_picture_type_char(frame->pict_type),
-            frame->pkt_size,
             frame->pts,
-            frame->key_frame,
-            frame->coded_picture_number
+            (frame->flags & AV_FRAME_FLAG_KEY) ? 1 : 0
         );
     }
     return 0;
@@ -484,16 +482,16 @@ bool MediaContainerMgr::init_video_output(const std::string& video_file_name, un
     m_output_audio_codec_context->bit_rate = m_format_context->streams[m_audio_stream_index]->codecpar->bit_rate;
     m_output_audio_codec_context->sample_fmt = AV_SAMPLE_FMT_S16;
     m_output_audio_codec_context->sample_rate = m_format_context->streams[m_audio_stream_index]->codecpar->sample_rate;
-    m_output_audio_codec_context->channel_layout = m_format_context->streams[m_audio_stream_index]->codecpar->channel_layout;
-    m_output_audio_codec_context->channels = m_format_context->streams[m_audio_stream_index]->codecpar->channels;
+    // AVCodecContext::channels / channel_layout were removed in favor of the AVChannelLayout-based
+    // ch_layout field (av_channel_layout_copy() deep-copies it, including any custom layout data).
+    av_channel_layout_copy(&m_output_audio_codec_context->ch_layout, &m_format_context->streams[m_audio_stream_index]->codecpar->ch_layout);
 
     m_output_audio_stream->codecpar->codec_id = m_output_format->audio_codec;
     m_output_audio_stream->codecpar->codec_type = AVMEDIA_TYPE_AUDIO;
     m_output_audio_stream->codecpar->format = m_format_context->streams[m_audio_stream_index]->codecpar->format;
     m_output_audio_stream->codecpar->bit_rate = m_format_context->streams[m_audio_stream_index]->codecpar->bit_rate;
     m_output_audio_stream->codecpar->sample_rate = m_format_context->streams[m_audio_stream_index]->codecpar->sample_rate;
-    m_output_audio_stream->codecpar->channels = m_format_context->streams[m_audio_stream_index]->codecpar->channels;
-    m_output_audio_stream->codecpar->channel_layout = m_format_context->streams[m_audio_stream_index]->codecpar->channel_layout;
+    av_channel_layout_copy(&m_output_audio_stream->codecpar->ch_layout, &m_format_context->streams[m_audio_stream_index]->codecpar->ch_layout);
     m_output_audio_stream->avg_frame_rate = m_format_context->streams[m_audio_stream_index]->avg_frame_rate;
     avcodec_parameters_to_context(m_output_audio_codec_context, m_output_audio_stream->codecpar);
     m_output_audio_codec_context->time_base = m_format_context->streams[m_audio_stream_index]->time_base;

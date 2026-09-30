@@ -10,6 +10,7 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/avutil.h>
 #include <libavutil/opt.h>
+#include <libavutil/channel_layout.h>  // av_channel_layout_copy()
 #include <libswscale/swscale.h>
 }
 
@@ -76,7 +77,7 @@ private:
 	// For writing the output video:
 	void free_output_assets();
 	bool                   m_recording;
-	AVOutputFormat*  m_output_format;
+	const AVOutputFormat*  m_output_format;  // av_guess_format() now returns a const pointer
 	AVFormatContext*       m_output_format_context;
 	const AVCodec*         m_output_video_codec;
 	AVCodecContext*        m_output_video_codec_context;

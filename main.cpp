@@ -8,6 +8,10 @@
 #include <GLFW/glfw3.h>
 #include "glm/glm.hpp"
 
+#include "imgui/imgui.h"
+#include "imgui/imgui_impl_glfw.h"
+#include "imgui/imgui_impl_opengl3.h"
+
 #include "stb_image.h"
 
 #include "env_config.h"
@@ -88,6 +92,15 @@ int main()
         return -1;
     }
 
+    // Dear ImGui: create the context and wire up the GLFW/OpenGL3 backends. This is what
+    // lets us draw the File/Edit/View/Help menu bar on top of the scene each frame.
+    // -----------------------------------------------------------------------------------
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330");
+
     float bottom = (float)(1.0 - 2.0 * SCR_HEIGHT / (SCR_HEIGHT + UI_HEIGHT));
     glm::vec3 extents[4];  //bl, br, tl, tr
     extents[0] = glm::vec3(-1.0, bottom, 0.0);
@@ -132,6 +145,7 @@ int main()
     float prev_frame_time = frame_time;
     float duration_avg = -1.0;
     bool confirming_launch = false;
+    bool show_about_popup = false;
     // render loop
     // -----------
     while (!glfwWindowShouldClose(window))
@@ -141,6 +155,55 @@ int main()
         //TODO(P1) Find a way for these things to get their updates automatically, so I don't have to remember
         //         to do it for each widget that receives input.
         media_scrub_widget.handle_input();
+
+        // Start the ImGui frame and draw the File/Edit/View/Help menu bar.
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        if (ImGui::BeginMainMenuBar()) {
+            if (ImGui::BeginMenu("File")) {
+                if (ImGui::MenuItem("Save Project")) {
+                    project_file_mgr.save_project();
+                }
+                ImGui::Separator();
+                if (ImGui::MenuItem("Exit")) {
+                    media_container_mgr.finalize_output();
+                    glfwSetWindowShouldClose(window, true);
+                }
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Edit")) {
+                ImGui::MenuItem("(nothing here yet)", nullptr, false, false);
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("View")) {
+                ImGui::MenuItem("(nothing here yet)", nullptr, false, false);
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Help")) {
+                if (ImGui::MenuItem("About CamBot")) {
+                    show_about_popup = true;
+                }
+                ImGui::EndMenu();
+            }
+            ImGui::EndMainMenuBar();
+        }
+
+        if (show_about_popup) {
+            ImGui::OpenPopup("About CamBot");
+            show_about_popup = false;
+        }
+        if (ImGui::BeginPopupModal("About CamBot", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::Text("CamBot");
+            ImGui::Separator();
+            ImGui::TextWrapped("Overlays custom flight telemetry onto GoPro video for glider flying.");
+            ImGui::Spacing();
+            if (ImGui::Button("Close")) {
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
 
         if (interaction_mgr->key_down(GLFW_KEY_ESCAPE)) {
             glfwSetWindowShouldClose(window, true);
@@ -247,13 +310,8 @@ int main()
         graph_widget.render();
         font_manager.render();
 
-        date_time_widget.render_border();
-        /*
-        media_scrub_widget.render_border();
-        map_widget.render_border();
-        climb_widget.render_border();
-        graph_widget.render_border();
-        */
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         // glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
         // -------------------------------------------------------------------------------
@@ -273,6 +331,12 @@ int main()
             }
         }
     }
+
+    // Dear ImGui: tear down the backends and context.
+    // -------------------------------------------------
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
 
     // glfw: terminate, clearing all previously allocated GLFW resources.
     // ------------------------------------------------------------------

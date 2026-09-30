@@ -128,8 +128,11 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>freetype.lib;avcodec.lib;avdevice.lib;avfilter.lib;avformat.lib;avresample.lib;avutil.lib;postproc.lib;swresample.lib;swscale.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;glfw3.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>D:\ronb\hardware\freetype-2.10.4\objs\x64\Release Static;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <!-- glfw3, freetype and ffmpeg (avcodec/avdevice/avfilter/avformat/avutil/swresample/swscale)
+           now come from vcpkg (see vcpkg.json) and are auto-linked from vcpkg_installed's lib
+           directory, so they no longer need to be named here. Only Windows system libs and
+           opengl32 (not provided by any package manager) remain explicit. -->
+      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -164,6 +167,12 @@
     <ClCompile Include="widget.cpp" />
     <ClCompile Include="widget_base.cpp" />
     <ClCompile Include="widget_mgr.cpp" />
+    <ClCompile Include="imgui\imgui.cpp" />
+    <ClCompile Include="imgui\imgui_draw.cpp" />
+    <ClCompile Include="imgui\imgui_tables.cpp" />
+    <ClCompile Include="imgui\imgui_widgets.cpp" />
+    <ClCompile Include="imgui\imgui_impl_glfw.cpp" />
+    <ClCompile Include="imgui\imgui_impl_opengl3.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="3.3.shader.frag" />
@@ -210,6 +219,15 @@
     <ClInclude Include="widget.h" />
     <ClInclude Include="widget_base.h" />
     <ClInclude Include="widget_mgr.h" />
+    <ClInclude Include="imgui\imconfig.h" />
+    <ClInclude Include="imgui\imgui.h" />
+    <ClInclude Include="imgui\imgui_internal.h" />
+    <ClInclude Include="imgui\imstb_rectpack.h" />
+    <ClInclude Include="imgui\imstb_textedit.h" />
+    <ClInclude Include="imgui\imstb_truetype.h" />
+    <ClInclude Include="imgui\imgui_impl_glfw.h" />
+    <ClInclude Include="imgui\imgui_impl_opengl3.h" />
+    <ClInclude Include="imgui\imgui_impl_opengl3_loader.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
