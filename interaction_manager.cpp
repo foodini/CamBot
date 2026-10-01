@@ -1,5 +1,6 @@
 #include <stdio.h>
 
+#include "imgui/imgui.h"
 #include "interaction_manager.h"
 #include "util.h"
 
@@ -63,12 +64,20 @@ void InteractionMgr::tick(GLFWwindow* window) {
 	double x_pos, y_pos;
 	glfwGetCursorPos(window, &x_pos, &y_pos);
 	const EnvConfig* env_config = EnvConfig::instance;
+	// The actual GLFW window is taller than the video/UI canvas by whatever is reserved at the top
+	// for the ImGui menu bar. Strip that off first so mouse coordinates keep lining up with the
+	// NDC space the widgets were positioned in, regardless of the reserved strip's exact size.
+	int win_height;
+	glfwGetWindowSize(window, nullptr, &win_height);
+	y_pos -= (double)win_height - (double)env_config->screen_height();
 	x_pos /= env_config->screen_width();
 	y_pos /= env_config->screen_height();
 	m_mouse_x_pos = -1.0 + 2.0 * (float)x_pos;
 	m_mouse_y_pos = 1.0f - 2.0 * (float)y_pos;
 
-	int mouse_button = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
+	// Let ImGui have the click when it wants the mouse (e.g. the menu bar is open/hovered), so menu
+	// interaction doesn't also register as a click on whatever widget happens to sit underneath it.
+	int mouse_button = ImGui::GetIO().WantCaptureMouse ? GLFW_RELEASE : glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
 	if (mouse_button == GLFW_PRESS) {
 		if (!m_mouse_button_down && m_mouse_button_held < 0.0) {
 			m_mouse_button_down = true;

@@ -1,109 +1,30 @@
-﻿  env_config.cpp
-D:\ronb\hardware\OpenGL\CamBot\CamBot\telemetry.h(75,49): warning C4267: 'return': conversion from 'size_t' to 'uint32_t', possible loss of data
-  (compiling source file 'env_config.cpp')
-  
-  interaction_manager.cpp
-D:\ronb\hardware\OpenGL\CamBot\CamBot\interaction_manager.cpp(68,23): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
-D:\ronb\hardware\OpenGL\CamBot\CamBot\interaction_manager.cpp(69,23): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
-  lines.cpp
-D:\ronb\hardware\OpenGL\CamBot\CamBot\lines.h(17,69): warning C4267: '=': conversion from 'size_t' to 'uint32_t', possible loss of data
-  (compiling source file 'lines.cpp')
-  
-  media_container_manager.cpp
-D:\ronb\hardware\OpenGL\CamBot\CamBot\media_container_manager.cpp(373,27): warning C4244: 'argument': conversion from 'float' to 'int64_t', possible loss of data
-  font_manager.cpp
-D:\ronb\hardware\OpenGL\CamBot\CamBot\font_manager.cpp(113,40): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
-D:\ronb\hardware\OpenGL\CamBot\CamBot\font_manager.cpp(119,59): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
-  main.cpp
+﻿  main.cpp
 D:\ronb\hardware\OpenGL\CamBot\CamBot\lines.h(17,69): warning C4267: '=': conversion from 'size_t' to 'uint32_t', possible loss of data
   (compiling source file 'main.cpp')
   
 D:\ronb\hardware\OpenGL\CamBot\CamBot\telemetry.h(75,49): warning C4267: 'return': conversion from 'size_t' to 'uint32_t', possible loss of data
   (compiling source file 'main.cpp')
   
-D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(118,68): warning C4305: 'argument': truncation from 'double' to 'float'
-D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(118,54): warning C4305: 'argument': truncation from 'double' to 'float'
-D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(118,42): warning C4305: 'argument': truncation from 'double' to 'float'
-D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(118,37): warning C4305: 'argument': truncation from 'double' to 'float'
-D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(119,59): warning C4305: 'argument': truncation from 'double' to 'float'
-D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(119,53): warning C4305: 'argument': truncation from 'double' to 'float'
-D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(119,47): warning C4305: 'argument': truncation from 'double' to 'float'
-D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(119,41): warning C4305: 'argument': truncation from 'double' to 'float'
-D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(121,74): warning C4305: 'argument': truncation from 'double' to 'float'
-D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(121,69): warning C4305: 'argument': truncation from 'double' to 'float'
-D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(121,44): warning C4305: 'argument': truncation from 'double' to 'float'
-D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(121,26): warning C4305: 'argument': truncation from 'double' to 'float'
-D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(122,87): warning C4305: 'argument': truncation from 'double' to 'float'
-D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(122,79): warning C4305: 'argument': truncation from 'double' to 'float'
-D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(122,51): warning C4305: 'argument': truncation from 'double' to 'float'
-D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(122,30): warning C4305: 'argument': truncation from 'double' to 'float'
-D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(123,50): warning C4305: 'argument': truncation from 'double' to 'float'
-D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(123,38): warning C4305: 'argument': truncation from 'double' to 'float'
-D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(123,34): warning C4305: 'argument': truncation from 'double' to 'float'
-D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(224,85): warning C4244: 'argument': conversion from 'double' to 'float', possible loss of data
-  project_file_manager.cpp
-D:\ronb\hardware\OpenGL\CamBot\CamBot\project_file_manager.cpp(54,30): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
-D:\ronb\hardware\OpenGL\CamBot\CamBot\project_file_manager.cpp(57,25): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
-  Source.cpp
-  stb_image.cpp
-  telemetry.cpp
-D:\ronb\hardware\OpenGL\CamBot\CamBot\telemetry.h(75,49): warning C4267: 'return': conversion from 'size_t' to 'uint32_t', possible loss of data
-  (compiling source file 'telemetry.cpp')
-  
-D:\ronb\hardware\OpenGL\CamBot\CamBot\telemetry.cpp(57,37): warning C4244: '=': conversion from 'double' to 'int', possible loss of data
-D:\ronb\hardware\OpenGL\CamBot\CamBot\telemetry.cpp(39,46): warning C4101: 'open_brace': unreferenced local variable
-D:\ronb\hardware\OpenGL\CamBot\CamBot\telemetry.cpp(40,6): warning C4101: 'ms': unreferenced local variable
-D:\ronb\hardware\OpenGL\CamBot\CamBot\telemetry.cpp(39,58): warning C4101: 'close_brace': unreferenced local variable
-D:\ronb\hardware\OpenGL\CamBot\CamBot\telemetry.cpp(42,8): warning C4101: 'baud': unreferenced local variable
-D:\ronb\hardware\OpenGL\CamBot\CamBot\telemetry.cpp(39,7): warning C4101: 'decimal_point': unreferenced local variable
-D:\ronb\hardware\OpenGL\CamBot\CamBot\telemetry.cpp(39,22): warning C4101: 'unit': unreferenced local variable
-D:\ronb\hardware\OpenGL\CamBot\CamBot\telemetry.cpp(190,52): warning C4267: 'argument': conversion from 'size_t' to 'uint32_t', possible loss of data
-  util.cpp
-D:\ronb\hardware\OpenGL\CamBot\CamBot\util.cpp(15,17): warning C4244: 'initializing': conversion from 'float' to 'int32_t', possible loss of data
-C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared\minwindef.h(130,9): warning C4005: 'APIENTRY': macro redefinition
-  (compiling source file 'util.cpp')
-      D:\ronb\hardware\OpenGL\glad\include\glad\glad.h(32,9):
-      see previous definition of 'APIENTRY'
-  
-  widget.cpp
-D:\ronb\hardware\OpenGL\CamBot\CamBot\telemetry.h(75,49): warning C4267: 'return': conversion from 'size_t' to 'uint32_t', possible loss of data
-  (compiling source file 'widget.cpp')
-  
-D:\ronb\hardware\OpenGL\CamBot\CamBot\lines.h(17,69): warning C4267: '=': conversion from 'size_t' to 'uint32_t', possible loss of data
-  (compiling source file 'widget.cpp')
-  
-D:\ronb\hardware\OpenGL\CamBot\CamBot\widget.cpp(98,14): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
-D:\ronb\hardware\OpenGL\CamBot\CamBot\widget.cpp(99,14): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
-D:\ronb\hardware\OpenGL\CamBot\CamBot\widget.cpp(188,40): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
-D:\ronb\hardware\OpenGL\CamBot\CamBot\widget.cpp(190,46): warning C4244: 'argument': conversion from 'double' to 'T', possible loss of data
-D:\ronb\hardware\OpenGL\CamBot\CamBot\widget.cpp(190,46): warning C4244:         with
-D:\ronb\hardware\OpenGL\CamBot\CamBot\widget.cpp(190,46): warning C4244:         [
-D:\ronb\hardware\OpenGL\CamBot\CamBot\widget.cpp(190,46): warning C4244:             T=float
-D:\ronb\hardware\OpenGL\CamBot\CamBot\widget.cpp(190,46): warning C4244:         ]
-D:\ronb\hardware\OpenGL\CamBot\CamBot\widget.cpp(239,79): warning C4305: 'argument': truncation from 'double' to 'float'
-D:\ronb\hardware\OpenGL\CamBot\CamBot\widget.cpp(309,15): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
-D:\ronb\hardware\OpenGL\CamBot\CamBot\widget.cpp(366,60): warning C4267: 'argument': conversion from 'size_t' to 'GLsizei', possible loss of data
-D:\ronb\hardware\OpenGL\CamBot\CamBot\widget.cpp(401,55): warning C4244: '=': conversion from 'int32_t' to 'float', possible loss of data
-  widget_base.cpp
-D:\ronb\hardware\OpenGL\CamBot\CamBot\telemetry.h(75,49): warning C4267: 'return': conversion from 'size_t' to 'uint32_t', possible loss of data
-  (compiling source file 'widget_base.cpp')
-  
-D:\ronb\hardware\OpenGL\CamBot\CamBot\widget_base.cpp(28,22): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
-D:\ronb\hardware\OpenGL\CamBot\CamBot\widget_base.cpp(29,21): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
-  widget_mgr.cpp
-  imgui.cpp
-C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared\minwindef.h(130,9): warning C4005: 'APIENTRY': macro redefinition
-  (compiling source file 'imgui/imgui.cpp')
-      D:\ronb\hardware\OpenGL\glad\include\glad\glad.h(32,9):
-      see previous definition of 'APIENTRY'
-  
-  imgui_draw.cpp
-  imgui_tables.cpp
-  imgui_widgets.cpp
-  imgui_impl_glfw.cpp
-  imgui_impl_opengl3.cpp
-  Generating Code...
-  glad.c
+D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(124,68): warning C4305: 'argument': truncation from 'double' to 'float'
+D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(124,54): warning C4305: 'argument': truncation from 'double' to 'float'
+D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(124,42): warning C4305: 'argument': truncation from 'double' to 'float'
+D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(124,37): warning C4305: 'argument': truncation from 'double' to 'float'
+D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(125,59): warning C4305: 'argument': truncation from 'double' to 'float'
+D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(125,53): warning C4305: 'argument': truncation from 'double' to 'float'
+D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(125,47): warning C4305: 'argument': truncation from 'double' to 'float'
+D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(125,41): warning C4305: 'argument': truncation from 'double' to 'float'
+D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(127,74): warning C4305: 'argument': truncation from 'double' to 'float'
+D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(127,69): warning C4305: 'argument': truncation from 'double' to 'float'
+D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(127,44): warning C4305: 'argument': truncation from 'double' to 'float'
+D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(127,26): warning C4305: 'argument': truncation from 'double' to 'float'
+D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(128,87): warning C4305: 'argument': truncation from 'double' to 'float'
+D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(128,79): warning C4305: 'argument': truncation from 'double' to 'float'
+D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(128,51): warning C4305: 'argument': truncation from 'double' to 'float'
+D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(128,30): warning C4305: 'argument': truncation from 'double' to 'float'
+D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(129,50): warning C4305: 'argument': truncation from 'double' to 'float'
+D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(129,38): warning C4305: 'argument': truncation from 'double' to 'float'
+D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(129,34): warning C4305: 'argument': truncation from 'double' to 'float'
+D:\ronb\hardware\OpenGL\CamBot\CamBot\main.cpp(230,85): warning C4244: 'argument': conversion from 'double' to 'float', possible loss of data
   CamBot.vcxproj -> D:\ronb\hardware\OpenGL\CamBot\x64\Debug\CamBot.exe
   'pwsh.exe' is not recognized as an internal or external command,
   operable program or batch file.

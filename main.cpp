@@ -35,6 +35,12 @@ void processInput(GLFWwindow* window);
 const unsigned int SCR_WIDTH = 1920;
 const unsigned int SCR_HEIGHT = 1080;
 const unsigned int UI_HEIGHT = 134;        // Divisible by FOUR, RIGHT?
+const unsigned int MENU_HEIGHT = 19;       // Exact pixel height ImGui renders the main menu bar at with
+                                            // the default font/style: FontSize (13) + FramePadding.y (3) * 2.
+                                            // Kept separate from SCR_HEIGHT/UI_HEIGHT so the menu never
+                                            // ends up inside the region read back for recording. If a
+                                            // custom font or DPI scaling is ever added, this needs to
+                                            // change to match, or a gap/overlap will reappear here.
 
 bool paused = false;
 
@@ -73,7 +79,7 @@ int main()
 
     // glfw window creation
     // --------------------
-    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT, "LearnOpenGL", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT + MENU_HEIGHT, "LearnOpenGL", NULL, NULL);
     if (window == NULL)
     {
         std::cout << "Failed to create GLFW window" << std::endl;
@@ -301,6 +307,14 @@ int main()
         // ------
         glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
+
+        // Restrict the 3D scene (video + widgets) to the original SCR_HEIGHT+UI_HEIGHT canvas at
+        // the bottom of the window, leaving the MENU_HEIGHT strip above it untouched for the ImGui
+        // menu bar. This keeps every existing NDC-based widget/video coordinate unchanged, and keeps
+        // the menu bar out of the pixels captured below for recording. ImGui's own render pass sets
+        // its own full-window viewport and restores this one afterward, so it must be reset here,
+        // every frame.
+        glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT);
 
         media_container_mgr.render();
         date_time_widget.render();
