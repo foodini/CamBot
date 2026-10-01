@@ -370,7 +370,7 @@ bool MediaContainerMgr::advance_to(int64_t timestamp) {
 }
 
 bool MediaContainerMgr::advance_to_parametric(float parametric) {
-    advance_to(parametric * m_format_context->streams[m_video_stream_index]->duration);
+    advance_to((int64_t)(parametric * m_format_context->streams[m_video_stream_index]->duration));
     return true;
 }
 

@@ -72,7 +72,7 @@ public:
 
 	//TODO(P1) get this behind an interface instead of public.
 	const TelemetrySlice& operator[](int64_t index) const;
-	uint32_t size() const { return m_telemetry.size(); }
+	uint32_t size() const { return (uint32_t)m_telemetry.size(); }
 
 	/*
 	glm::vec2 get_current_coords();

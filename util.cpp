@@ -12,7 +12,7 @@ float ffsw::elapsed() {
 }
 
 char* ffsw::make_time(char* buf, float t, bool decimal) {
-	int32_t divmod = t * 10;
+	int32_t divmod = (int32_t)(t * 10);
 	int32_t tenths = divmod % 10;
 	divmod /= 10;
 	int32_t sec = abs(divmod % 60);
@@ -33,6 +33,10 @@ void ffsw::sleep(uint32_t milliseconds) {
 }
 
 
+// glad.h (pulled in via util.h, above) already defines APIENTRY for its GL function pointer
+// typedefs; undef it first so <windows.h> can define its own copy without a macro-redefinition
+// warning. Both expand to the same thing (__stdcall), so this changes nothing at runtime.
+#undef APIENTRY
 #include <windows.h>
 #include <shobjidl.h>
 

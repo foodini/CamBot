@@ -95,8 +95,8 @@ MapWidget::MapWidget(float width, float height, float x_pos, float y_pos) :
 	WidgetBase(width, height, x_pos, y_pos, "map_widget.vert", "map_widget.frag"),
 	m_shader_course("map_widget_1_course.vert", "map_widget_1_course.frag"),
 	m_shader_arrow("map_widget_2_arrow.vert", "map_widget_2_arrow.frag"),
-	m_center_lat(nan("")),
-	m_center_lon(nan("")),
+	m_center_lat(nanf("")),
+	m_center_lon(nanf("")),
 	m_course_lines(8.0, 0.5),
 	m_vertex_attrib_sizes{2, 1}
 {
@@ -185,9 +185,9 @@ void MapWidget::render_course() {
 	// Scale the data to have the displayed data in the [-1.0..1.0, -1.0..1.0] ranges
 	static float last_speed_scale = 1.0; //TODO(P0) move this to be a member.
 	float speed_scale = glm::min(1.0f, 1.0f / env_config->telemetry_slice().speed_mph() + 0.3f);
-	last_speed_scale = speed_scale * 0.01 + last_speed_scale * 0.99;
+	last_speed_scale = speed_scale * 0.01f + last_speed_scale * 0.99f;
 	float widget_dimension_scale = max_clip.x - min_clip.x;
-	glm::vec3 scale_vec(0.01 * last_speed_scale * widget_dimension_scale);  // 0.01 to make the widget 200m tall when pilot stationary.
+	glm::vec3 scale_vec(0.01f * last_speed_scale * widget_dimension_scale);  // 0.01 to make the widget 200m tall when pilot stationary.
 	projection = glm::scale(identity, scale_vec) * projection;
 	env_config->font_mgr->add_string(
 		StringAndProperties(
@@ -236,7 +236,7 @@ void MapWidget::render() {
 	env_config->font_mgr->add_string(
 		StringAndProperties(
 			"o",
-			0, glm::vec2(m_x_pos + m_width, m_y_pos + 0.01), glm::vec3(1.0, 1.0, 1.0), 0.33, 2.5,
+			0, glm::vec2(m_x_pos + m_width, m_y_pos + 0.01), glm::vec3(1.0, 1.0, 1.0), 0.33f, 2.5,
 			StringAndProperties::V_ALIGN::V_BOTTOM, StringAndProperties::H_ALIGN::H_RIGHT));
 	env_config->font_mgr->add_string(
 		StringAndProperties(
@@ -306,7 +306,7 @@ void GraphWidget::polygonalize(TelemetrySlice& slice, uint32_t index, uint32_t n
 		m_next_index = 0.0f;
 	}
 
-	float stride = num_slices / (env_config->screen_width() * m_width * 2.0); // Doubling in case we get some antialiasing help.
+	float stride = num_slices / (env_config->screen_width() * m_width * 2.0f); // Doubling in case we get some antialiasing help.
 	if ((float)index >= m_next_index) {
 		// TODO(P1): This is O(n^2) with an average runtime around O(n). Maybe only do the adjustment every n seconds?
 		if (slice.m_alt[1] < m_alt_min || slice.m_alt[1] > m_alt_max) {
@@ -363,7 +363,7 @@ void GraphWidget::render_alt_body() {
 	glBufferData(GL_ARRAY_BUFFER, sizeof(float) * m_alt_body_vect.size(), m_alt_body_vect.data(), GL_STATIC_DRAW);
 	glUniformMatrix4fv(glGetUniformLocation(m_alt_body_shader.ID, "projection"), 1, GL_FALSE, glm::value_ptr(m_graph_to_screen_projection));
 	glBindVertexArray(m_alt_body_vao);
-	glDrawArrays(GL_TRIANGLE_STRIP, 0, m_alt_body_vect.size() / 2);  // Last arg is NUMBER OF VERTS!!!!
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, (GLsizei)(m_alt_body_vect.size() / 2));  // Last arg is NUMBER OF VERTS!!!!
 		
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0);
@@ -398,7 +398,7 @@ void GraphWidget::render_pilot_position() {
 	glEnableVertexAttribArray(0);
 	glPointSize(50.0);
 	
-	m_alt_position_verts[0] = env_config->telemetry_index();
+	m_alt_position_verts[0] = (float)env_config->telemetry_index();
 	m_alt_position_verts[1] = env_config->telemetry_slice().m_alt[1];
 
 	// Draw the body.

@@ -14,7 +14,7 @@ public:
 	void add_segment(glm::vec2& xy, std::vector<float>& supplementary);
 	//TODO(P0): checking out this buffer ought to lock it against adds, in case the
 	//          std::vector frees its underlying buffer (for resizing up).
-	const float* get_buffer(uint32_t* size) { *size = m_dot_vector.size(); return m_dot_vector.data(); }
+	const float* get_buffer(uint32_t* size) { *size = (uint32_t)m_dot_vector.size(); return m_dot_vector.data(); }
 
 	size_t size() { return m_vert_count; } // Returns NUMBER OF VERTS!
 	void clear() { m_dot_vector.clear(); m_vert_count = 0; }

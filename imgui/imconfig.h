@@ -156,3 +156,9 @@ namespace ImGui
 // includes first) makes our already-loaded GL functions visible to it instead.
 #define IMGUI_IMPL_OPENGL_LOADER_CUSTOM
 #include <glad/glad.h>
+
+// glad.h (just above) defines APIENTRY for its GL function pointer typedefs. imgui.cpp
+// later includes <windows.h> itself (for Win32 clipboard/IME functions), which tries to
+// define APIENTRY too -- undef it here so that include does not warn about redefining it.
+// Both expand to the same thing (__stdcall), so this changes nothing at runtime.
+#undef APIENTRY

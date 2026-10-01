@@ -36,10 +36,10 @@ TelemetrySlice::TelemetrySlice(const std::string& line, float gps_altitude_offse
 	m_pulse(false),
 	m_gps_alt(-1000000.0f)
 {
-	char decimal_point, unit, lat_dir, lon_dir, open_brace, close_brace;
-	int ms;
-
-	float baud;
+	// decimal_point/unit/open_brace/close_brace/ms/baud used to be parsed here under an older,
+	// text-scanned telemetry format; they are unused now that this is parsed as JSON below, so
+	// they've been dropped. lat_dir/lon_dir are still needed and stay.
+	char lat_dir, lon_dir;
 
 	std::istringstream ss(line);
 	ss.imbue(std::locale("en_US.utf-8"));
@@ -54,7 +54,7 @@ TelemetrySlice::TelemetrySlice(const std::string& line, float gps_altitude_offse
 	double gps_time_d = root.get("gps_time", "0.0").asDouble();
 	unsigned int gps_time_i = (unsigned int)gps_time_d;
 
-	m_msec = (gps_time_d - gps_time_i) * 1000;
+	m_msec = (int)((gps_time_d - gps_time_i) * 1000);
 
 	m_timestruct.tm_mday = gps_date % 100;
 	gps_date /= 100;
@@ -187,7 +187,7 @@ void TelemetryMgr::parse_telemetry_file(const std::string& path, std::vector<Wid
 		}
 
 		for (auto widget = widgets->begin(); widget != widgets->end(); widget++) {
-			(*widget)->polygonalize(slice, index, lines.size());
+			(*widget)->polygonalize(slice, index, (uint32_t)lines.size());
 		}
 	}
 	m_default_slice = m_telemetry[0];

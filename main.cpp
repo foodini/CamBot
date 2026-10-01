@@ -121,12 +121,12 @@ int main()
     //TODO(P1) Hand the telemetry_mgr, instead of its vector, into the env_config.
     EnvConfig env_config(&media_container_mgr, &font_manager, &project_file_mgr, (float)SCR_WIDTH, (float)SCR_HEIGHT + (float)UI_HEIGHT, (float)UI_HEIGHT);
 
-    DateTimeWidget date_time_widget(.29, .18, 1.0-.29-.015, 1.0-.18-.01);
-    MediaScrubWidget media_scrub_widget(1.96, 0.04, -.98, -.835);
+    DateTimeWidget date_time_widget(.29f, .18f, 1.0f-.29f-.015f, 1.0f-.18f-.01f);
+    MediaScrubWidget media_scrub_widget(1.96f, 0.04f, -.98f, -.835f);
 
-    MapWidget map_widget(.35, .35*SCR_WIDTH/(SCR_HEIGHT+UI_HEIGHT), 0.6, -0.765);
-    ClimbWidget climb_widget(.02, .35 * SCR_WIDTH / (SCR_HEIGHT + UI_HEIGHT), 0.9625, -0.765);
-    GraphWidget graph_widget(.5, .3, -0.99, -1.0 + .24);
+    MapWidget map_widget(.35f, .35f*SCR_WIDTH/(SCR_HEIGHT+UI_HEIGHT), 0.6f, -0.765f);
+    ClimbWidget climb_widget(.02f, .35f * SCR_WIDTH / (SCR_HEIGHT + UI_HEIGHT), 0.9625f, -0.765f);
+    GraphWidget graph_widget(.5f, .3f, -0.99f, -1.0f + .24f);
     //TODO(P0): This is dumb. Have each widget know whether it needs a poly call. The TelemetryMgr can call all widgets and
     //construct the list of the ones that need data.
     std::vector<WidgetBase*> polygonalized_widgets;
@@ -227,7 +227,7 @@ int main()
         if (interaction_mgr->key_down(GLFW_KEY_DOWN) || interaction_mgr->key_held(GLFW_KEY_DOWN) >= 0.25)
             env_config.telemetry_offset(env_config.telemetry_offset() + (paused ? 0.1f : 10.0f));
         if (interaction_mgr->key_down(GLFW_KEY_F)) {
-            media_container_mgr.rotation_angle(media_container_mgr.rotation_angle() + 3.141592653);
+            media_container_mgr.rotation_angle(media_container_mgr.rotation_angle() + 3.141592653f);
         }
         if (interaction_mgr->key_down(GLFW_KEY_L)) {
             if (confirming_launch) {

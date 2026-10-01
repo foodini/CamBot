@@ -25,8 +25,8 @@ void WidgetBase::render_mask() {
 
 void WidgetBase::render_border() {
 	const EnvConfig* env_config = EnvConfig::instance;
-	float border_height = 8.0 / env_config->screen_height() / m_height;
-	float border_width = 8.0 / env_config->screen_width() / m_width;
+	float border_height = 8.0f / env_config->screen_height() / m_height;
+	float border_width = 8.0f / env_config->screen_width() / m_width;
 
 	m_border_shader.use();
 	glUniform1f(glGetUniformLocation(m_border_shader.ID, "border_width"), border_width);

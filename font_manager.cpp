@@ -110,13 +110,13 @@ void FontManager::render_string(const StringAndProperties& sap) {
 
     float v_offset = 0.0;
     if (sap.v_align == StringAndProperties::V_ALIGN::V_CENTER)
-        v_offset = -sap.scale * m_size / 2.0;
+        v_offset = -sap.scale * m_size / 2.0f;
     if (sap.v_align == StringAndProperties::V_ALIGN::V_TOP)
         v_offset = -sap.scale * m_size;
 
     float h_offset = 0.0;
     if (sap.h_align == StringAndProperties::H_ALIGN::H_CENTER)
-        h_offset = -get_string_width(sap.str) * sap.scale * 0.5;
+        h_offset = -get_string_width(sap.str) * sap.scale * 0.5f;
     if (sap.h_align == StringAndProperties::H_ALIGN::H_RIGHT)
         h_offset = -get_string_width(sap.str) * sap.scale;
 

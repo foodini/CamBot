@@ -122,6 +122,11 @@
       <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <!-- /FS: force synchronous PDB writes. With this many source files (now including the
+           vendored ImGui sources) MSBuild/cl.exe can end up with more than one process trying
+           to write x64\Debug\vc145.pdb at the same time, which fails with "C1090: PDB API
+           call failed". /FS serializes those writes instead of letting that race happen. -->
+      <AdditionalOptions>/FS %(AdditionalOptions)</AdditionalOptions>
       <DisableSpecificWarnings>
       </DisableSpecificWarnings>
     </ClCompile>

@@ -72,8 +72,8 @@ void InteractionMgr::tick(GLFWwindow* window) {
 	y_pos -= (double)win_height - (double)env_config->screen_height();
 	x_pos /= env_config->screen_width();
 	y_pos /= env_config->screen_height();
-	m_mouse_x_pos = -1.0 + 2.0 * (float)x_pos;
-	m_mouse_y_pos = 1.0f - 2.0 * (float)y_pos;
+	m_mouse_x_pos = -1.0f + 2.0f * (float)x_pos;
+	m_mouse_y_pos = 1.0f - 2.0f * (float)y_pos;
 
 	// Let ImGui have the click when it wants the mouse (e.g. the menu bar is open/hovered), so menu
 	// interaction doesn't also register as a click on whatever widget happens to sit underneath it.

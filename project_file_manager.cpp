@@ -51,10 +51,10 @@ void ProjectFileManager::get_project() {
 				m_telemetry_file_path = std::string(line + 6);
 			}
 			else if (strncmp(line, "d_tel", 3) == 0) {
-				m_telemetry_offset = atof(line + 6);
+				m_telemetry_offset = (float)atof(line + 6);
 			}
 			else if (strncmp(line, "d_lau", 3) == 0) {
-				m_launch_time = atof(line + 6);
+				m_launch_time = (float)atof(line + 6);
 			}
 		}
 		fclose(project_fd);
