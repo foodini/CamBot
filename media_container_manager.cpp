@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
+#include <utility> // std::move
 
 #include "shader_s.h"
 
@@ -235,9 +236,6 @@ bool MediaContainerMgr::advance_frame() {
                 continue;
             }
             if (m_packet->stream_index == m_audio_stream_index) {
-                printf("m_packet->stream_index: (m_audio_stream_index) %d\n", m_packet->stream_index);
-                printf("  m_packet->pts: %lld\n", m_packet->pts);
-                printf("  mpacket->size: %d\n", m_packet->size);
                 if (m_recording) {
                     int err = 0;
                     err = av_write_frame(m_output_format_context, m_packet);
@@ -308,15 +306,6 @@ int MediaContainerMgr::decode_packet() {
         av_strerror(response, buf, 256);
         printf("Error while receiving a frame from the decoder: %s\n", buf);
         return response;
-    } else {
-        printf(
-            "Stream %d, Frame %lld (type=%c), pts %lld, key_frame %d\n",
-            m_packet->stream_index,
-            codec_context->frame_num,
-            av_get_picture_type_char(frame->pict_type),
-            frame->pts,
-            (frame->flags & AV_FRAME_FLAG_KEY) ? 1 : 0
-        );
     }
     return 0;
 }
@@ -357,13 +346,106 @@ unsigned long int MediaContainerMgr::get_frame_time() const {
         m_format_context->streams[m_video_stream_index]->time_base.num;
 }
 
+float MediaContainerMgr::frame_rate() const {
+    return (float)m_format_context->streams[m_video_stream_index]->avg_frame_rate.num /
+        m_format_context->streams[m_video_stream_index]->avg_frame_rate.den;
+}
+
 //TODO(P1) I'm not checking bounds on seeks.
+// One GOP's worth of frame cache, at most -- see m_gop_cache's declaration for why. Plane
+// copies are tightly packed (no linesize padding) going into the cache, and written back out
+// respecting the destination AVFrame's own linesize, since the two don't have to match.
+static void copy_plane_from_frame(std::vector<uint8_t>& dst, const AVFrame* frame, int plane, int width, int height) {
+    dst.resize((size_t)width * (size_t)height);
+    for (int row = 0; row < height; row++) {
+        memcpy(&dst[(size_t)row * width], frame->data[plane] + (size_t)row * frame->linesize[plane], width);
+    }
+}
+
+static void copy_plane_to_frame(AVFrame* frame, int plane, const std::vector<uint8_t>& src, int width, int height) {
+    for (int row = 0; row < height; row++) {
+        memcpy(frame->data[plane] + (size_t)row * frame->linesize[plane], &src[(size_t)row * width], width);
+    }
+}
+
+bool MediaContainerMgr::try_serve_from_cache(int64_t timestamp) {
+    if (m_gop_cache.empty() || timestamp < m_gop_cache.front().pts || timestamp > m_gop_cache.back().pts) {
+        return false;
+    }
+    // Frames are appended in decode (pts-increasing) order while filling the cache -- binary
+    // search for the last one at or before timestamp, matching advance_to()'s own "nearest
+    // frame at or before the target" semantics.
+    size_t lo = 0, hi = m_gop_cache.size(); // hi stays an exclusive upper bound
+    while (lo + 1 < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (m_gop_cache[mid].pts <= timestamp) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    const CachedFrame& cached = m_gop_cache[lo];
+    copy_plane_to_frame(m_last_video_frame, 0, cached.y, m_width, m_height);
+    copy_plane_to_frame(m_last_video_frame, 1, cached.u, m_width / 2, m_height / 2);
+    copy_plane_to_frame(m_last_video_frame, 2, cached.v, m_width / 2, m_height / 2);
+    m_last_video_frame->pts = cached.pts;
+    return true;
+}
+
 bool MediaContainerMgr::advance_to(int64_t timestamp) {
-    //while (av_get_picture_type_char(m_frame->pict_type) != 'I)
-    // rewind until we get to an IFrame
-    av_seek_frame(m_format_context, m_video_stream_index, timestamp, AVSEEK_FLAG_BACKWARD);
+    // A GOP we've already decoded through once (any real backward move walks forward from a
+    // keyframe to its target, which is exactly what fills this cache below) can answer a repeat
+    // visit for free -- no seek, no decode at all.
+    if (try_serve_from_cache(timestamp)) {
+        return true;
+    }
+
+    // Seeking jumps straight to the nearest keyframe at/before the target via the container's
+    // index, so its cost doesn't depend on how far away the target is. Decoding forward without
+    // seeking is cheap only when the target is close by (a few frames, as when scanning or
+    // dragging one tick at a time) -- for a target far ahead (e.g. a single click jumping from
+    // the start of an hour-long clip to near the end) it means decoding every single frame in
+    // between one at a time, which is the opposite of cheap. So only skip the seek for a small
+    // forward hop (within roughly one GOP); anything farther, any backward move, or the very
+    // first call (before any frame has been decoded, when m_last_video_frame->pts is still
+    // AV_NOPTS_VALUE) seeks as before.
+    const int64_t MAX_COAST_FRAMES = 300; // generous upper bound on real-world GOP length
+    bool has_valid_pts = m_last_video_frame->pts != AV_NOPTS_VALUE;
+    int64_t forward_distance = has_valid_pts ? timestamp - m_last_video_frame->pts : -1;
+    bool small_forward_hop = forward_distance >= 0 &&
+        forward_distance < MAX_COAST_FRAMES * (int64_t)get_frame_time();
+    // A real seek always lands on a keyframe -- if it's not the one m_gop_cache already holds,
+    // that cache is now for the wrong GOP, so drop it. The loop below finds out which keyframe
+    // from the first frame it decodes (that's always the keyframe right after a fresh seek) and
+    // fills the cache fresh from there.
+    bool did_seek = !small_forward_hop;
+    if (did_seek) {
+        av_seek_frame(m_format_context, m_video_stream_index, timestamp, AVSEEK_FLAG_BACKWARD);
+        m_gop_cache.clear();
+        m_gop_cache_keyframe_pts = AV_NOPTS_VALUE;
+    }
+    bool first_frame_after_seek = did_seek;
+    const uint64_t CACHE_BUDGET_BYTES = (uint64_t)1 * 1024 * 1024 * 1024; // 1 GiB -- see the plan notes on sizing
+    uint64_t frame_bytes = (uint64_t)m_width * (uint64_t)m_height * 3 / 2; // planar YUV 4:2:0
     do {
         advance_frame();
+        if (did_seek) {
+            if (first_frame_after_seek) {
+                m_gop_cache_keyframe_pts = m_last_video_frame->pts;
+                first_frame_after_seek = false;
+            }
+            // Stop appending once the budget's spent -- the cache then holds a prefix of this
+            // GOP rather than all of it, which just means frames past that prefix fall back to
+            // a real decode next time, same as today.
+            if ((uint64_t)m_gop_cache.size() * frame_bytes < CACHE_BUDGET_BYTES) {
+                CachedFrame cf;
+                cf.pts = m_last_video_frame->pts;
+                copy_plane_from_frame(cf.y, m_last_video_frame, 0, m_width, m_height);
+                copy_plane_from_frame(cf.u, m_last_video_frame, 1, m_width / 2, m_height / 2);
+                copy_plane_from_frame(cf.v, m_last_video_frame, 2, m_width / 2, m_height / 2);
+                m_gop_cache.push_back(std::move(cf));
+            }
+        }
     } while (m_last_video_frame->pts < timestamp);
 
     return true;
@@ -372,6 +454,47 @@ bool MediaContainerMgr::advance_to(int64_t timestamp) {
 bool MediaContainerMgr::advance_to_parametric(float parametric) {
     advance_to((int64_t)(parametric * m_format_context->streams[m_video_stream_index]->duration));
     return true;
+}
+
+// Fast, approximate seek used while interactively dragging/scanning: seeks to the nearest
+// preceding keyframe and decodes exactly that one frame -- advance_frame() already stops as
+// soon as it has a video frame, which right after a fresh seek is the keyframe itself. Cost is
+// one seek plus one frame decode, full stop, regardless of GOP length or resolution -- unlike
+// advance_to(), which can end up decoding an entire GOP to land on an exact target.
+bool MediaContainerMgr::seek_to_keyframe_near(int64_t timestamp) {
+    av_seek_frame(m_format_context, m_video_stream_index, timestamp, AVSEEK_FLAG_BACKWARD);
+    return advance_frame();
+}
+
+bool MediaContainerMgr::seek_to_parametric_fast(float parametric) {
+    return seek_to_keyframe_near((int64_t)(parametric * m_format_context->streams[m_video_stream_index]->duration));
+}
+
+bool MediaContainerMgr::seek_by_frames_fast(int64_t frame_delta) {
+    int64_t current_pts = (int64_t)get_presentation_timestamp();
+    int64_t timestamp = current_pts + frame_delta * (int64_t)get_frame_time();
+
+    if (frame_delta > 0) {
+        // Only jump if a keyframe actually lies between here and the target -- otherwise
+        // AVSEEK_FLAG_BACKWARD would land on the keyframe we already passed, a step backward
+        // dressed up as a seek. Checked via the index (read-only) rather than seeking
+        // speculatively, since a speculative seek we then had to recover from would cost
+        // exactly the GOP-decode burst this whole function exists to avoid.
+        AVStream* stream = m_format_context->streams[m_video_stream_index];
+        const AVIndexEntry* entry = avformat_index_get_entry_from_timestamp(stream, timestamp, AVSEEK_FLAG_BACKWARD);
+        if (entry != nullptr && entry->timestamp > current_pts) {
+            return seek_to_keyframe_near(timestamp); // real GOP boundary ahead -- O(1) jump
+        }
+        // No keyframe reachable yet (still inside the current GOP) -- decode forward for
+        // real, same as the precise path (and the only option mid-GOP, regardless of approach).
+        return advance_by((uint64_t)frame_delta);
+    }
+
+    // Backward: unchanged for now. A backward AVSEEK_FLAG_BACKWARD seek always lands
+    // at-or-before the target, which is always genuinely behind our current position, so this
+    // specific bug is forward-only -- reverse scanning has its own, separate, not-yet-diagnosed
+    // problem.
+    return seek_to_keyframe_near(timestamp);
 }
 
 bool MediaContainerMgr::advance_by(uint64_t frame_count) {

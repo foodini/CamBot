@@ -14,6 +14,9 @@ InteractionMgr::InteractionMgr() :
 	m_mouse_button_down(false),
 	m_mouse_button_up(false),
 	m_mouse_button_held(-1.0),
+	m_mouse_right_button_down(false),
+	m_mouse_right_button_up(false),
+	m_mouse_right_button_held(-1.0),
 	m_mouse_x_pos(0.0), m_mouse_y_pos(0.0)
 {
 	if (InteractionMgr::c_instance != nullptr) {
@@ -77,28 +80,36 @@ void InteractionMgr::tick(GLFWwindow* window) {
 
 	// Let ImGui have the click when it wants the mouse (e.g. the menu bar is open/hovered), so menu
 	// interaction doesn't also register as a click on whatever widget happens to sit underneath it.
-	int mouse_button = ImGui::GetIO().WantCaptureMouse ? GLFW_RELEASE : glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
-	if (mouse_button == GLFW_PRESS) {
-		if (!m_mouse_button_down && m_mouse_button_held < 0.0) {
-			m_mouse_button_down = true;
-			m_mouse_button_up = false;
-			m_mouse_button_held = -1.0;
+	bool imgui_wants_mouse = ImGui::GetIO().WantCaptureMouse;
+	int left_mouse_button = imgui_wants_mouse ? GLFW_RELEASE : glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
+	update_mouse_button_state(left_mouse_button == GLFW_PRESS, m_mouse_button_down, m_mouse_button_up, m_mouse_button_held);
+
+	int right_mouse_button = imgui_wants_mouse ? GLFW_RELEASE : glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT);
+	update_mouse_button_state(right_mouse_button == GLFW_PRESS, m_mouse_right_button_down, m_mouse_right_button_up, m_mouse_right_button_held);
+}
+
+void InteractionMgr::update_mouse_button_state(bool pressed, bool& down, bool& up, float& held) {
+	if (pressed) {
+		if (!down && held < 0.0) {
+			down = true;
+			up = false;
+			held = -1.0;
 		} else {
-			m_mouse_button_down = false;
-			m_mouse_button_up = false;
-			if (m_mouse_button_held <= 0.0)
-				m_mouse_button_held = ffsw::elapsed();
+			down = false;
+			up = false;
+			if (held <= 0.0)
+				held = ffsw::elapsed();
 		} 
 	} else {
-		if (m_mouse_button_down || m_mouse_button_held >= 0.0) {
-			m_mouse_button_down = false;
-			m_mouse_button_up = true;
-			m_mouse_button_held = -1.0;
+		if (down || held >= 0.0) {
+			down = false;
+			up = true;
+			held = -1.0;
 		}
 		else {
-			m_mouse_button_down = false;
-			m_mouse_button_up = false;
-			m_mouse_button_held = -1.0;
+			down = false;
+			up = false;
+			held = -1.0;
 		}
 	}
 }

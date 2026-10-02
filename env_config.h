@@ -11,6 +11,11 @@
 class TelemetryMgr;
 class TelemetrySlice;
 
+// Defined in main.cpp; the render loop's single playback-paused flag. EnvConfig::pause()/
+// is_paused() are the way code outside main.cpp (widgets, in particular) reach it, so there
+// stays one source of truth for whether the video is advancing on its own.
+extern bool paused;
+
 class EnvConfig {
 public:
 	EnvConfig(MediaContainerMgr* mcm, FontManager* fm, ProjectFileManager* pfm, float screen_width, float screen_height, float ui_height);
@@ -20,7 +25,17 @@ public:
 	bool screen_width(float width)                         { m_screen_width = width; return true; }
 	bool telemetry_offset(float offset);
 	bool advance_to_parametric(float parametric)           { return media_mgr->advance_to_parametric(parametric); }
+	bool advance_by(uint64_t frame_count)                  { return media_mgr->advance_by(frame_count); }
+	bool rewind_by(uint64_t frame_count)                   { return media_mgr->rewind_by(frame_count); }
+	// Fast, approximate seek for interactive dragging/scanning -- see MediaContainerMgr::
+	// seek_to_keyframe_near for why this is the one to reach for from a widget, not advance_to_parametric
+	// / advance_by() / rewind_by().
+	bool seek_to_parametric_fast(float parametric)         { return media_mgr->seek_to_parametric_fast(parametric); }
+	bool seek_by_frames_fast(int64_t frame_delta)          { return media_mgr->seek_by_frames_fast(frame_delta); }
 	bool launch_time(float launch_time);
+	// Pauses normal playback (used when an interactive scrub/scan begins); there's no un-pause
+	// call here because nothing currently auto-resumes -- releasing the mouse just leaves it paused.
+	void pause()                                           { paused = true; }
 
 	//Getters
 	//TODO(P0): set these to sane values (0 and whatever the file max is) when the video is read and
@@ -29,6 +44,8 @@ public:
 	float                   media_width()            const { return media_mgr->get_width(); }
 	float                   screen_height()          const { return m_screen_height; }
 	float                   screen_width()           const { return m_screen_width; }
+	float                   frame_rate()             const { return media_mgr->frame_rate(); }
+	bool                    is_paused()              const { return paused; }
 	//TODO(P0): The having telemetry-related stuff here was okay when the EnvConfig was meant to be the entire
 	//          interface to system state. The growing complexity means it's time to move these methods to
 	//          TelemetryMgr. Move m_telemetry_offset, while you're at it.

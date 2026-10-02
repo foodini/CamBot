@@ -5,6 +5,8 @@
 #include <GLFW/glfw3.h>
 #include "glm/glm.hpp"
 
+#include <vector>
+
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -16,6 +18,15 @@ extern "C" {
 
 #include "shader_s.h"
 
+// One decoded video frame, kept around so a GOP we have already decoded through once can be
+// replayed (forward or backward) without re-seeking/re-decoding. Plane data is copied out of
+// the decoder's AVFrame tightly packed (no linesize padding), since the decoder reuses/
+// overwrites its own frame buffer on every call.
+struct CachedFrame {
+	int64_t pts;
+	std::vector<uint8_t> y, u, v;
+};
+
 class MediaContainerMgr {
 public:
 	MediaContainerMgr(const std::string& infile, const std::string& vert, const std::string& frag, 
@@ -23,9 +34,25 @@ public:
 	~MediaContainerMgr();
 	bool advance_frame();
 	bool advance_to(int64_t timestamp);
+	// Checked by advance_to() before it seeks: if timestamp falls within the GOP we already
+	// decoded through and cached, serve it straight from the cache (no seek, no decode) and
+	// return true. See m_gop_cache below for what populates it.
+	bool try_serve_from_cache(int64_t timestamp);
 	bool advance_to_parametric(float parametric);
 	bool advance_by(uint64_t timestamp_delta);
 	bool rewind_by(uint64_t timestamp_delta);
+	// Fast, approximate seek: seeks to the nearest preceding keyframe and decodes exactly that one
+	// frame, no further -- O(1) regardless of GOP length or resolution, unlike advance_to() which
+	// can end up decoding an entire GOP to land on an exact target. Used for interactive dragging/
+	// scanning, where landing on the nearest keyframe (coarse) beats staying responsive at the cost
+	// of an exact frame; advance_to()/advance_by()/rewind_by() remain the precise tools for small,
+	// bounded moves (e.g. single-frame stepping).
+	bool seek_to_keyframe_near(int64_t timestamp);
+	bool seek_to_parametric_fast(float parametric);
+	// Relative version of seek_to_keyframe_near, in frame-count units like advance_by()/
+	// rewind_by() -- lets a caller ask for "about N frames from here, fast" without having to
+	// reach for raw timestamps/tick units itself. Negative frame_delta moves backward.
+	bool seek_by_frames_fast(int64_t frame_delta);
 	float get_width() const { return (float)m_width; }
 	float get_height() const { return (float)m_height; }
 	uint64_t get_presentation_timestamp() const;
@@ -38,6 +65,7 @@ public:
 	float rotation_angle() { return m_rotation_angle;  }
 
 	unsigned long int get_frame_time() const;
+	float frame_rate() const; // Native playback frame rate (frames/sec) of the video stream.
 	float timestamp_to_seconds(uint64_t timestamp) const;
 	void render();
 	bool recording() { return m_recording; }
@@ -65,6 +93,14 @@ private:
 	uint32_t           m_width;
 	uint32_t           m_ui_height;
 	float              m_rotation_angle;
+
+	// Caches every frame decoded while walking forward from a keyframe (advance_to()'s existing
+	// seek-then-decode-to-target loop already does this walk for any backward move -- this just
+	// keeps what it decodes instead of throwing it away), so repeat visits within that same GOP
+	// -- the common case while scanning back and forth over a short stretch -- are instant.
+	// Holds at most one GOP at a time, cleared whenever a seek lands on a different keyframe.
+	std::vector<CachedFrame> m_gop_cache;
+	int64_t                  m_gop_cache_keyframe_pts = AV_NOPTS_VALUE;
 	
 	unsigned int       m_yuv_textures[3];
 	Shader             m_shader;

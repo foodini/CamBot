@@ -27,6 +27,19 @@ public:
 
 protected:
 private:
+	// Maps a signed horizontal drag offset (NDC units, same space as InteractionMgr::mouse_x_pos())
+	// from the right-click scan origin into a signed playback rate, in video frames per second.
+	// Positive = scan forward, negative = scan backward. See widget.cpp for the curve shape.
+	float scan_rate_for_offset(float dx) const;
+
+	// Left button: click-and-hold to scrub to an absolute position.
+	bool  m_dragging = false;
+
+	// Right button: click-and-drag to scan forward/backward at a variable rate.
+	bool  m_scanning = false;
+	float m_scan_origin_x = 0.0f;
+	float m_scan_frame_accumulator = 0.0f;  // Fractional frames carried between calls; sign-aware.
+	float m_last_scan_tick_time = 0.0f;
 };
 
 class MapWidget : public WidgetBase {

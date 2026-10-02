@@ -1,5 +1,7 @@
 #include "stdio.h"
 
+#include <cmath>
+
 #include "interaction_manager.h"
 #include "telemetry.h"
 #include "util.h"
@@ -48,6 +50,17 @@ void DateTimeWidget::render() {
 }
 
 
+// --- Scan-rate tuning for the right-click "scan" gesture below. SCAN_DEADZONE/SCAN_MAX_DRAG are
+//     in the same NDC units as InteractionMgr::mouse_x_pos() (full screen width spans -1..1). ---
+static const float SCAN_DEADZONE = 0.01f;              // No motion below this -- avoids drift from a near-stationary click.
+static const float SCAN_MAX_DRAG = 0.5f;               // Offset at which the rate saturates at the max speed.
+static const float SCAN_MIN_RATE_FPS = 5.0f;           // Rate right at the edge of the deadzone.
+static const float SCAN_MAX_SPEED_MULTIPLIER = 50.0f;  // Rate at SCAN_MAX_DRAG, as a multiple of the video's native fps.
+static const int64_t SCAN_FAST_THRESHOLD_FRAMES = 8;   // Skipping more than this many frames in one tick
+                                                       // switches from a precise frame-by-frame advance to a
+                                                       // fast, approximate keyframe-snap -- see widget.cpp's
+                                                       // handle_input() and MediaContainerMgr::seek_to_keyframe_near.
+
 MediaScrubWidget::MediaScrubWidget(float width, float height, float x_pos, float y_pos) :
 	WidgetBase(width, height, x_pos, y_pos, "media_scrub_widget.vert", "media_scrub_widget.frag")
 {
@@ -58,14 +71,104 @@ MediaScrubWidget::~MediaScrubWidget() {
 
 }
 
+float MediaScrubWidget::scan_rate_for_offset(float dx) const {
+	float magnitude = fabsf(dx);
+	if (magnitude < SCAN_DEADZONE) {
+		return 0.0f;
+	}
+
+	float max_rate_fps = SCAN_MAX_SPEED_MULTIPLIER * EnvConfig::instance->frame_rate();
+	float t = (magnitude - SCAN_DEADZONE) / (SCAN_MAX_DRAG - SCAN_DEADZONE);
+	if (t > 1.0f) {
+		t = 1.0f;
+	}
+	// Exponential ramp: fine control just past the deadzone, but still able to reach a very fast
+	// shuttle (potentially 1000+ fps) within a comfortable drag distance.
+	float rate_fps = SCAN_MIN_RATE_FPS * powf(max_rate_fps / SCAN_MIN_RATE_FPS, t);
+	printf("%f\n", rate_fps);
+	return (dx < 0.0f) ? -rate_fps : rate_fps;
+}
+
 void MediaScrubWidget::handle_input() {
 	InteractionMgr* interaction_mgr = InteractionMgr::instance();
+	float mouse_x = interaction_mgr->mouse_x_pos();
+	float mouse_y = interaction_mgr->mouse_y_pos();
+	bool over_widget = mouse_x >= m_x_pos && mouse_x < m_x_pos + m_width &&
+		mouse_y >= m_y_pos && mouse_y < m_y_pos + m_height;
 
-	if (interaction_mgr->mouse_button_down()) {
-		if (interaction_mgr->mouse_x_pos() >= m_x_pos && interaction_mgr->mouse_x_pos() < m_x_pos + m_width &&
-			interaction_mgr->mouse_y_pos() >= m_y_pos && interaction_mgr->mouse_y_pos() < m_y_pos + m_height) {
- 			float parametric = (interaction_mgr->mouse_x_pos() - m_x_pos) / m_width;
-			EnvConfig::instance->advance_to_parametric(parametric);
+	// --- Left button: click-and-hold to scrub to an absolute position. ---
+	if (interaction_mgr->mouse_button_down() && over_widget) {
+		m_dragging = true;
+		EnvConfig::instance->pause();
+	}
+	if (m_dragging) {
+		if (interaction_mgr->mouse_button_up()) {
+			m_dragging = false;
+		} else {
+			// Clamp so dragging past either edge of the bar still lands exactly at the start/end,
+			// and so moving the mouse above/below the bar while still held keeps scrubbing instead
+			// of stopping -- only the x position matters once a drag has started.
+			float clamped_x = mouse_x;
+			if (clamped_x < m_x_pos) {
+				clamped_x = m_x_pos;
+			} else if (clamped_x > m_x_pos + m_width) {
+				clamped_x = m_x_pos + m_width;
+			}
+			float parametric = (clamped_x - m_x_pos) / m_width;
+			// Fast/approximate on purpose: an exact-frame advance_to_parametric() here can mean
+			// decoding a whole GOP (seconds, at this footage's keyframe spacing) per mouse-move tick.
+			// This snaps to the nearest earlier keyframe instead, which is instant regardless of GOP
+			// length or resolution; use the single-frame step keys afterward to land on an exact frame.
+			EnvConfig::instance->seek_to_parametric_fast(parametric);
+		}
+	}
+
+	// --- Right button: click-and-drag to scan forward/backward at a variable rate. ---
+	if (interaction_mgr->mouse_right_button_down() && over_widget) {
+		m_scanning = true;
+		m_scan_origin_x = mouse_x;
+		m_scan_frame_accumulator = 0.0f;
+		m_last_scan_tick_time = ffsw::elapsed();
+		EnvConfig::instance->pause();
+	}
+	if (m_scanning) {
+		if (interaction_mgr->mouse_right_button_up()) {
+			m_scanning = false;
+		} else {
+			float now = ffsw::elapsed();
+			float dt = now - m_last_scan_tick_time;
+			m_last_scan_tick_time = now;
+
+			float rate_fps = scan_rate_for_offset(mouse_x - m_scan_origin_x);
+			m_scan_frame_accumulator += rate_fps * dt;
+
+			// advance_to()'s seek-then-decode loop always decodes at least one frame, even when
+			// asked to move by zero -- so only call it once there's at least one whole frame to move.
+			int64_t whole_frames = (int64_t)m_scan_frame_accumulator;
+			if (whole_frames != 0) {
+				// Capped to one decoded frame per tick, in both directions, on purpose -- this is
+				// meant for quick local searches (small, cache-friendly steps through advance_to()),
+				// which never need more than real one-frame-at-a-time decode speed. Anything that
+				// wants to skip keyframe-to-keyframe is the left button's job now, so the
+				// fast/keyframe-jump branch below is no longer reachable from here, but stays in
+				// place as a safety net.
+				whole_frames = (whole_frames > 0) ? 1 : -1;
+				m_scan_frame_accumulator -= (float)whole_frames;
+				int64_t abs_whole_frames = (whole_frames < 0) ? -whole_frames : whole_frames;
+				if (abs_whole_frames <= SCAN_FAST_THRESHOLD_FRAMES) {
+					// Small enough to decode frame-by-frame precisely, same as always.
+					if (whole_frames > 0) {
+						EnvConfig::instance->advance_by((uint64_t)whole_frames);
+					} else {
+						EnvConfig::instance->rewind_by((uint64_t)(-whole_frames));
+					}
+				} else {
+					// Fast scanning: decoding every skipped frame one at a time would cost the same as
+					// real-time playback no matter how fast the requested rate is. Snap to the nearest
+					// keyframe toward the target instead -- same reasoning as the left-button drag above.
+					EnvConfig::instance->seek_by_frames_fast(whole_frames);
+				}
+			}
 		}
 	}
 }
