@@ -1,0 +1,11 @@
+* (P1)Tell the user that frames are currently being cached while doing a right-click scrub
+  if the next required frame is being delayed.
+* Add something to the scrub widget to display the center of right-click scrubbing, and
+  potentially the frame rate being traversed.
+* Clicking on the video frame should pause/unpause.
+* Note the comment in widget.cpp: "Clamp dragging past either edge of the bar....." The
+  intent to to have a drag past the right end stop on the last frame, but the clamping
+  to the nearest keyframe is causing this to not work properly. 
+* The comments in media_container_manager.h near m_gop_cache suggest that frames
+  from only one GOP at a time are cached. If you are reverse-scrubbing, you want
+  the previous GOP's frames to be precaching while the current GOP is being displayed.
