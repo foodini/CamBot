@@ -47,6 +47,11 @@ public:
 	float                   media_width()            const { return media_mgr->get_width(); }
 	float                   screen_height()          const { return m_screen_height; }
 	float                   screen_width()           const { return m_screen_width; }
+	// The strip of screen_height() reserved below the video for the scrubbers/graph/map -- the
+	// video's own display rect is screen_height() - ui_height() tall. Needed by
+	// MediaContainerMgr::render() to know the video rect's real aspect ratio for its rotation
+	// cover-scale (see 3.3.shader.vert).
+	float                   ui_height()              const { return m_ui_height; }
 	float                   frame_rate()             const { return media_mgr->frame_rate(); }
 	bool                    is_paused()              const { return paused; }
 	int32_t                 telemetry_index()        const;

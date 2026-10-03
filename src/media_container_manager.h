@@ -97,6 +97,11 @@ private:
 	int                m_rewind_step_repeat_bucket;
 	int                m_advance_step_repeat_bucket;
 
+	// The video quad's own center, in NDC -- the pivot rotation happens around (see render()
+	// and 3.3.shader.vert). Computed once from `extents` at construction time.
+	float              m_center_ndc_x;
+	float              m_center_ndc_y;
+
 	// Caches every frame decoded while walking forward from a keyframe (advance_to()'s existing
 	// seek-then-decode-to-target loop already does this walk for any backward move -- this just
 	// keeps what it decodes instead of throwing it away), so repeat visits within that same GOP

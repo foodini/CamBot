@@ -2,11 +2,13 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <cmath>
 #include <inttypes.h>
 #include <utility> // std::move
 
 #include "shader_s.h"
 
+#include "env_config.h"
 #include "interaction_manager.h"
 #include "media_container_manager.h"
 #include "util.h"
@@ -22,6 +24,8 @@ MediaContainerMgr::MediaContainerMgr(const std::string& infile, const std::strin
     m_rotation_angle(0.0),
     m_rewind_step_repeat_bucket(-1),
     m_advance_step_repeat_bucket(-1),
+    m_center_ndc_x((extents[0].x + extents[3].x) / 2.0f),
+    m_center_ndc_y((extents[0].y + extents[3].y) / 2.0f),
     m_shader(vert.c_str(), frag.c_str()),
     m_recording(false),
     m_output_format(nullptr),
@@ -242,6 +246,35 @@ void MediaContainerMgr::render() {
     m_shader.use(); // ALL UNIFORMS MUST BE SET AFTER use() is called.
     m_shader.setFloat("time", (float)get_presentation_timefloat());
     m_shader.setFloat("angle", m_rotation_angle);
+
+    // The rotation itself, and how much to zoom in while rotated so no empty corners show
+    // without unnecessary cropping, both need the video rect's real pixel aspect ratio -- see
+    // 3.3.shader.vert's uniform comments for the derivation. EnvConfig is guaranteed to exist by
+    // the time render() is ever called (main() constructs it before the render loop starts),
+    // same assumption WidgetBase::render_border() already makes.
+    const EnvConfig* env_config = EnvConfig::instance;
+    float viewport_width = env_config->screen_width();
+    float viewport_height = env_config->screen_height(); // includes the UI_HEIGHT strip below the video
+    float video_rect_height = viewport_height - env_config->ui_height();
+    // NDC x and y don't cover equal pixel counts here (the viewport isn't square in pixels), so
+    // a plain rotation matrix applied to NDC coordinates would shear the image. This is the
+    // correction factor the shader divides/multiplies by to undo that mismatch before/after
+    // rotating.
+    float aspect_correction = viewport_width / viewport_height;
+    // Minimal zoom so the rotated video rect still fully covers its own display area with no
+    // empty corners. NOTE: this does NOT simply repeat every 90 degrees for a non-square rect
+    // like this one -- that's only true in the square case. What's actually true for any
+    // rectangle is that |cos| and |sin| are each even and 180-degree-periodic on their own,
+    // which is exactly what the formula below uses, so it needs no angle reduction/wrapping at
+    // all (an earlier version reduced the angle into [0, half_pi) first, which assumed the
+    // square-only 90-degree repeat and so got a small negative angle backwards -- treating
+    // "just past zero" as "just before 90 degrees" instead).
+    float video_rect_aspect = viewport_width / video_rect_height;
+    float cover_scale = fabsf(cosf(m_rotation_angle)) + video_rect_aspect * fabsf(sinf(m_rotation_angle));
+    m_shader.setFloat("aspect_correction", aspect_correction);
+    m_shader.setFloat("cover_scale", cover_scale);
+    m_shader.setFloat("center_x", m_center_ndc_x);
+    m_shader.setFloat("center_y", m_center_ndc_y);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_yuv_textures[0]);
