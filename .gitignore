@@ -2,3 +2,6 @@
 x64/
 vcpkg_installed/
 build_log.txt
+*.log
+*.mp4
+*.ffsw
