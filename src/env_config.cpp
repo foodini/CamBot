@@ -10,7 +10,6 @@ EnvConfig::EnvConfig(MediaContainerMgr* mcm, FontManager* fm, ProjectFileManager
 	font_mgr(fm),
 	project_file_mgr(pfm),
 	m_launch_time(pfm->get_launch_time()),
-	m_telemetry_offset(pfm->get_telemetry_offset()),
 	m_screen_width(screen_width),
 	m_screen_height(screen_height),
 	m_ui_height(ui_height),
@@ -47,9 +46,21 @@ float EnvConfig::flight_time() const {
 }
 
 bool EnvConfig::telemetry_offset(float offset) {
-	m_telemetry_offset = offset;
+	TelemetryMgr::instance->set_offset(offset);
 	save_project();
 	return true;
+}
+
+float EnvConfig::telemetry_offset() const {
+	return TelemetryMgr::instance->offset();
+}
+
+float EnvConfig::telemetry_duration() const {
+	return TelemetryMgr::instance->duration();
+}
+
+float EnvConfig::telemetry_elapsed() const {
+	return TelemetryMgr::instance->elapsed_at(media_in_elapsed());
 }
 
 bool EnvConfig::launch_time(float launch_time) { 
@@ -59,17 +70,16 @@ bool EnvConfig::launch_time(float launch_time) {
 }
 
 int32_t EnvConfig::telemetry_index() const {
-	float telemetry_elapsed = media_in_elapsed() - m_telemetry_offset;
-	return (int64_t)(telemetry_elapsed * TELEMETRY_FREQUENCY);
+	return TelemetryMgr::instance->index_at(media_in_elapsed());
 }
 
 const TelemetrySlice& EnvConfig::telemetry_slice() const {
-	return (*TelemetryMgr::instance)[telemetry_index()];
+	return TelemetryMgr::instance->slice_at(media_in_elapsed());
 }
 
 void EnvConfig::save_project() {
 	project_file_mgr->set_launch_time(m_launch_time);
-	project_file_mgr->set_telemetry_offset(m_telemetry_offset);
+	project_file_mgr->set_telemetry_offset(TelemetryMgr::instance->offset());
 	project_file_mgr->save_project();
 }
 

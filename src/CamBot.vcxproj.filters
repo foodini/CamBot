@@ -86,6 +86,9 @@
     <None Include="media_scrub_widget.vert">
       <Filter>Resource Files</Filter>
     </None>
+    <None Include="telemetry_scrub_widget.frag">
+      <Filter>Resource Files</Filter>
+    </None>
     <None Include="map_widget.frag">
       <Filter>Resource Files</Filter>
     </None>

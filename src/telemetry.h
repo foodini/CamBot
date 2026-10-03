@@ -64,7 +64,7 @@ public:
 //TODO(P1): TelemetryMgr[x] should return the x-th TelemetrySlice - or a default one.
 class TelemetryMgr {
 public:
-	TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* widgets);
+	TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* widgets, float initial_offset);
 	~TelemetryMgr();
 
 	//Using a * to widgets instead of & since threads don't seem to like refs.
@@ -79,6 +79,26 @@ public:
 	std::pair<int32_t, int32_t> get_current_gridref();  // Really, only useful for debugging.
 	*/
 
+	// The fixed time offset between the video's clock and the telemetry device's clock (they aren't
+	// hardware-synced, so this has to be set by eye -- see TelemetryScrubWidget). Positive means the
+	// telemetry device started recording later than the camera did.
+	float offset() const                  { return m_telemetry_offset; }
+	bool  set_offset(float offset)        { m_telemetry_offset = offset; return true; }
+
+	// Telemetry's own recorded length, in seconds -- independent of the video entirely.
+	float duration() const                { return (float)size() / (float)TELEMETRY_FREQUENCY; }
+
+	// Everything below combines telemetry's clock with the caller's notion of "now" on the video's
+	// clock (media_elapsed), rather than reaching for a MediaContainerMgr directly, so this class
+	// stays decoupled from anything video-related.
+	float elapsed_at(float media_elapsed) const;
+	// [0..1] across telemetry's own duration, clamped so an offset that pushes "now" outside the
+	// telemetry recording still yields a sane, renderable position instead of needing a special case
+	// downstream (e.g. in TelemetryScrubWidget's shader).
+	float parametric_at(float media_elapsed) const;
+	int32_t index_at(float media_elapsed) const;
+	const TelemetrySlice& slice_at(float media_elapsed) const { return (*this)[index_at(media_elapsed)]; }
+
 	void tick();
 	bool parsing_done() { m_parse_done && !m_thread_running; }
 	static TelemetryMgr* instance;
@@ -89,4 +109,5 @@ private:
 	std::atomic<bool>           m_parse_done;
 	std::atomic<bool>           m_thread_running;
 	TelemetrySlice              m_default_slice;
+	float                        m_telemetry_offset;
 };

@@ -208,6 +208,7 @@
     <None Include="mask_shader.vert" />
     <None Include="media_scrub_widget.frag" />
     <None Include="media_scrub_widget.vert" />
+    <None Include="telemetry_scrub_widget.frag" />
     <None Include="text.frag" />
     <None Include="text.vert" />
   </ItemGroup>

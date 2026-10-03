@@ -122,8 +122,9 @@ float TelemetrySlice::course_rad() const {
 
 TelemetryMgr* TelemetryMgr::instance = nullptr;
 
-TelemetryMgr::TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* widgets) :
-	m_parse_done(false)
+TelemetryMgr::TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* widgets, float initial_offset) :
+	m_parse_done(false),
+	m_telemetry_offset(initial_offset)
 {
 	if (TelemetryMgr::instance != nullptr) {
 		throw "Cannot create second TelemetryMgr";
@@ -202,6 +203,28 @@ const TelemetrySlice& TelemetryMgr::operator[](int64_t index) const {
 	if ((uint64_t)index >= m_telemetry.size() || index < 0)
 		return m_default_slice;
 	return m_telemetry[index];
+}
+
+float TelemetryMgr::elapsed_at(float media_elapsed) const {
+	return media_elapsed - m_telemetry_offset;
+}
+
+float TelemetryMgr::parametric_at(float media_elapsed) const {
+	float total_duration = duration();
+	if (total_duration <= 0.0f) {
+		return 0.0f;
+	}
+	float parametric = elapsed_at(media_elapsed) / total_duration;
+	if (parametric < 0.0f) {
+		parametric = 0.0f;
+	} else if (parametric > 1.0f) {
+		parametric = 1.0f;
+	}
+	return parametric;
+}
+
+int32_t TelemetryMgr::index_at(float media_elapsed) const {
+	return (int32_t)(elapsed_at(media_elapsed) * TELEMETRY_FREQUENCY);
 }
 
 void TelemetryMgr::tick() {

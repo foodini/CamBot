@@ -123,6 +123,7 @@ int main()
 
     DateTimeWidget date_time_widget(.29f, .18f, 1.0f-.29f-.015f, 1.0f-.18f-.01f);
     MediaScrubWidget media_scrub_widget(1.96f, 0.04f, -.98f, -.835f);
+    TelemetryScrubWidget telemetry_scrub_widget(1.96f, 0.04f, -.98f, -.885f);
 
     MapWidget map_widget(.35f, .35f*SCR_WIDTH/(SCR_HEIGHT+UI_HEIGHT), 0.6f, -0.765f);
     ClimbWidget climb_widget(.02f, .35f * SCR_WIDTH / (SCR_HEIGHT + UI_HEIGHT), 0.9625f, -0.765f);
@@ -133,7 +134,7 @@ int main()
     polygonalized_widgets.push_back(&map_widget);
     polygonalized_widgets.push_back(&graph_widget);
 
-    TelemetryMgr telemetry_mgr(project_file_mgr.get_telemetry_file_path(), &polygonalized_widgets);
+    TelemetryMgr telemetry_mgr(project_file_mgr.get_telemetry_file_path(), &polygonalized_widgets, project_file_mgr.get_telemetry_offset());
 
     InteractionMgr* interaction_mgr = InteractionMgr::instance();
     interaction_mgr->watch_key(GLFW_KEY_ESCAPE);
@@ -161,6 +162,7 @@ int main()
         //TODO(P1) Find a way for these things to get their updates automatically, so I don't have to remember
         //         to do it for each widget that receives input.
         media_scrub_widget.handle_input();
+        telemetry_scrub_widget.handle_input();
 
         // Start the ImGui frame and draw the File/Edit/View/Help menu bar.
         ImGui_ImplOpenGL3_NewFrame();
@@ -319,6 +321,7 @@ int main()
         media_container_mgr.render();
         date_time_widget.render();
         media_scrub_widget.render();
+        telemetry_scrub_widget.render();
         map_widget.render();
         climb_widget.render();
         graph_widget.render();

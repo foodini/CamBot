@@ -23,6 +23,9 @@ public:
 	//Setters
 	bool screen_height(float height)                       { m_screen_height = height; return true; }
 	bool screen_width(float width)                         { m_screen_width = width; return true; }
+	// Thin forwarders -- TelemetryMgr owns m_telemetry_offset and the telemetry-side math now; this
+	// just combines it with media_in_elapsed() for the ~10 call sites (widgets, mostly) that already
+	// reach it through EnvConfig and don't need to change.
 	bool telemetry_offset(float offset);
 	bool advance_to_parametric(float parametric)           { return media_mgr->advance_to_parametric(parametric); }
 	bool advance_by(uint64_t frame_count)                  { return media_mgr->advance_by(frame_count); }
@@ -46,12 +49,13 @@ public:
 	float                   screen_width()           const { return m_screen_width; }
 	float                   frame_rate()             const { return media_mgr->frame_rate(); }
 	bool                    is_paused()              const { return paused; }
-	//TODO(P0): The having telemetry-related stuff here was okay when the EnvConfig was meant to be the entire
-	//          interface to system state. The growing complexity means it's time to move these methods to
-	//          TelemetryMgr. Move m_telemetry_offset, while you're at it.
 	int32_t                 telemetry_index()        const;
 	const TelemetrySlice&   telemetry_slice()        const;
-	float                   telemetry_offset()       const { return m_telemetry_offset; }
+	float                   telemetry_offset()       const;
+	// Telemetry's own recorded length, and the current media position mapped onto it -- see
+	// TelemetryMgr::duration()/elapsed_at(). Used by TelemetryScrubWidget.
+	float                   telemetry_duration()      const;
+	float                   telemetry_elapsed()       const;
 	float                   media_in_elapsed()       const; // Wall time passed since start of video.
 	float                   media_in_duration()      const; // Wall time length of video.
 	float                   media_out_elapsed()      const;
@@ -76,7 +80,6 @@ private:
 
 	uint64_t                m_media_pts_start;
 	uint64_t                m_media_pts_end;
-	float                   m_telemetry_offset; 
 
 	float                   m_screen_width;
 	float                   m_screen_height;

@@ -55,14 +55,25 @@ void DateTimeWidget::render() {
 static const float SCAN_DEADZONE = 0.01f;              // No motion below this -- avoids drift from a near-stationary click.
 static const float SCAN_MAX_DRAG = 0.5f;               // Offset at which the rate saturates at the max speed.
 static const float SCAN_MIN_RATE_FPS = 5.0f;           // Rate right at the edge of the deadzone.
-static const float SCAN_MAX_SPEED_MULTIPLIER = 50.0f;  // Rate at SCAN_MAX_DRAG, as a multiple of the video's native fps.
-static const int64_t SCAN_FAST_THRESHOLD_FRAMES = 8;   // Skipping more than this many frames in one tick
-                                                       // switches from a precise frame-by-frame advance to a
-                                                       // fast, approximate keyframe-snap -- see widget.cpp's
-                                                       // handle_input() and MediaContainerMgr::seek_to_keyframe_near.
+static const float SCAN_MAX_SPEED_MULTIPLIER = 50.0f;  // Rate at SCAN_MAX_DRAG, as a multiple of native_rate().
+static const int64_t SCAN_FAST_THRESHOLD_FRAMES = 8;   // Skipping more than this many units in one tick
+                                                       // switches from a precise per-unit step to the
+                                                       // step_fast() path -- see ScrubWidget::handle_input()
+                                                       // below (currently unreachable; kept as a safety net).
+
+ScrubWidget::ScrubWidget(float width, float height, float x_pos, float y_pos,
+		const std::string& vert, const std::string& frag) :
+	WidgetBase(width, height, x_pos, y_pos, vert, frag)
+{
+
+}
+
+ScrubWidget::~ScrubWidget() {
+
+}
 
 MediaScrubWidget::MediaScrubWidget(float width, float height, float x_pos, float y_pos) :
-	WidgetBase(width, height, x_pos, y_pos, "media_scrub_widget.vert", "media_scrub_widget.frag")
+	ScrubWidget(width, height, x_pos, y_pos, "media_scrub_widget.vert", "media_scrub_widget.frag")
 {
 
 }
@@ -71,25 +82,24 @@ MediaScrubWidget::~MediaScrubWidget() {
 
 }
 
-float MediaScrubWidget::scan_rate_for_offset(float dx) const {
+float ScrubWidget::scan_rate_for_offset(float dx) const {
 	float magnitude = fabsf(dx);
 	if (magnitude < SCAN_DEADZONE) {
 		return 0.0f;
 	}
 
-	float max_rate_fps = SCAN_MAX_SPEED_MULTIPLIER * EnvConfig::instance->frame_rate();
+	float max_rate_fps = SCAN_MAX_SPEED_MULTIPLIER * native_rate();
 	float t = (magnitude - SCAN_DEADZONE) / (SCAN_MAX_DRAG - SCAN_DEADZONE);
 	if (t > 1.0f) {
 		t = 1.0f;
 	}
 	// Exponential ramp: fine control just past the deadzone, but still able to reach a very fast
-	// shuttle (potentially 1000+ fps) within a comfortable drag distance.
+	// shuttle (potentially 1000+ units/sec) within a comfortable drag distance.
 	float rate_fps = SCAN_MIN_RATE_FPS * powf(max_rate_fps / SCAN_MIN_RATE_FPS, t);
-	printf("%f\n", rate_fps);
 	return (dx < 0.0f) ? -rate_fps : rate_fps;
 }
 
-void MediaScrubWidget::handle_input() {
+void ScrubWidget::handle_input() {
 	InteractionMgr* interaction_mgr = InteractionMgr::instance();
 	float mouse_x = interaction_mgr->mouse_x_pos();
 	float mouse_y = interaction_mgr->mouse_y_pos();
@@ -115,11 +125,7 @@ void MediaScrubWidget::handle_input() {
 				clamped_x = m_x_pos + m_width;
 			}
 			float parametric = (clamped_x - m_x_pos) / m_width;
-			// Fast/approximate on purpose: an exact-frame advance_to_parametric() here can mean
-			// decoding a whole GOP (seconds, at this footage's keyframe spacing) per mouse-move tick.
-			// This snaps to the nearest earlier keyframe instead, which is instant regardless of GOP
-			// length or resolution; use the single-frame step keys afterward to land on an exact frame.
-			EnvConfig::instance->seek_to_parametric_fast(parametric);
+			seek_to_parametric(parametric);
 		}
 	}
 
@@ -146,31 +152,56 @@ void MediaScrubWidget::handle_input() {
 			// asked to move by zero -- so only call it once there's at least one whole frame to move.
 			int64_t whole_frames = (int64_t)m_scan_frame_accumulator;
 			if (whole_frames != 0) {
-				// Capped to one decoded frame per tick, in both directions, on purpose -- this is
-				// meant for quick local searches (small, cache-friendly steps through advance_to()),
-				// which never need more than real one-frame-at-a-time decode speed. Anything that
-				// wants to skip keyframe-to-keyframe is the left button's job now, so the
-				// fast/keyframe-jump branch below is no longer reachable from here, but stays in
+				// Capped to one unit per tick, in both directions, on purpose -- this is
+				// meant for quick local searches (small, cache-friendly steps through step()),
+				// which never need more than real one-unit-at-a-time speed. Anything that
+				// wants to skip farther is step_fast()'s job now, so the
+				// fast branch below is no longer reachable from here, but stays in
 				// place as a safety net.
 				whole_frames = (whole_frames > 0) ? 1 : -1;
 				m_scan_frame_accumulator -= (float)whole_frames;
 				int64_t abs_whole_frames = (whole_frames < 0) ? -whole_frames : whole_frames;
 				if (abs_whole_frames <= SCAN_FAST_THRESHOLD_FRAMES) {
-					// Small enough to decode frame-by-frame precisely, same as always.
-					if (whole_frames > 0) {
-						EnvConfig::instance->advance_by((uint64_t)whole_frames);
-					} else {
-						EnvConfig::instance->rewind_by((uint64_t)(-whole_frames));
-					}
+					// Small enough to step precisely, same as always.
+					step(whole_frames);
 				} else {
-					// Fast scanning: decoding every skipped frame one at a time would cost the same as
-					// real-time playback no matter how fast the requested rate is. Snap to the nearest
-					// keyframe toward the target instead -- same reasoning as the left-button drag above.
-					EnvConfig::instance->seek_by_frames_fast(whole_frames);
+					// Fast scanning: see step_fast()'s own documentation.
+					step_fast(whole_frames);
 				}
 			}
 		}
 	}
+}
+
+float MediaScrubWidget::current_parametric() const {
+	return EnvConfig::instance->time_parametric();
+}
+
+float MediaScrubWidget::native_rate() const {
+	return EnvConfig::instance->frame_rate();
+}
+
+void MediaScrubWidget::seek_to_parametric(float parametric) {
+	// Fast/approximate on purpose: an exact-frame advance_to_parametric() here can mean
+	// decoding a whole GOP (seconds, at this footage's keyframe spacing) per mouse-move tick.
+	// This snaps to the nearest earlier keyframe instead, which is instant regardless of GOP
+	// length or resolution; use the single-frame step keys afterward to land on an exact frame.
+	EnvConfig::instance->seek_to_parametric_fast(parametric);
+}
+
+void MediaScrubWidget::step(int64_t delta) {
+	if (delta > 0) {
+		EnvConfig::instance->advance_by((uint64_t)delta);
+	} else {
+		EnvConfig::instance->rewind_by((uint64_t)(-delta));
+	}
+}
+
+void MediaScrubWidget::step_fast(int64_t delta) {
+	// Fast scanning: decoding every skipped frame one at a time would cost the same as
+	// real-time playback no matter how fast the requested rate is. Snap to the nearest
+	// keyframe toward the target instead -- same reasoning as the left-button drag above.
+	EnvConfig::instance->seek_by_frames_fast(delta);
 }
 
 void MediaScrubWidget::render() {
@@ -192,6 +223,51 @@ void MediaScrubWidget::render() {
 			std::string(buf),
 			0, glm::vec2(m_x_pos + 0.005, m_y_pos + m_height * 0.5), glm::vec3(1.0, 1.0, 1.0), 0.33f, 1.0f,
 			StringAndProperties::V_ALIGN::V_CENTER));
+}
+
+TelemetryScrubWidget::TelemetryScrubWidget(float width, float height, float x_pos, float y_pos) :
+	ScrubWidget(width, height, x_pos, y_pos, "media_scrub_widget.vert", "telemetry_scrub_widget.frag")
+{
+
+}
+
+TelemetryScrubWidget::~TelemetryScrubWidget() {
+
+}
+
+float TelemetryScrubWidget::current_parametric() const {
+	return TelemetryMgr::instance->parametric_at(EnvConfig::instance->media_in_elapsed());
+}
+
+float TelemetryScrubWidget::native_rate() const {
+	return TELEMETRY_FREQUENCY;
+}
+
+void TelemetryScrubWidget::seek_to_parametric(float parametric) {
+	// There's no decode cost for telemetry -- adjusting the offset is just a float assignment --
+	// so, unlike MediaScrubWidget, this is an exact solve rather than a fast/approximate snap.
+	float desired_elapsed = parametric * TelemetryMgr::instance->duration();
+	EnvConfig::instance->telemetry_offset(EnvConfig::instance->media_in_elapsed() - desired_elapsed);
+}
+
+void TelemetryScrubWidget::step(int64_t delta) {
+	EnvConfig::instance->telemetry_offset(EnvConfig::instance->telemetry_offset() - delta / (float)TELEMETRY_FREQUENCY);
+}
+
+void TelemetryScrubWidget::step_fast(int64_t delta) {
+	// No decode cost either way -- same path as step().
+	step(delta);
+}
+
+void TelemetryScrubWidget::render() {
+	const EnvConfig* env_config = EnvConfig::instance;
+
+	WidgetBase::render_mask();
+
+	// Uniform settings must happen after a use() call
+	m_shader.use();
+	m_shader.setFloat("time_parametric", current_parametric());
+	WidgetBase::render(m_shader);
 }
 
 MapWidget::MapWidget(float width, float height, float x_pos, float y_pos) :
