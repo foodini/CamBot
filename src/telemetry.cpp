@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "env_config.h"
+#include "interaction_manager.h"
 #include "widget_base.h"
 
 TelemetrySlice::TelemetrySlice() :
@@ -125,7 +126,9 @@ TelemetryMgr* TelemetryMgr::instance = nullptr;
 TelemetryMgr::TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* widgets, float initial_offset, float initial_window_start_elapsed) :
 	m_parse_done(false),
 	m_telemetry_offset(initial_offset),
-	m_window_start_elapsed(initial_window_start_elapsed)
+	m_window_start_elapsed(initial_window_start_elapsed),
+	m_advance_offset_repeat_bucket(-1),
+	m_rewind_offset_repeat_bucket(-1)
 {
 	if (TelemetryMgr::instance != nullptr) {
 		throw "Cannot create second TelemetryMgr";
@@ -135,6 +138,30 @@ TelemetryMgr::TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* wi
 	m_thread_running = true;
 	m_parse_thread = std::thread(&TelemetryMgr::parse_telemetry_file, this, path, widgets);
 	//parse_telemetry_file(path, widgets);
+
+	// UP/DOWN nudge the video/telemetry sync offset by one telemetry sample at a time -- the
+	// finest adjustment that means anything, same idea as the frame-step keys for video. Bound
+	// here (rather than in main()) because m_telemetry_offset is this class's own state. UP
+	// "advances" telemetry: elapsed_at(media_elapsed) = media_elapsed - offset, so moving
+	// telemetry's sample forward relative to the video means decreasing the offset; DOWN
+	// "rewinds" it by increasing the offset the same amount. See ffsw::held_repeat_due() for the
+	// ~10/s auto-repeat while held.
+	// constexpr (not just const) so the lambdas below can use it without capturing it.
+	static constexpr float SAMPLE_SECONDS = 1.0f / TELEMETRY_FREQUENCY;
+	InteractionMgr::instance()->bind_key(GLFW_KEY_UP,
+		[this]() { m_telemetry_offset -= SAMPLE_SECONDS; },
+		nullptr,
+		[this](float held_seconds) {
+			if (ffsw::held_repeat_due(held_seconds, 0.25f, 0.1f, m_advance_offset_repeat_bucket))
+				m_telemetry_offset -= SAMPLE_SECONDS;
+		});
+	InteractionMgr::instance()->bind_key(GLFW_KEY_DOWN,
+		[this]() { m_telemetry_offset += SAMPLE_SECONDS; },
+		nullptr,
+		[this](float held_seconds) {
+			if (ffsw::held_repeat_due(held_seconds, 0.25f, 0.1f, m_rewind_offset_repeat_bucket))
+				m_telemetry_offset += SAMPLE_SECONDS;
+		});
 }
 
 TelemetryMgr::~TelemetryMgr() {

@@ -9,6 +9,7 @@
 
 #include "interaction_manager.h"
 #include "media_container_manager.h"
+#include "util.h"
 
 //TODO(P1): height and width are floats some places and uint32_ts elsewhere.
 
@@ -19,6 +20,8 @@ MediaContainerMgr::MediaContainerMgr(const std::string& infile, const std::strin
     m_height(0),
     m_width(0),
     m_rotation_angle(0.0),
+    m_rewind_step_repeat_bucket(-1),
+    m_advance_step_repeat_bucket(-1),
     m_shader(vert.c_str(), frag.c_str()),
     m_recording(false),
     m_output_format(nullptr),
@@ -126,17 +129,18 @@ MediaContainerMgr::MediaContainerMgr(const std::string& infile, const std::strin
 
     // Rotation nudge (held-repeat) and flip are this subsystem's own state (m_rotation_angle),
     // so they're bound here rather than in main() -- see InteractionMgr::bind_key()'s doc
-    // comment. The on_down handles the initial tap; on_held re-fires every frame once held past
-    // the 0.25s repeat threshold, matching the held-repeat feel the old if(key_down() ||
-    // key_held() >= 0.25) chain had.
-    InteractionMgr::instance()->bind_key(GLFW_KEY_RIGHT,
+    // comment. Comma/period (</>) rather than the arrow keys, now that LEFT/RIGHT do frame
+    // stepping below. The on_down handles the initial tap; on_held re-fires every frame once
+    // held past the 0.25s repeat threshold, matching the held-repeat feel the old if(key_down()
+    // || key_held() >= 0.25) chain had.
+    InteractionMgr::instance()->bind_key(GLFW_KEY_PERIOD,
         [this]() { m_rotation_angle -= 3.141592653f / 720.0f; },
         nullptr,
         [this](float held_seconds) {
             if (held_seconds >= 0.25f)
                 m_rotation_angle -= 3.141592653f / 720.0f;
         });
-    InteractionMgr::instance()->bind_key(GLFW_KEY_LEFT,
+    InteractionMgr::instance()->bind_key(GLFW_KEY_COMMA,
         [this]() { m_rotation_angle += 3.141592653f / 720.0f; },
         nullptr,
         [this](float held_seconds) {
@@ -147,6 +151,24 @@ MediaContainerMgr::MediaContainerMgr(const std::string& infile, const std::strin
         [this]() { m_rotation_angle += 3.141592653f; },
         nullptr,
         nullptr);
+
+    // Single-frame scrub, like the left/right arrows in most video editors: one video frame per
+    // tap, auto-repeating at ~10fps (see ffsw::held_repeat_due()) while held rather than at
+    // render frame rate -- a much gentler shuttle speed than the rotation keys' max-rate repeat.
+    InteractionMgr::instance()->bind_key(GLFW_KEY_LEFT,
+        [this]() { rewind_by(1); },
+        nullptr,
+        [this](float held_seconds) {
+            if (ffsw::held_repeat_due(held_seconds, 0.25f, 0.1f, m_rewind_step_repeat_bucket))
+                rewind_by(1);
+        });
+    InteractionMgr::instance()->bind_key(GLFW_KEY_RIGHT,
+        [this]() { advance_by(1); },
+        nullptr,
+        [this](float held_seconds) {
+            if (ffsw::held_repeat_due(held_seconds, 0.25f, 0.1f, m_advance_step_repeat_bucket))
+                advance_by(1);
+        });
 }
 
 MediaContainerMgr::~MediaContainerMgr() {

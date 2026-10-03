@@ -123,4 +123,8 @@ private:
 	TelemetrySlice              m_default_slice;
 	float                        m_telemetry_offset;
 	float                        m_window_start_elapsed;
+
+	// Per-key auto-repeat state for the held offset-nudge keys -- see ffsw::held_repeat_due().
+	int                          m_advance_offset_repeat_bucket;
+	int                          m_rewind_offset_repeat_bucket;
 };

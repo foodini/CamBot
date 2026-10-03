@@ -11,6 +11,19 @@ float ffsw::elapsed() {
 	return (float)glfwGetTime();
 }
 
+bool ffsw::held_repeat_due(float held_seconds, float initial_delay, float interval, int& bucket) {
+	if (held_seconds < initial_delay) {
+		bucket = -1;
+		return false;
+	}
+	int current_bucket = (int)((held_seconds - initial_delay) / interval);
+	if (current_bucket > bucket) {
+		bucket = current_bucket;
+		return true;
+	}
+	return false;
+}
+
 char* ffsw::make_time(char* buf, float t, bool decimal) {
 	int32_t divmod = (int32_t)(t * 10);
 	int32_t tenths = divmod % 10;
