@@ -13,6 +13,7 @@
 #include "imgui/imgui_impl_opengl3.h"
 
 #include "stb_image.h"
+#include "stb_image_write.h"
 
 #include "env_config.h"
 #include "font_manager.h"
@@ -44,9 +45,6 @@ const unsigned int MENU_HEIGHT = 19;       // Exact pixel height ImGui renders t
 
 bool paused = false;
 
-bool fwd = false;
-bool rev = false;
-
 // glfw: whenever the window size changed (by OS or user resize) this callback function executes
 // ---------------------------------------------------------------------------------------------
 void framebuffer_size_callback(GLFWwindow* window, int width, int height)
@@ -66,6 +64,25 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 
 
 
+}
+
+// Captures the (0, UI_HEIGHT, SCR_WIDTH, SCR_HEIGHT) rectangle -- in pixel space, exactly the
+// rectangle the video is rendered into (see `extents` in main(), and the existing recording
+// capture below, both of which read this same rectangle) -- from whatever's currently in the
+// back buffer, and writes it out as a PNG at `path`. No-op if `path` is empty, so callers can
+// just call this unconditionally once per frame and let it decide. Called at two different
+// points in the same frame's render sequence (see the call sites in the render loop below) so
+// each capture sees exactly the pixels it's supposed to: right after the video renders (raw, no
+// overlay yet) or right after every widget/text has (telemetry overlay baked in).
+static void save_frame_as_png(const std::string& path) {
+    if (path.empty())
+        return;
+    std::vector<uint8_t> buf((size_t)SCR_WIDTH * SCR_HEIGHT * 3);
+    glReadPixels(0, UI_HEIGHT, SCR_WIDTH, SCR_HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, buf.data());
+    // glReadPixels' first row is the bottom of the image; PNG (and stb_image_write) expect the
+    // first row to be the top, so flip on the way out rather than changing how we read.
+    stbi_flip_vertically_on_write(1);
+    stbi_write_png(path.c_str(), SCR_WIDTH, SCR_HEIGHT, 3, buf.data(), SCR_WIDTH * 3);
 }
 
 int main()
@@ -88,7 +105,6 @@ int main()
     }
     glfwMakeContextCurrent(window);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
-    //glfwSetKeyCallback(window, &InteractionMgr::key_callback);
 
     // glad: load all OpenGL function pointers
     // ---------------------------------------
@@ -134,25 +150,37 @@ int main()
     polygonalized_widgets.push_back(&map_widget);
     polygonalized_widgets.push_back(&graph_widget);
 
+    // Every widget drawn over the video, generically -- used by the click-to-pause check below
+    // so a click on any of them (map, date/time, climb rate, either scrubber) doesn't also toggle
+    // pause. The distance-flown text is intentionally NOT in here: it isn't a tracked widget, so
+    // a click there falls through and does pause/unpause the video.
+    std::vector<WidgetBase*> all_widgets;
+    all_widgets.push_back(&date_time_widget);
+    all_widgets.push_back(&media_scrub_widget);
+    all_widgets.push_back(&telemetry_scrub_widget);
+    all_widgets.push_back(&map_widget);
+    all_widgets.push_back(&climb_widget);
+    all_widgets.push_back(&graph_widget);
+
     TelemetryMgr telemetry_mgr(project_file_mgr.get_telemetry_file_path(), &polygonalized_widgets, project_file_mgr.get_telemetry_offset(), project_file_mgr.get_window_start_elapsed());
 
     InteractionMgr* interaction_mgr = InteractionMgr::instance();
-    interaction_mgr->watch_key(GLFW_KEY_ESCAPE);
-    interaction_mgr->watch_key(GLFW_KEY_SPACE);
-    interaction_mgr->watch_key(GLFW_KEY_LEFT);
-    interaction_mgr->watch_key(GLFW_KEY_RIGHT);
-    interaction_mgr->watch_key(GLFW_KEY_UP);
-    interaction_mgr->watch_key(GLFW_KEY_DOWN);
-    interaction_mgr->watch_key(GLFW_KEY_L);
-    interaction_mgr->watch_key(GLFW_KEY_S);
-    interaction_mgr->watch_key(GLFW_KEY_R);
-    interaction_mgr->watch_key(GLFW_KEY_F);
+    // Pause toggle stays owned here for now rather than by a specific subsystem -- see the
+    // discussion in the project history for why (nothing else is an obvious owner yet).
+    interaction_mgr->bind_key(GLFW_KEY_SPACE,
+        []() { paused = !paused; },
+        nullptr,
+        nullptr);
 
     float frame_time = ffsw::elapsed();
     float prev_frame_time = frame_time;
     float duration_avg = -1.0;
-    bool confirming_launch = false;
     bool show_about_popup = false;
+    // Set by the two "Save ... Frame" menu items below; consumed (and cleared) at the exact
+    // point in this same frame's render sequence that produces the right pixels -- see the two
+    // save_frame_as_png() call sites further down.
+    std::string pending_raw_screenshot_path;
+    std::string pending_overlay_screenshot_path;
     // render loop
     // -----------
     while (!glfwWindowShouldClose(window))
@@ -175,6 +203,17 @@ int main()
                     project_file_mgr.save_project();
                 }
                 ImGui::Separator();
+                if (ImGui::MenuItem("Save Raw Video Frame...")) {
+                    pending_raw_screenshot_path = ffsw::file_dialog(L"png", L"Save Raw Video Frame As (*.png)", false);
+                }
+                if (ImGui::MenuItem("Save Frame with Telemetry Overlay...")) {
+                    pending_overlay_screenshot_path = ffsw::file_dialog(L"png", L"Save Frame with Telemetry Overlay As (*.png)", false);
+                }
+                ImGui::Separator();
+                // Not wired up yet -- placeholder until the overlays are where we want them. See
+                // MediaContainerMgr::init_video_output()/output_video_frame().
+                ImGui::MenuItem("Start Recording (coming soon)", nullptr, false, false);
+                ImGui::Separator();
                 if (ImGui::MenuItem("Exit")) {
                     media_container_mgr.finalize_output();
                     glfwSetWindowShouldClose(window, true);
@@ -182,7 +221,9 @@ int main()
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Edit")) {
-                ImGui::MenuItem("(nothing here yet)", nullptr, false, false);
+                if (ImGui::MenuItem("Mark Launch Point")) {
+                    env_config.launch_time(env_config.media_in_elapsed());
+                }
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("View")) {
@@ -213,70 +254,31 @@ int main()
             ImGui::EndPopup();
         }
 
-        if (interaction_mgr->key_down(GLFW_KEY_ESCAPE)) {
-            glfwSetWindowShouldClose(window, true);
-            media_container_mgr.finalize_output();
-            break;
-        }
-        if (interaction_mgr->key_down(GLFW_KEY_SPACE))
-            paused = !paused;
-        if (interaction_mgr->key_down(GLFW_KEY_RIGHT) || interaction_mgr->key_held(GLFW_KEY_RIGHT) >= 0.25) {
-            media_container_mgr.rotation_angle(media_container_mgr.rotation_angle() - 3.141592653f / 180.0f);
-        }
-        if (interaction_mgr->key_down(GLFW_KEY_UP) || interaction_mgr->key_held(GLFW_KEY_UP) >= 0.25)
-            env_config.telemetry_offset(env_config.telemetry_offset() - (paused ? 0.1f : 10.0f));
-        if (interaction_mgr->key_down(GLFW_KEY_LEFT) || interaction_mgr->key_held(GLFW_KEY_LEFT) >= 0.25) {
-            media_container_mgr.rotation_angle(media_container_mgr.rotation_angle() + 3.141592653f / 180.0f);
-        }
-        if (interaction_mgr->key_down(GLFW_KEY_DOWN) || interaction_mgr->key_held(GLFW_KEY_DOWN) >= 0.25)
-            env_config.telemetry_offset(env_config.telemetry_offset() + (paused ? 0.1f : 10.0f));
-        if (interaction_mgr->key_down(GLFW_KEY_F)) {
-            media_container_mgr.rotation_angle(media_container_mgr.rotation_angle() + 3.141592653f);
-        }
-        if (interaction_mgr->key_down(GLFW_KEY_L)) {
-            if (confirming_launch) {
-                confirming_launch = false;
-                env_config.launch_time(env_config.media_in_elapsed());
-            } else {
-                paused = true;
-                confirming_launch = true;
+        // Any click on the video itself that doesn't land on one of the widgets drawn over top of
+        // it toggles pause (see all_widgets above for which widgets count, and why the
+        // distance-flown text deliberately doesn't). ImGui already claims the click instead of us
+        // whenever it wants the mouse (e.g. the menu bar), via InteractionMgr::tick().
+        if (interaction_mgr->mouse_button_down()) {
+            float mouse_x = interaction_mgr->mouse_x_pos();
+            float mouse_y = interaction_mgr->mouse_y_pos();
+            bool in_video_rect = mouse_x >= -1.0f && mouse_x <= 1.0f && mouse_y >= bottom && mouse_y <= 1.0f;
+            if (in_video_rect) {
+                bool on_a_widget = false;
+                for (WidgetBase* widget : all_widgets) {
+                    if (widget->contains(mouse_x, mouse_y)) {
+                        on_a_widget = true;
+                        break;
+                    }
+                }
+                if (!on_a_widget) {
+                    paused = !paused;
+                }
             }
-        }
-        if (interaction_mgr->key_down(GLFW_KEY_S)) {
-            uint8_t* buf = new uint8_t[SCR_WIDTH * SCR_HEIGHT * 3];
-            //std::memset(buf, 0, SCR_WIDTH * SCR_HEIGHT * 3);
-            glReadPixels(0, UI_HEIGHT, SCR_WIDTH, SCR_HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, (void*)buf);
-            FILE* ppm_out = fopen("debug.ppm", "wb");
-            fprintf(ppm_out, "P6 %d %d 255\n", SCR_WIDTH, SCR_HEIGHT);
-            fwrite(buf, 1, SCR_WIDTH * SCR_HEIGHT * 3, ppm_out);
-            fclose(ppm_out);
-            delete[] buf;
-        }
-        if (interaction_mgr->key_down(GLFW_KEY_R)) {
-            const std::string& video_file_name = 
-                   project_file_mgr.get_project_file_path() + ".mp4"; //TODO(P2): trim off the proj's extension.
-            media_container_mgr.init_video_output(video_file_name, SCR_WIDTH, SCR_HEIGHT);
-        }
-        if (fwd) {
-            media_container_mgr.advance_by(paused ? 1 : 100); 
-            fwd = false;
-        }
-        if (rev) {
-            media_container_mgr.rewind_by(paused ? 1 : 100);
-            rev = false;
         }
 
         // Let the font manager know that it's time to clear out expired strings:
         font_manager.update_time(media_container_mgr.get_presentation_timestamp());
 
-        if (confirming_launch) {
-            glm::vec3 yellow(1.0, 1.0, 0.2);
-            font_manager.add_string(
-                StringAndProperties(
-                    ffsw::format("Press L again to confirm launch @ this frame"),
-                    0, glm::vec2(0.0, 0.0), yellow, 0.5, 2.0,
-                    StringAndProperties::V_ALIGN::V_CENTER, StringAndProperties::H_ALIGN::H_CENTER));
-        }
         float x = interaction_mgr->mouse_x_pos();
         float y = interaction_mgr->mouse_y_pos();
         /*
@@ -289,7 +291,7 @@ int main()
         font_manager.add_string(
             StringAndProperties(
                 ffsw::format("%6.2fkm", env_config.telemetry_distance_flown()),
-                0, glm::vec2(-.98, .98), glm::vec3(1.0, 1.0, 1.0), 1.0, 2.0,
+                0, glm::vec2(-.99, .99), glm::vec3(1.0, 1.0, 1.0), 1.0, 2.0,
                 StringAndProperties::V_ALIGN::V_TOP, StringAndProperties::H_ALIGN::H_LEFT));
 
         frame_time = ffsw::elapsed();
@@ -321,6 +323,8 @@ int main()
         glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT);
 
         media_container_mgr.render();
+        save_frame_as_png(pending_raw_screenshot_path);
+        pending_raw_screenshot_path.clear();
         date_time_widget.render();
         media_scrub_widget.render();
         telemetry_scrub_widget.render();
@@ -328,6 +332,8 @@ int main()
         climb_widget.render();
         graph_widget.render();
         font_manager.render();
+        save_frame_as_png(pending_overlay_screenshot_path);
+        pending_overlay_screenshot_path.clear();
 
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());

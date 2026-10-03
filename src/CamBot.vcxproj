@@ -167,6 +167,7 @@
     <ClCompile Include="project_file_manager.cpp" />
     <ClCompile Include="Source.cpp" />
     <ClCompile Include="stb_image.cpp" />
+    <ClCompile Include="stb_image_write.cpp" />
     <ClCompile Include="telemetry.cpp" />
     <ClCompile Include="util.cpp" />
     <ClCompile Include="widget.cpp" />
@@ -220,6 +221,7 @@
     <ClInclude Include="media_container_manager.h" />
     <ClInclude Include="project_file_manager.h" />
     <ClInclude Include="stb_image.h" />
+    <ClInclude Include="stb_image_write.h" />
     <ClInclude Include="telemetry.h" />
     <ClInclude Include="util.h" />
     <ClInclude Include="widget.h" />

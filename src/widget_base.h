@@ -28,6 +28,14 @@ public:
 	virtual void change_geometry(float width, float height, float x_pos, float y_pos);
 	virtual void polygonalize(TelemetrySlice& slice, uint32_t index, uint32_t num_slices) {};
 
+	// True if (x, y), in the same NDC space the widget was positioned in, falls inside this
+	// widget's own rect (see change_geometry() -- the rect spans [m_x_pos, m_x_pos+m_width] x
+	// [m_y_pos, m_y_pos+m_height]). Used generically by anything that needs to know whether a
+	// click landed on a widget rather than, say, the video behind it.
+	bool contains(float x, float y) const {
+		return x >= m_x_pos && x <= m_x_pos + m_width && y >= m_y_pos && y <= m_y_pos + m_height;
+	}
+
 protected:
 	unsigned int m_VBO;
 	unsigned int m_VAO;

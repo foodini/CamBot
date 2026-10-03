@@ -29,8 +29,6 @@ InteractionMgr::~InteractionMgr() {
 	InteractionMgr::c_instance = nullptr;
 }
 
-// TODO(P0): Rewrite to run on the callback. Each callback will tell store what's been pressed or
-//           released each frame. Upon tick, use that info to update down/up/held.
 void InteractionMgr::tick(GLFWwindow* window) {
 	static int count = -1;
 	count++;
@@ -86,6 +84,21 @@ void InteractionMgr::tick(GLFWwindow* window) {
 
 	int right_mouse_button = imgui_wants_mouse ? GLFW_RELEASE : glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT);
 	update_mouse_button_state(right_mouse_button == GLFW_PRESS, m_mouse_right_button_down, m_mouse_right_button_up, m_mouse_right_button_held);
+
+	// Dispatch to whatever bound each key, now that this frame's down/up/held state is final.
+	for (auto& entry : m_key_bindings) {
+		int key = entry.first;
+		KeyBinding& binding = entry.second;
+		if (binding.on_down && key_down(key))
+			binding.on_down();
+		if (binding.on_up && key_up(key))
+			binding.on_up();
+		if (binding.on_held) {
+			float held_seconds = key_held(key);
+			if (held_seconds >= 0.0f)
+				binding.on_held(held_seconds);
+		}
+	}
 }
 
 void InteractionMgr::update_mouse_button_state(bool pressed, bool& down, bool& up, float& held) {
@@ -123,18 +136,14 @@ float InteractionMgr::key_held(int key) {
 	}
 }
 
-void InteractionMgr::key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
-{
-	/*
-	bool paused = true, rev=true, fwd=true;
-
-	if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-		glfwSetWindowShouldClose(window, true);
-	if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
-		paused = !paused;
-	if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
-		rev = true;
-	if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
-		fwd = true;
-	*/
+void InteractionMgr::bind_key(int key, std::function<void()> on_down, std::function<void()> on_up,
+                               std::function<void(float)> on_held) {
+	assert(m_key_bindings.find(key) == m_key_bindings.end() &&
+	       "InteractionMgr::bind_key: key already claimed by another binding -- each key belongs to exactly one subsystem.");
+	watch_key(key);
+	KeyBinding binding;
+	binding.on_down = on_down;
+	binding.on_up = on_up;
+	binding.on_held = on_held;
+	m_key_bindings[key] = binding;
 }

@@ -7,6 +7,7 @@
 
 #include "shader_s.h"
 
+#include "interaction_manager.h"
 #include "media_container_manager.h"
 
 //TODO(P1): height and width are floats some places and uint32_ts elsewhere.
@@ -122,6 +123,30 @@ MediaContainerMgr::MediaContainerMgr(const std::string& infile, const std::strin
     }
 
     init_rendering(extents);
+
+    // Rotation nudge (held-repeat) and flip are this subsystem's own state (m_rotation_angle),
+    // so they're bound here rather than in main() -- see InteractionMgr::bind_key()'s doc
+    // comment. The on_down handles the initial tap; on_held re-fires every frame once held past
+    // the 0.25s repeat threshold, matching the held-repeat feel the old if(key_down() ||
+    // key_held() >= 0.25) chain had.
+    InteractionMgr::instance()->bind_key(GLFW_KEY_RIGHT,
+        [this]() { m_rotation_angle -= 3.141592653f / 720.0f; },
+        nullptr,
+        [this](float held_seconds) {
+            if (held_seconds >= 0.25f)
+                m_rotation_angle -= 3.141592653f / 720.0f;
+        });
+    InteractionMgr::instance()->bind_key(GLFW_KEY_LEFT,
+        [this]() { m_rotation_angle += 3.141592653f / 720.0f; },
+        nullptr,
+        [this](float held_seconds) {
+            if (held_seconds >= 0.25f)
+                m_rotation_angle += 3.141592653f / 720.0f;
+        });
+    InteractionMgr::instance()->bind_key(GLFW_KEY_F,
+        [this]() { m_rotation_angle += 3.141592653f; },
+        nullptr,
+        nullptr);
 }
 
 MediaContainerMgr::~MediaContainerMgr() {
