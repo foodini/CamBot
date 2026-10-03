@@ -65,6 +65,10 @@ float EnvConfig::telemetry_elapsed() const {
 
 bool EnvConfig::launch_time(float launch_time) { 
 	m_launch_time = launch_time; 
+	// Snapshot telemetry's elapsed time at this launch marker, using whatever offset is in
+	// effect right now -- see TelemetryMgr::window_start_elapsed()'s doc comment for why this
+	// is a one-time snapshot rather than a live formula.
+	TelemetryMgr::instance->set_window_start_elapsed(TelemetryMgr::instance->elapsed_at(launch_time));
 	save_project();
 	return true;
 }
@@ -77,9 +81,41 @@ const TelemetrySlice& EnvConfig::telemetry_slice() const {
 	return TelemetryMgr::instance->slice_at(media_in_elapsed());
 }
 
+float EnvConfig::telemetry_window_start_elapsed() const {
+	return TelemetryMgr::instance->window_start_elapsed();
+}
+
+int32_t EnvConfig::telemetry_window_start_index() const {
+	int32_t index = TelemetryMgr::instance->index_for_elapsed(TelemetryMgr::instance->window_start_elapsed());
+	int32_t last_valid = (int32_t)TelemetryMgr::instance->size() - 1;
+	if (index < 0) {
+		return 0;
+	} else if (index > last_valid) {
+		return last_valid;
+	}
+	return index;
+}
+
+int32_t EnvConfig::telemetry_window_end_index() const {
+	int32_t index = TelemetryMgr::instance->index_for_elapsed(TelemetryMgr::instance->window_start_elapsed() + media_in_duration());
+	int32_t last_valid = (int32_t)TelemetryMgr::instance->size() - 1;
+	if (index < 0) {
+		return 0;
+	} else if (index > last_valid) {
+		return last_valid;
+	}
+	return index;
+}
+
+float EnvConfig::telemetry_distance_flown() const {
+	const TelemetrySlice& window_start_slice = (*TelemetryMgr::instance)[telemetry_window_start_index()];
+	return telemetry_slice().m_total_distance - window_start_slice.m_total_distance;
+}
+
 void EnvConfig::save_project() {
 	project_file_mgr->set_launch_time(m_launch_time);
 	project_file_mgr->set_telemetry_offset(TelemetryMgr::instance->offset());
+	project_file_mgr->set_window_start_elapsed(TelemetryMgr::instance->window_start_elapsed());
 	project_file_mgr->save_project();
 }
 

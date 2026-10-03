@@ -243,11 +243,16 @@ float TelemetryScrubWidget::native_rate() const {
 	return TELEMETRY_FREQUENCY;
 }
 
-void TelemetryScrubWidget::seek_to_parametric(float parametric) {
+float TelemetryScrubWidget::offset_for_parametric_at(float parametric, float reference_media_elapsed) {
 	// There's no decode cost for telemetry -- adjusting the offset is just a float assignment --
 	// so, unlike MediaScrubWidget, this is an exact solve rather than a fast/approximate snap.
 	float desired_elapsed = parametric * TelemetryMgr::instance->duration();
-	EnvConfig::instance->telemetry_offset(EnvConfig::instance->media_in_elapsed() - desired_elapsed);
+	return reference_media_elapsed - desired_elapsed;
+}
+
+void TelemetryScrubWidget::seek_to_parametric(float parametric) {
+	EnvConfig::instance->telemetry_offset(
+		offset_for_parametric_at(parametric, EnvConfig::instance->media_in_elapsed()));
 }
 
 void TelemetryScrubWidget::step(int64_t delta) {
@@ -259,14 +264,56 @@ void TelemetryScrubWidget::step_fast(int64_t delta) {
 	step(delta);
 }
 
+// Clamped [0,1] position of a cutoff marker, read from EnvConfig's launch-marker-derived
+// telemetry_window_start_elapsed() -- not interactive, drawn purely for feedback (see the
+// doc comment on the declaration in widget.h). *in_bounds reports whether the true,
+// unclamped position actually fell inside [0,1] -- false means we've run out of recorded
+// telemetry on that side.
+float TelemetryScrubWidget::cutoff_parametric(bool is_left, bool* in_bounds) const {
+	const EnvConfig* env_config = EnvConfig::instance;
+	float window_start = env_config->telemetry_window_start_elapsed();
+	float target_elapsed = is_left ? window_start : window_start + env_config->media_in_duration();
+	float raw = target_elapsed / TelemetryMgr::instance->duration();
+	*in_bounds = (raw >= 0.0f) && (raw <= 1.0f);
+	if (raw < 0.0f) {
+		raw = 0.0f;
+	} else if (raw > 1.0f) {
+		raw = 1.0f;
+	}
+	return raw;
+}
+
+// Purely cosmetic now -- sizes render()'s soft halo around each cutoff marker. The markers
+// aren't clickable, so this is no longer also a hit-test radius.
+static const float CUTOFF_HALO_RADIUS_PX = 7.0f;
+
 void TelemetryScrubWidget::render() {
 	const EnvConfig* env_config = EnvConfig::instance;
 
 	WidgetBase::render_mask();
 
+	bool left_in_bounds, right_in_bounds;
+	float left_parametric = cutoff_parametric(true, &left_in_bounds);
+	float right_parametric = cutoff_parametric(false, &right_in_bounds);
+
+	// White when the cutoff sits inside the actual recorded telemetry, mid-grey when it's been
+	// clamped to the edge of the bar because we ran out of telemetry on that side. Red/green are
+	// deliberately avoided here.
+	float left_shade = left_in_bounds ? 1.0f : 0.5f;
+	float right_shade = right_in_bounds ? 1.0f : 0.5f;
+
+	float marker_halfwidth = 1.0f * 2.0f / (m_width * env_config->screen_width());
+	float halo_halfwidth = CUTOFF_HALO_RADIUS_PX * 2.0f / (m_width * env_config->screen_width());
+
 	// Uniform settings must happen after a use() call
 	m_shader.use();
 	m_shader.setFloat("time_parametric", current_parametric());
+	m_shader.setFloat("cutoff_left", left_parametric);
+	m_shader.setFloat("cutoff_right", right_parametric);
+	m_shader.setFloat3("cutoff_left_color", left_shade, left_shade, left_shade);
+	m_shader.setFloat3("cutoff_right_color", right_shade, right_shade, right_shade);
+	m_shader.setFloat("marker_halfwidth", marker_halfwidth);
+	m_shader.setFloat("halo_halfwidth", halo_halfwidth);
 	WidgetBase::render(m_shader);
 }
 
@@ -387,7 +434,43 @@ void MapWidget::render_course() {
 	m_course_lines.render(set_map_widget_vertex_attrib_pointers);
 }
 
+// Rebuilds m_course_lines (and recenters the local lat/lon projection on the window's own
+// start) straight from TelemetryMgr, scoped to [start_index, end_index] -- i.e. exactly what
+// polygonalize() already does per-sample, just driven directly instead of through the
+// incremental parse callback. polygonalize() itself is untouched, so the map still
+// progressively fills in while the file is still parsing; this takes over as soon as parsing
+// completes, and again every time the window changes (the TSW's offset or cutoffs move).
+void MapWidget::rebuild_course_for_window(int32_t start_index, int32_t end_index) {
+	TelemetryMgr& telemetry_mgr = *TelemetryMgr::instance;
+
+	const TelemetrySlice& window_start_slice = telemetry_mgr[start_index];
+	m_center_lat = window_start_slice.m_gps_lat;
+	m_center_lon = window_start_slice.m_gps_lon;
+
+	m_course_lines.clear();
+	for (int32_t i = start_index; i <= end_index; i++) {
+		const TelemetrySlice& slice = telemetry_mgr[i];
+		glm::vec2 xy = latlon_to_coords(slice.m_gps_lat, slice.m_gps_lon);
+
+		std::vector<float> supp;
+		supp.push_back(slice.m_climb_rate[1]);
+
+		m_course_lines.add_segment(xy, supp);
+	}
+}
+
 void MapWidget::render() {
+	if (TelemetryMgr::instance->parsing_done()) {
+		const EnvConfig* env_config = EnvConfig::instance;
+		int32_t start_index = env_config->telemetry_window_start_index();
+		int32_t end_index = env_config->telemetry_window_end_index();
+		if (start_index != m_window_start_index || end_index != m_window_end_index) {
+			rebuild_course_for_window(start_index, end_index);
+			m_window_start_index = start_index;
+			m_window_end_index = end_index;
+		}
+	}
+
 	WidgetBase::render_mask();
 	
 	set_uniforms();
@@ -590,7 +673,75 @@ void GraphWidget::render_pilot_position() {
 	glBindVertexArray(0);
 }
 
+// Rebuilds m_alt_body_vect/m_alt_outline_lines (and m_alt_min/m_alt_max) straight from
+// TelemetryMgr, scoped to [start_index, end_index] -- the same stride/min-max logic
+// polygonalize() already runs per-sample, just driven directly instead of through the
+// incremental parse callback, and with the stride sized to the window's own sample count
+// rather than the whole file's (otherwise, whenever telemetry runs much longer than the
+// video, the graph would come out far chunkier than it needs to be). x-coordinates are kept
+// as real telemetry indices (not reset to 0) so render_pilot_position()'s absolute
+// telemetry_index() still projects correctly through the resulting m_graph_to_screen_projection.
+// polygonalize() itself is untouched, so the graph still progressively fills in while the file
+// is still parsing; this takes over as soon as parsing completes, and again every time the
+// window changes (the TSW's offset or cutoffs move).
+void GraphWidget::rebuild_windowed_data(int32_t start_index, int32_t end_index) {
+	const EnvConfig* env_config = EnvConfig::instance;
+	TelemetryMgr& telemetry_mgr = *TelemetryMgr::instance;
+
+	m_alt_body_vect.clear();
+	m_alt_outline_lines.clear();
+
+	const TelemetrySlice& first_slice = telemetry_mgr[start_index];
+	m_alt_max = first_slice.m_alt[1];
+	m_alt_min = first_slice.m_alt[1];
+
+	float stride = (float)(end_index - start_index + 1) / (env_config->screen_width() * m_width * 2.0f);
+	m_next_index = (float)start_index;
+
+	for (int32_t index = start_index; index <= end_index; index++) {
+		const TelemetrySlice& slice = telemetry_mgr[index];
+		if ((float)index < m_next_index) {
+			continue;
+		}
+
+		if (slice.m_alt[1] < m_alt_min || slice.m_alt[1] > m_alt_max) {
+			m_alt_max = glm::max(m_alt_max, slice.m_alt[1]);
+			m_alt_min = glm::min(m_alt_min, slice.m_alt[1]);
+			m_below_min_alt = m_alt_min - 0.05f * (m_alt_max - m_alt_min);
+			for (int i = 3; i < m_alt_body_vect.size(); i += 4) {
+				m_alt_body_vect[i] = m_below_min_alt;
+			}
+		}
+
+		m_alt_body_vect.push_back(m_next_index);
+		m_alt_body_vect.push_back(slice.m_alt[1]);
+		m_alt_body_vect.push_back(m_next_index);
+		m_alt_body_vect.push_back(m_below_min_alt);
+
+		glm::vec2 xy(m_next_index, slice.m_alt[1]);
+		std::vector<float> sup;
+		m_alt_outline_lines.add_segment(xy, sup);
+
+		m_next_index += stride;
+	}
+
+	if (m_alt_body_vect.size() > 0) {
+		update_graph_to_screen_projection();
+	}
+}
+
 void GraphWidget::render() {
+	if (TelemetryMgr::instance->parsing_done()) {
+		const EnvConfig* env_config = EnvConfig::instance;
+		int32_t start_index = env_config->telemetry_window_start_index();
+		int32_t end_index = env_config->telemetry_window_end_index();
+		if (start_index != m_window_start_index || end_index != m_window_end_index) {
+			rebuild_windowed_data(start_index, end_index);
+			m_window_start_index = start_index;
+			m_window_end_index = end_index;
+		}
+	}
+
 	WidgetBase::render_mask();
 
 	//m_shader.use(); 

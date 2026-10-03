@@ -56,6 +56,23 @@ public:
 	// TelemetryMgr::duration()/elapsed_at(). Used by TelemetryScrubWidget.
 	float                   telemetry_duration()      const;
 	float                   telemetry_elapsed()       const;
+	// Telemetry's own elapsed time at the launch marker, snapshotted once, whenever the launch
+	// marker is (re)placed by launch_time() above -- not a live function of the current sync
+	// offset, so an ordinary TSW drag afterward can't move it. This is the start of the window
+	// the map, the altitude graph, and distance-flown restrict themselves to, and what
+	// TelemetryScrubWidget's left cutoff marker displays.
+	float                   telemetry_window_start_elapsed() const;
+	// The telemetry index range backing that launch-anchored, video-duration-wide window --
+	// clamped to the telemetry file's actual recorded bounds. Used by the map, the altitude
+	// graph, and telemetry_distance_flown() below so none of them pull in telemetry recorded
+	// outside that window (TelemetryMgr itself stays video/launch-agnostic, so this combination
+	// lives here rather than there).
+	int32_t                 telemetry_window_start_index() const;
+	int32_t                 telemetry_window_end_index()   const;
+	// Distance flown (km), from the start of that window to the current playhead -- replaces a
+	// plain telemetry_slice().m_total_distance read, which was cumulative since telemetry
+	// recording began rather than since the video's own start.
+	float                   telemetry_distance_flown() const;
 	float                   media_in_elapsed()       const; // Wall time passed since start of video.
 	float                   media_in_duration()      const; // Wall time length of video.
 	float                   media_out_elapsed()      const;

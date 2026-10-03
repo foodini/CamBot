@@ -5,7 +5,8 @@ ProjectFileManager::ProjectFileManager() :
 	m_video_file_path(""),
 	m_telemetry_file_path(""),
 	m_launch_time(0.0),
-	m_telemetry_offset(0.0)
+	m_telemetry_offset(0.0),
+	m_window_start_elapsed(0.0)
 {
 	get_project();
 }
@@ -38,6 +39,7 @@ void ProjectFileManager::get_project() {
 
 		m_launch_time = 0.0f;
 		m_telemetry_offset = 0.0f;
+		m_window_start_elapsed = 0.0f;
 		save_project();
 	} else {
 		char line[1024];
@@ -56,6 +58,9 @@ void ProjectFileManager::get_project() {
 			else if (strncmp(line, "d_lau", 3) == 0) {
 				m_launch_time = (float)atof(line + 6);
 			}
+			else if (strncmp(line, "d_win", 3) == 0) {
+				m_window_start_elapsed = (float)atof(line + 6);
+			}
 		}
 		fclose(project_fd);
 	}
@@ -72,6 +77,7 @@ void ProjectFileManager::save_project() {
 	fprintf(project_fd, "telem:%s\n", m_telemetry_file_path.c_str());
 	fprintf(project_fd, "d_tel:%f\n", m_telemetry_offset);
 	fprintf(project_fd, "d_lau:%f\n", m_launch_time);
+	fprintf(project_fd, "d_win:%f\n", m_window_start_elapsed);
 
 	fclose(project_fd);
 }

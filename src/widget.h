@@ -97,7 +97,21 @@ protected:
 	void  seek_to_parametric(float parametric) override;
 	void  step(int64_t delta) override;
 	void  step_fast(int64_t delta) override;
+
 private:
+	// Clamped [0,1] position of a cutoff marker, read from EnvConfig's launch-marker-derived
+	// telemetry_window_start_elapsed() (is_left selects which one: the left cutoff is that
+	// value itself, the right is that value plus media_in_duration()). Not interactive -- the
+	// markers are drawn purely for feedback; there's no drag path that reaches this. *in_bounds
+	// is set to false when the true, unclamped position fell outside [0,1] -- i.e. we've run
+	// out of recorded telemetry on that side -- so the caller can draw the clamped marker but
+	// still know to render it grey instead of white.
+	float cutoff_parametric(bool is_left, bool* in_bounds) const;
+
+	// What offset makes telemetry's elapsed time equal parametric*duration() at the given
+	// reference point on the video's own clock. Used by seek_to_parametric() for an ordinary
+	// drag.
+	static float offset_for_parametric_at(float parametric, float reference_media_elapsed);
 };
 
 class MapWidget : public WidgetBase {
@@ -120,6 +134,14 @@ private:
 	glm::vec2             latlon_to_coords(float lat, float lon);
 	float                 m_center_lat;
 	float                 m_center_lon;
+
+	// The telemetry index range last used to build m_course_lines (see EnvConfig::
+	// telemetry_window_start_index()/_end_index()) -- -1 forces an initial build. Rebuilt
+	// from TelemetryMgr directly (not through polygonalize()) whenever this changes, i.e.
+	// whenever the TSW's offset or cutoffs move.
+	int32_t               m_window_start_index = -1;
+	int32_t               m_window_end_index = -1;
+	void                  rebuild_course_for_window(int32_t start_index, int32_t end_index);
 
 	Shader                m_shader_course;
 	Shader                m_shader_arrow;
@@ -167,6 +189,16 @@ private:
 
 	void               update_graph_to_screen_projection();
 	glm::mat4          m_graph_to_screen_projection;
+
+	// The telemetry index range last used to build m_alt_body_vect/m_alt_outline_lines (see
+	// EnvConfig::telemetry_window_start_index()/_end_index()) -- -1 forces an initial build.
+	// polygonalize() itself is untouched (so the graph still progressively fills in while the
+	// file is still parsing); once parsing is done, this rebuild -- driven straight off
+	// TelemetryMgr with a stride sized to just the window, not the whole file -- takes over
+	// and re-runs whenever the TSW's offset or cutoffs move.
+	int32_t            m_window_start_index = -1;
+	int32_t            m_window_end_index = -1;
+	void               rebuild_windowed_data(int32_t start_index, int32_t end_index);
 };
 
 class ClimbWidget : public WidgetBase {

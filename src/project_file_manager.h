@@ -16,16 +16,19 @@ public:
 	const std::string& get_project_file_path() { return m_project_file_path; }
 	float get_launch_time() { return m_launch_time; }
 	float get_telemetry_offset() { return m_telemetry_offset; }
+	float get_window_start_elapsed() { return m_window_start_elapsed; }
 
 	// Setters;
 	void set_launch_time(float t) { m_launch_time = t; }
 	void set_telemetry_offset(float offset) { m_telemetry_offset = offset; }
+	void set_window_start_elapsed(float t) { m_window_start_elapsed = t; }
 
 private:
 	std::string  m_project_file_path;
 
 	std::string  m_video_file_path;
 	std::string  m_telemetry_file_path;
-	float        m_launch_time;      // Represents the contents of the file, not necessarily current config.
-	float        m_telemetry_offset; // Represents the contents of the file, not necessarily current config.
+	float        m_launch_time;           // Represents the contents of the file, not necessarily current config.
+	float        m_telemetry_offset;      // Represents the contents of the file, not necessarily current config.
+	float        m_window_start_elapsed;  // Represents the contents of the file, not necessarily current config.
 };

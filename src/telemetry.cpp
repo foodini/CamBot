@@ -122,9 +122,10 @@ float TelemetrySlice::course_rad() const {
 
 TelemetryMgr* TelemetryMgr::instance = nullptr;
 
-TelemetryMgr::TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* widgets, float initial_offset) :
+TelemetryMgr::TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* widgets, float initial_offset, float initial_window_start_elapsed) :
 	m_parse_done(false),
-	m_telemetry_offset(initial_offset)
+	m_telemetry_offset(initial_offset),
+	m_window_start_elapsed(initial_window_start_elapsed)
 {
 	if (TelemetryMgr::instance != nullptr) {
 		throw "Cannot create second TelemetryMgr";

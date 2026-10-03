@@ -64,7 +64,7 @@ public:
 //TODO(P1): TelemetryMgr[x] should return the x-th TelemetrySlice - or a default one.
 class TelemetryMgr {
 public:
-	TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* widgets, float initial_offset);
+	TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* widgets, float initial_offset, float initial_window_start_elapsed);
 	~TelemetryMgr();
 
 	//Using a * to widgets instead of & since threads don't seem to like refs.
@@ -85,8 +85,20 @@ public:
 	float offset() const                  { return m_telemetry_offset; }
 	bool  set_offset(float offset)        { m_telemetry_offset = offset; return true; }
 
+	// Telemetry's own elapsed seconds marking where the usable window of telemetry begins --
+	// set once, whenever the launch marker is (re)placed (see EnvConfig::launch_time()), and
+	// otherwise held fixed, so it never drifts just because the TSW's sync offset gets
+	// tweaked afterward.
+	float window_start_elapsed() const           { return m_window_start_elapsed; }
+	bool  set_window_start_elapsed(float elapsed) { m_window_start_elapsed = elapsed; return true; }
+
 	// Telemetry's own recorded length, in seconds -- independent of the video entirely.
 	float duration() const                { return (float)size() / (float)TELEMETRY_FREQUENCY; }
+
+	// Sample index for a plain telemetry-elapsed-seconds value -- no offset involved (contrast
+	// with index_at(), which subtracts offset first). Used to turn window_start_elapsed() (and
+	// window_start_elapsed() + video duration) into sample indices.
+	int32_t index_for_elapsed(float telemetry_elapsed) const { return (int32_t)(telemetry_elapsed * TELEMETRY_FREQUENCY); }
 
 	// Everything below combines telemetry's clock with the caller's notion of "now" on the video's
 	// clock (media_elapsed), rather than reaching for a MediaContainerMgr directly, so this class
@@ -100,7 +112,7 @@ public:
 	const TelemetrySlice& slice_at(float media_elapsed) const { return (*this)[index_at(media_elapsed)]; }
 
 	void tick();
-	bool parsing_done() { m_parse_done && !m_thread_running; }
+	bool parsing_done() { return m_parse_done && !m_thread_running; }
 	static TelemetryMgr* instance;
 
 private:
@@ -110,4 +122,5 @@ private:
 	std::atomic<bool>           m_thread_running;
 	TelemetrySlice              m_default_slice;
 	float                        m_telemetry_offset;
+	float                        m_window_start_elapsed;
 };

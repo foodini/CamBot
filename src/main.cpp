@@ -134,7 +134,7 @@ int main()
     polygonalized_widgets.push_back(&map_widget);
     polygonalized_widgets.push_back(&graph_widget);
 
-    TelemetryMgr telemetry_mgr(project_file_mgr.get_telemetry_file_path(), &polygonalized_widgets, project_file_mgr.get_telemetry_offset());
+    TelemetryMgr telemetry_mgr(project_file_mgr.get_telemetry_file_path(), &polygonalized_widgets, project_file_mgr.get_telemetry_offset(), project_file_mgr.get_window_start_elapsed());
 
     InteractionMgr* interaction_mgr = InteractionMgr::instance();
     interaction_mgr->watch_key(GLFW_KEY_ESCAPE);
@@ -220,12 +220,14 @@ int main()
         }
         if (interaction_mgr->key_down(GLFW_KEY_SPACE))
             paused = !paused;
-        if (interaction_mgr->key_down(GLFW_KEY_RIGHT) || interaction_mgr->key_held(GLFW_KEY_RIGHT) >= 0.25)
-            fwd = true;
+        if (interaction_mgr->key_down(GLFW_KEY_RIGHT) || interaction_mgr->key_held(GLFW_KEY_RIGHT) >= 0.25) {
+            media_container_mgr.rotation_angle(media_container_mgr.rotation_angle() - 3.141592653f / 180.0f);
+        }
         if (interaction_mgr->key_down(GLFW_KEY_UP) || interaction_mgr->key_held(GLFW_KEY_UP) >= 0.25)
             env_config.telemetry_offset(env_config.telemetry_offset() - (paused ? 0.1f : 10.0f));
-        if (interaction_mgr->key_down(GLFW_KEY_LEFT) || interaction_mgr->key_held(GLFW_KEY_LEFT) >= 0.25)
-            rev = true;
+        if (interaction_mgr->key_down(GLFW_KEY_LEFT) || interaction_mgr->key_held(GLFW_KEY_LEFT) >= 0.25) {
+            media_container_mgr.rotation_angle(media_container_mgr.rotation_angle() + 3.141592653f / 180.0f);
+        }
         if (interaction_mgr->key_down(GLFW_KEY_DOWN) || interaction_mgr->key_held(GLFW_KEY_DOWN) >= 0.25)
             env_config.telemetry_offset(env_config.telemetry_offset() + (paused ? 0.1f : 10.0f));
         if (interaction_mgr->key_down(GLFW_KEY_F)) {
@@ -286,7 +288,7 @@ int main()
         */
         font_manager.add_string(
             StringAndProperties(
-                ffsw::format("%6.2fkm", env_config.telemetry_slice().m_total_distance),
+                ffsw::format("%6.2fkm", env_config.telemetry_distance_flown()),
                 0, glm::vec2(-.98, .98), glm::vec3(1.0, 1.0, 1.0), 1.0, 2.0,
                 StringAndProperties::V_ALIGN::V_TOP, StringAndProperties::H_ALIGN::H_LEFT));
 
