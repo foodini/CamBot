@@ -1,8 +1,11 @@
+* The .exe needs an icon.
+* audio in UI mode
 * Tell the user that frames are currently being cached while doing a right-click scrub
   if the next required frame is being delayed.
 * We need an aesthetic pass over the map. lift/sync should be averaged over the last n
   seconds, where n is configurable. The map needs to be wider/taller, and the scale during
   straight-line flight needs to dip considerably further.
+* Show grid lines for 3-5 seconds after each rotation.
 * Altitude graph needs the blue dot to be more opaque at the center/stand out more.
 * Allow user to input actual altitude at launch and landing. From then on, displayed 
   altitude is offset by the interpolated difference between measured and actual values.
@@ -15,5 +18,6 @@
 * Do you have any control over the quality of the exported video?
 * DVORAK!!!
 * Don't allow export while telemetry is still loading.
+* Orient the glider on the map according to magnetic telemetry so you can see it skidding?
 
 
