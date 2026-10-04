@@ -129,10 +129,10 @@ private:
 	SwsContext*            m_output_scale_context;
 	AVStream*              m_output_video_stream;
 	
-	const AVCodec*         m_output_audio_codec;
+	// Audio is a straight stream copy (see advance_frame()'s remux path), never decoded or
+	// re-encoded -- the only thing needed for it is the output AVStream itself, with its
+	// codecpar copied from the input audio stream.
 	AVStream*              m_output_audio_stream;
-	AVCodecContext*        m_output_audio_codec_context;
-	AVFormatContext*       m_output_audio_format_context;
 };
 
 #endif

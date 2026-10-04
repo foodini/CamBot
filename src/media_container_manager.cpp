@@ -34,7 +34,8 @@ MediaContainerMgr::MediaContainerMgr(const std::string& infile, const std::strin
     m_output_video_codec_context(nullptr),
     m_output_video_frame(nullptr),
     m_output_scale_context(nullptr),
-    m_output_video_stream(nullptr)
+    m_output_video_stream(nullptr),
+    m_output_audio_stream(nullptr)
 {
     // AVFormatContext holds header info from the format specified in the container:
     m_format_context = avformat_alloc_context();
@@ -173,6 +174,15 @@ MediaContainerMgr::MediaContainerMgr(const std::string& infile, const std::strin
             if (ffsw::held_repeat_due(held_seconds, 0.25f, 0.1f, m_advance_step_repeat_bucket))
                 advance_by(1);
         });
+
+    // Escape cancels an in-progress export (there's no other use for it -- see the ESC-to-quit
+    // removal earlier in the project history). finalize_output() flushes the encoder and writes
+    // a proper trailer either way, so a cancelled file is still a valid, playable .mp4, just
+    // shorter than the full video.
+    InteractionMgr::instance()->bind_key(GLFW_KEY_ESCAPE,
+        [this]() { if (m_recording) finalize_output(); },
+        nullptr,
+        nullptr);
 }
 
 MediaContainerMgr::~MediaContainerMgr() {
@@ -316,15 +326,22 @@ bool MediaContainerMgr::advance_frame() {
                 continue;
             }
             if (m_packet->stream_index == m_audio_stream_index) {
+                // Audio is never decoded or re-encoded -- the input and output audio are
+                // identical, so this is a straight stream copy: point the packet at the
+                // output audio stream and rescale its pts/dts/duration from the input
+                // stream's time_base to the output stream's (av_write_frame() above used to
+                // hand the packet over with neither of those fixed up, which left it tagged
+                // for the wrong stream and on the wrong clock).
                 if (m_recording) {
-                    int err = 0;
-                    err = av_write_frame(m_output_format_context, m_packet);
-
+                    AVPacket* out_packet = av_packet_clone(m_packet);
+                    out_packet->stream_index = m_output_audio_stream->index;
+                    av_packet_rescale_ts(out_packet, m_format_context->streams[m_audio_stream_index]->time_base,
+                        m_output_audio_stream->time_base);
+                    int err = av_interleaved_write_frame(m_output_format_context, out_packet);
                     if (err) {
-                        printf("  encoding error: %d\n", err);
-                        printf("    avcodec_is_open(m_output_audio_codec_context): %d\n", avcodec_is_open(m_output_audio_codec_context));
-                        printf("    av_codec_is_encoder(m_output_audio_codec_context->codec): %d\n", av_codec_is_encoder(m_output_audio_codec_context->codec));
+                        printf("  audio remux error: %d\n", err);
                     }
+                    av_packet_free(&out_packet);
                 }
 
                 continue;
@@ -607,6 +624,14 @@ bool MediaContainerMgr::init_video_output(const std::string& video_file_name, un
         return true;
     m_recording = true;
 
+    // Export always covers the whole input, start to finish, regardless of wherever
+    // playback happened to be sitting when it was started. Clearing the GOP cache first
+    // forces a real seek: otherwise, if frame 0 is still sitting in the cache from a
+    // previous (e.g. cancelled) export, advance_to(0L) answers from the cache -- which
+    // only patches m_last_video_frame's pixels, not the demuxer's actual read position --
+    // and the export silently resumes from wherever that previous run left off.
+    m_gop_cache.clear();
+    m_gop_cache_keyframe_pts = AV_NOPTS_VALUE;
     advance_to(0L);
 
     if (!(m_output_format = av_guess_format(nullptr, video_file_name.c_str(), nullptr))) {
@@ -621,9 +646,13 @@ bool MediaContainerMgr::init_video_output(const std::string& video_file_name, un
     }
 
     //TODO(P0): Break out the video and audio inits into their own methods.
-    m_output_video_codec = avcodec_find_encoder(m_output_format->video_codec);
+    // Explicitly requesting h264_nvenc (rather than letting avcodec_find_encoder() pick
+    // whatever generic H.264 encoder is registered, which in practice meant software
+    // libx264) is what actually gets export onto the GPU. This assumes an NVIDIA GPU +
+    // driver are present; there is deliberately no software-encoder fallback.
+    m_output_video_codec = avcodec_find_encoder_by_name("h264_nvenc");
     if (!m_output_video_codec) {
-        printf("Failed to create video codec.\n");
+        printf("Failed to find h264_nvenc encoder -- is an NVIDIA GPU and driver available?\n");
         return false;
     }
     m_output_video_stream = avformat_new_stream(m_output_format_context, m_output_video_codec);
@@ -636,11 +665,11 @@ bool MediaContainerMgr::init_video_output(const std::string& video_file_name, un
         printf("Failed to create video codec context.\n");
         return(false);
     }
-    m_output_video_stream->codecpar->codec_id = m_output_format->video_codec;
+    m_output_video_stream->codecpar->codec_id = m_output_video_codec->id;
     m_output_video_stream->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
     m_output_video_stream->codecpar->width = width;
     m_output_video_stream->codecpar->height = height;
-    m_output_video_stream->codecpar->format = AV_PIX_FMT_YUV420P;
+    m_output_video_stream->codecpar->format = AV_PIX_FMT_NV12;
     // Use the same bit rate as the input stream.
     m_output_video_stream->codecpar->bit_rate = m_format_context->streams[m_video_stream_index]->codecpar->bit_rate;
     m_output_video_stream->avg_frame_rate = m_format_context->streams[m_video_stream_index]->avg_frame_rate;
@@ -655,59 +684,31 @@ bool MediaContainerMgr::init_video_output(const std::string& video_file_name, un
     m_output_video_codec_context->gop_size = 12;
     m_output_video_codec_context->framerate = m_format_context->streams[m_video_stream_index]->r_frame_rate;
     //m_output_codec_context->refcounted_frames = 0;
-    if (m_output_video_stream->codecpar->codec_id == AV_CODEC_ID_H264) {
-        av_opt_set(m_output_video_codec_context, "preset", "ultrafast", 0);
-    } else if (m_output_video_stream->codecpar->codec_id == AV_CODEC_ID_H265) {
-        av_opt_set(m_output_video_codec_context, "preset", "ultrafast", 0);
-    } else {
-        av_opt_set_int(m_output_video_codec_context, "lossless", 1, 0);
-    }
+    // "p1" is h264_nvenc's fastest preset (NVENC's equivalent of libx264's "ultrafast") --
+    // for export, speed is the entire point. "hq" tuning trades a little of that speed back
+    // for quality; output size/quality is otherwise governed by the bit_rate copied from the
+    // input stream above, same as the old libx264 path.
+    av_opt_set(m_output_video_codec_context, "preset", "p1", 0);
+    av_opt_set(m_output_video_codec_context, "tune", "hq", 0);
     avcodec_parameters_from_context(m_output_video_stream->codecpar, m_output_video_codec_context);
 
-#define ATTEMPT_AUDIO
-#ifdef ATTEMPT_AUDIO
-    m_output_audio_codec = avcodec_find_encoder(m_output_format->audio_codec);
-    if (!m_output_audio_codec) {
-        printf("Failed to create audio codec.\n");
-        return false;
-    }
-
-    m_output_audio_stream = avformat_new_stream(m_output_format_context, m_output_audio_codec);
+    // Audio is a straight stream copy (see advance_frame()) -- no decoder or encoder needed,
+    // just an output stream whose codecpar matches the input audio stream exactly.
+    m_output_audio_stream = avformat_new_stream(m_output_format_context, nullptr);
     if (!m_output_audio_stream) {
-        printf("Failed to find audio format.\n");
+        printf("Failed to create audio stream.\n");
         return false;
     }
-    m_output_audio_codec_context = avcodec_alloc_context3(m_output_audio_codec);
-    if (!m_output_audio_codec_context) {
-        printf("Failed to create audio codec context.\n");
-        return(false);
-    }
-    m_output_audio_codec_context->bit_rate = m_format_context->streams[m_audio_stream_index]->codecpar->bit_rate;
-    m_output_audio_codec_context->sample_fmt = AV_SAMPLE_FMT_S16;
-    m_output_audio_codec_context->sample_rate = m_format_context->streams[m_audio_stream_index]->codecpar->sample_rate;
-    // AVCodecContext::channels / channel_layout were removed in favor of the AVChannelLayout-based
-    // ch_layout field (av_channel_layout_copy() deep-copies it, including any custom layout data).
-    av_channel_layout_copy(&m_output_audio_codec_context->ch_layout, &m_format_context->streams[m_audio_stream_index]->codecpar->ch_layout);
-
-    m_output_audio_stream->codecpar->codec_id = m_output_format->audio_codec;
-    m_output_audio_stream->codecpar->codec_type = AVMEDIA_TYPE_AUDIO;
-    m_output_audio_stream->codecpar->format = m_format_context->streams[m_audio_stream_index]->codecpar->format;
-    m_output_audio_stream->codecpar->bit_rate = m_format_context->streams[m_audio_stream_index]->codecpar->bit_rate;
-    m_output_audio_stream->codecpar->sample_rate = m_format_context->streams[m_audio_stream_index]->codecpar->sample_rate;
-    av_channel_layout_copy(&m_output_audio_stream->codecpar->ch_layout, &m_format_context->streams[m_audio_stream_index]->codecpar->ch_layout);
-    m_output_audio_stream->avg_frame_rate = m_format_context->streams[m_audio_stream_index]->avg_frame_rate;
-    avcodec_parameters_to_context(m_output_audio_codec_context, m_output_audio_stream->codecpar);
-    m_output_audio_codec_context->time_base = m_format_context->streams[m_audio_stream_index]->time_base;
-
-    err = avcodec_open2(m_output_audio_codec_context, m_output_audio_codec, nullptr);
+    err = avcodec_parameters_copy(m_output_audio_stream->codecpar, m_format_context->streams[m_audio_stream_index]->codecpar);
     if (err < 0) {
-        printf("Failed to open output video codec.\n");
+        printf("Failed to copy audio codec parameters.\n");
         return false;
     }
+    // The input and output containers don't necessarily agree on codec tag numbering --
+    // clearing it lets the muxer pick the right tag for the output container itself rather
+    // than carrying over a stale (or wrong) one from the input.
+    m_output_audio_stream->codecpar->codec_tag = 0;
 
-#endif //ATTEMPT_AUDIO
-
-    //TODO(P2): Free assets that have been allocated.
     err = avcodec_open2(m_output_video_codec_context, m_output_video_codec, nullptr);
     if (err < 0) {
         printf("Failed to open output video codec.\n");
@@ -755,7 +756,7 @@ bool MediaContainerMgr::output_video_frame(uint8_t* buf) {
 
     if (!m_output_video_frame) {
         m_output_video_frame = av_frame_alloc();
-        m_output_video_frame->format = AV_PIX_FMT_YUV420P;
+        m_output_video_frame->format = AV_PIX_FMT_NV12;
         m_output_video_frame->width = m_output_video_codec_context->width;
         m_output_video_frame->height = m_output_video_codec_context->height;
         err = av_frame_get_buffer(m_output_video_frame, 32);
@@ -772,7 +773,7 @@ bool MediaContainerMgr::output_video_frame(uint8_t* buf) {
         m_output_scale_context = sws_getContext(m_output_video_codec_context->width, m_output_video_codec_context->height, 
                                                 AV_PIX_FMT_RGB24,
                                                 m_output_video_codec_context->width, m_output_video_codec_context->height, 
-                                                AV_PIX_FMT_YUV420P, SWS_BICUBIC, nullptr, nullptr, nullptr);
+                                                AV_PIX_FMT_NV12, SWS_BICUBIC, nullptr, nullptr, nullptr);
     }
 
     int inLinesize[1] = { 3 * m_output_video_codec_context->width };
@@ -782,8 +783,8 @@ bool MediaContainerMgr::output_video_frame(uint8_t* buf) {
     //TODO(P0): Switch m_frame to be m_input_video_frame so I don't end up using the presentation timestamp from
     //          an audio frame if I threadify the frame reading.
     m_output_video_frame->pts = m_last_video_frame->pts;
-    printf("Output PTS: %lld, time_base: %d/%d\n", m_output_video_frame->pts,
-        m_output_video_codec_context->time_base.num, m_output_video_codec_context->time_base.den);
+    //printf("Output PTS: %lld, time_base: %d/%d\n", m_output_video_frame->pts,
+    //    m_output_video_codec_context->time_base.num, m_output_video_codec_context->time_base.den);
     err = avcodec_send_frame(m_output_video_codec_context, m_output_video_frame);
     if (err < 0) {
         printf("  ERROR sending new video frame output: ");
@@ -805,39 +806,60 @@ bool MediaContainerMgr::output_video_frame(uint8_t* buf) {
         return false;
     }
 
-    AVPacket pkt;
-    // av_init_packet(&pkt);
-    pkt.data = nullptr;
-    pkt.size = 0;
-    pkt.flags |= AV_PKT_FLAG_KEY;
+    AVPacket* pkt = av_packet_alloc();
+    pkt->flags |= AV_PKT_FLAG_KEY;
     int ret = 0;
-    if ((ret = avcodec_receive_packet(m_output_video_codec_context, &pkt)) == 0) {
+    if ((ret = avcodec_receive_packet(m_output_video_codec_context, pkt)) == 0) {
         static int counter = 0;
-        printf("pkt.key: 0x%08x, pkt.size: %d, counter: %d\n", pkt.flags & AV_PKT_FLAG_KEY, pkt.size, counter++);
-        uint8_t* size = ((uint8_t*)pkt.data);
-        printf("sizes: %d %d %d %d %d %d %d %d %d\n", size[0], size[1], size[2], size[2], size[3], size[4], size[5], size[6], size[7]);
-        av_interleaved_write_frame(m_output_format_context, &pkt);
+        //printf("pkt.key: 0x%08x, pkt.size: %d, counter: %d\n", pkt->flags & AV_PKT_FLAG_KEY, pkt->size, counter++);
+        av_interleaved_write_frame(m_output_format_context, pkt);
     }
-    printf("push: %d\n", ret);
-    av_packet_unref(&pkt);
+    //printf("push: %d\n", ret);
+    av_packet_free(&pkt);
 
     return true;
+}
+
+// Frees everything init_video_output() allocated, and resets the pointers back to the
+// construction-time nullptr state, so a later init_video_output() call (a fresh export,
+// started after this one finished or was cancelled) builds everything fresh instead of
+// finding stale pointers left over from the previous export. Called only from
+// finalize_output(), once the muxer is done with them.
+void MediaContainerMgr::free_output_assets() {
+    if (m_output_video_frame) {
+        av_frame_free(&m_output_video_frame);
+    }
+    if (m_output_scale_context) {
+        sws_freeContext(m_output_scale_context);
+        m_output_scale_context = nullptr;
+    }
+    if (m_output_video_codec_context) {
+        avcodec_free_context(&m_output_video_codec_context);
+    }
+    if (m_output_format_context) {
+        // Frees the AVFormatContext and its streams (m_output_video_stream/
+        // m_output_audio_stream point into it, so they go away here too, not separately) --
+        // not the AVIOContext/pb, which the caller already closed with avio_close().
+        avformat_free_context(m_output_format_context);
+        m_output_format_context = nullptr;
+    }
+    m_output_video_stream = nullptr;
+    m_output_audio_stream = nullptr;
+    m_output_video_codec = nullptr;
+    m_output_format = nullptr; // not owned -- av_guess_format() hands back a static table entry
 }
 
 bool MediaContainerMgr::finalize_output() {
     if (!m_recording)
         return true;
 
-    AVPacket pkt;
-//  av_init_packet(&pkt);
-    pkt.data = nullptr;
-    pkt.size = 0;
+    AVPacket* pkt = av_packet_alloc();
 
     for (;;) {
         avcodec_send_frame(m_output_video_codec_context, nullptr);
-        if (avcodec_receive_packet(m_output_video_codec_context, &pkt) == 0) {
+        if (avcodec_receive_packet(m_output_video_codec_context, pkt) == 0) {
 #if true
-            av_interleaved_write_frame(m_output_format_context, &pkt);
+            av_interleaved_write_frame(m_output_format_context, pkt);
 #endif
             printf("final push:\n");
         } else {
@@ -845,16 +867,24 @@ bool MediaContainerMgr::finalize_output() {
         }
     }
 
-    av_packet_unref(&pkt);
+    av_packet_free(&pkt);
 
     av_write_trailer(m_output_format_context);
+    bool closed_cleanly = true;
     if (!(m_output_format->flags & AVFMT_NOFILE)) {
         int err = avio_close(m_output_format_context->pb);
         if (err < 0) {
             printf("Failed to close file. err: %d\n", err);
-            return false;
+            closed_cleanly = false;
         }
     }
 
-    return true;
+    // Whether or not the close above succeeded, the output is done with -- leave the assets
+    // freed and m_recording false so a later init_video_output() (a fresh export after this
+    // one finished or was cancelled) starts from a clean slate instead of reusing stale
+    // pointers sized/opened for the previous export.
+    free_output_assets();
+    m_recording = false;
+
+    return closed_cleanly;
 }

@@ -1,5 +1,16 @@
+* DVORAK!!!
 * (P1)Tell the user that frames are currently being cached while doing a right-click scrub
   if the next required frame is being delayed.
+* Don't allow export while telemetry is still loading.
+* What  can we do to get the data loading time under control?
+* Require user to hold down control key to affect TelemetryScrubWidget, since a mis-click
+  there requires the user to re-sync the telemetry.
+* Allow user to input actual altitude at launch and landing. From then on, displayed 
+  altitude is offset by the interpolated difference between measured and actual values.
+* Video rotation is shearing the image. It's also not properly expanding to fit the video
+  area in the window.
+* The left/right arrows need to frame-by-frame the video. Maybe ^left/right should fbf
+  telemetry? Move rotation to <>
 * Add something to the scrub widget to display the center of right-click scrubbing, and
   potentially the frame rate being traversed.
 * Clicking on the video frame should pause/unpause.

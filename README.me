@@ -22,5 +22,15 @@ was necessary to solve certain immediate problems as they came up. When it works
 clean it up. IOW, start-up mode. And no, I have no intention of starting a company on
 this thing.
 
+One actual prerequisite, for real this time: FFmpeg. CamBot leans on it for all the
+video decode/encode work, and it used to mean hand-building it via MSYS2, which was
+an absolute nightmare to get right and an even bigger nightmare to get right *again*
+on a new machine. Not anymore -- the build now fetches a prebuilt, NVENC-capable
+Windows FFmpeg automatically the first time you build in Visual Studio (it is a
+pre-build step, see tools/fetch_ffmpeg.ps1). You do not need to install or build
+anything yourself; just let that first build take a little longer while it downloads
+~75MB into third_party/ffmpeg. If you ever want to move to a newer FFmpeg release,
+that script is the one and only place that needs updating.
+
 Good luck getting it to compile. There's a lot missing. No, I'm not going to document
 that stage until I get to that whole "clean up" thing.

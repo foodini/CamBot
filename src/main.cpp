@@ -181,6 +181,27 @@ int main()
     // save_frame_as_png() call sites further down.
     std::string pending_raw_screenshot_path;
     std::string pending_overlay_screenshot_path;
+
+    // Export (what used to be the 'R' key) state. was_recording lets us notice the instant
+    // an export stops -- either finishing normally at end-of-video or being cancelled with
+    // Escape (see MediaContainerMgr's constructor) -- so we can put up the "done" message.
+    // export_display_name is just the chosen file's own name, not the full path, for that
+    // message and the in-progress one. The ETA is estimated from how much of the export has
+    // gone by, wall-clock, since it started, versus how much video is left to encode.
+    bool was_recording = false;
+    bool show_export_done = false;
+    std::string export_display_name;
+    float export_start_wallclock = 0.0f;
+    float export_start_video_elapsed = 0.0f;
+    // Export runs flat-out rather than redrawing every frame -- see do_present below -- but
+    // still needs a full render + readback of every single frame to encode it, so this buffer
+    // is allocated once up front instead of new[]/delete[]-ing it every frame.
+    uint8_t* export_frame_buf = new uint8_t[SCR_WIDTH * SCR_HEIGHT * 4];
+    // Throttles how often we actually compose/present a frame to the screen while exporting
+    // (the encode itself never skips a frame -- see the recording block below). Not used at
+    // all outside of export, where we present every frame as always.
+    float last_present_time = ffsw::elapsed();
+
     // render loop
     // -----------
     while (!glfwWindowShouldClose(window))
@@ -192,66 +213,140 @@ int main()
         media_scrub_widget.handle_input();
         telemetry_scrub_widget.handle_input();
 
-        // Start the ImGui frame and draw the File/Edit/View/Help menu bar.
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
+        // Notice the instant an export stops -- normal completion at end-of-video and an
+        // Escape-cancel (handled above, inside interaction_mgr->tick()) both just drop
+        // recording() back to false, so either way this is where we catch it and put up the
+        // "done" message. The reverse edge is caught down in the File menu below, right where
+        // the user actually starts one.
+        bool now_recording = media_container_mgr.recording();
+        if (!now_recording && was_recording) {
+            show_export_done = true;
+        }
+        was_recording = now_recording;
 
-        if (ImGui::BeginMainMenuBar()) {
-            if (ImGui::BeginMenu("File")) {
-                if (ImGui::MenuItem("Save Project")) {
-                    project_file_mgr.save_project();
-                }
-                ImGui::Separator();
-                if (ImGui::MenuItem("Save Raw Video Frame...")) {
-                    pending_raw_screenshot_path = ffsw::file_dialog(L"png", L"Save Raw Video Frame As (*.png)", false);
-                }
-                if (ImGui::MenuItem("Save Frame with Telemetry Overlay...")) {
-                    pending_overlay_screenshot_path = ffsw::file_dialog(L"png", L"Save Frame with Telemetry Overlay As (*.png)", false);
-                }
-                ImGui::Separator();
-                // Not wired up yet -- placeholder until the overlays are where we want them. See
-                // MediaContainerMgr::init_video_output()/output_video_frame().
-                ImGui::MenuItem("Start Recording (coming soon)", nullptr, false, false);
-                ImGui::Separator();
-                if (ImGui::MenuItem("Exit")) {
-                    media_container_mgr.finalize_output();
-                    glfwSetWindowShouldClose(window, true);
-                }
-                ImGui::EndMenu();
+        // While exporting, don't bother presenting every single frame to the screen -- the
+        // encode below still happens every frame regardless, this just throttles how often
+        // we redraw the window/menu bar/export status text, since nobody needs to watch it
+        // tick by frame-by-frame and skipping most of those redraws is a meaningful chunk of
+        // export time back. Outside of export we present every frame, same as always.
+        bool do_present = true;
+        if (now_recording) {
+            float now = ffsw::elapsed();
+            do_present = (now - last_present_time) >= 1.0f;
+            if (do_present) {
+                last_present_time = now;
             }
-            if (ImGui::BeginMenu("Edit")) {
-                if (ImGui::MenuItem("Mark Launch Point")) {
-                    env_config.launch_time(env_config.media_in_elapsed());
-                }
-                ImGui::EndMenu();
-            }
-            if (ImGui::BeginMenu("View")) {
-                ImGui::MenuItem("(nothing here yet)", nullptr, false, false);
-                ImGui::EndMenu();
-            }
-            if (ImGui::BeginMenu("Help")) {
-                if (ImGui::MenuItem("About CamBot")) {
-                    show_about_popup = true;
-                }
-                ImGui::EndMenu();
-            }
-            ImGui::EndMainMenuBar();
         }
 
-        if (show_about_popup) {
-            ImGui::OpenPopup("About CamBot");
-            show_about_popup = false;
-        }
-        if (ImGui::BeginPopupModal("About CamBot", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::Text("CamBot");
-            ImGui::Separator();
-            ImGui::TextWrapped("Overlays custom flight telemetry onto GoPro video for glider flying.");
-            ImGui::Spacing();
-            if (ImGui::Button("Close")) {
-                ImGui::CloseCurrentPopup();
+        // Start the ImGui frame and draw the File/Edit/View/Help menu bar. Skipped on a
+        // throttled-away frame -- see do_present above -- along with the matching Render()/
+        // RenderDrawData()/SwapBuffers() further down; ImGui requires NewFrame() and Render()
+        // to be called in pairs, so these must always be skipped or run together.
+        if (do_present) {
+            ImGui_ImplOpenGL3_NewFrame();
+            ImGui_ImplGlfw_NewFrame();
+            ImGui::NewFrame();
+
+            if (ImGui::BeginMainMenuBar()) {
+                if (ImGui::BeginMenu("File")) {
+                    if (ImGui::MenuItem("Save Project")) {
+                        project_file_mgr.save_project();
+                    }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Save Raw Video Frame...")) {
+                        pending_raw_screenshot_path = ffsw::file_dialog(L"png", L"Save Raw Video Frame As (*.png)", false);
+                    }
+                    if (ImGui::MenuItem("Save Frame with Telemetry Overlay...")) {
+                        pending_overlay_screenshot_path = ffsw::file_dialog(L"png", L"Save Frame with Telemetry Overlay As (*.png)", false);
+                    }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Export Video...", nullptr, false, !media_container_mgr.recording())) {
+                        std::string export_path = ffsw::file_dialog(L"mp4", L"Export Video As (*.mp4)", false);
+                        if (!export_path.empty()) {
+                            size_t slash = export_path.find_last_of("/\\");
+                            export_display_name = (slash == std::string::npos) ? export_path : export_path.substr(slash + 1);
+                            export_start_wallclock = ffsw::elapsed();
+                            // init_video_output() always seeks the video back to the very
+                            // beginning before it does anything else -- export covers the
+                            // whole input, not just from wherever playback was -- so the
+                            // ETA math below always has 0.0 to measure progress against,
+                            // not whatever in_elapsed() reads right this moment (before
+                            // that seek happens).
+                            export_start_video_elapsed = 0.0f;
+                            show_export_done = false;
+                            media_container_mgr.init_video_output(export_path, SCR_WIDTH, SCR_HEIGHT);
+                        }
+                    }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Exit")) {
+                        media_container_mgr.finalize_output();
+                        glfwSetWindowShouldClose(window, true);
+                    }
+                    ImGui::EndMenu();
+                }
+                if (ImGui::BeginMenu("Edit")) {
+                    if (ImGui::MenuItem("Mark Launch Point")) {
+                        env_config.launch_time(env_config.media_in_elapsed());
+                    }
+                    ImGui::EndMenu();
+                }
+                if (ImGui::BeginMenu("View")) {
+                    ImGui::MenuItem("(nothing here yet)", nullptr, false, false);
+                    ImGui::EndMenu();
+                }
+                if (ImGui::BeginMenu("Help")) {
+                    if (ImGui::MenuItem("About CamBot")) {
+                        show_about_popup = true;
+                    }
+                    ImGui::EndMenu();
+                }
+                ImGui::EndMainMenuBar();
             }
-            ImGui::EndPopup();
+
+            if (show_about_popup) {
+                ImGui::OpenPopup("About CamBot");
+                show_about_popup = false;
+            }
+            if (ImGui::BeginPopupModal("About CamBot", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+                ImGui::Text("CamBot");
+                ImGui::Separator();
+                ImGui::TextWrapped("Overlays custom flight telemetry onto GoPro video for glider flying.");
+                ImGui::Spacing();
+                if (ImGui::Button("Close")) {
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            }
+
+            // Export status, bottom-center. Drawn through ImGui -- rather than font_manager,
+            // like the other overlays -- specifically because ImGui's own render pass happens
+            // after the capture point below, so unlike the telemetry overlays, this text never
+            // ends up baked into the exported video itself.
+            if (media_container_mgr.recording() || show_export_done) {
+                std::string status_text;
+                if (media_container_mgr.recording()) {
+                    float elapsed_wallclock = ffsw::elapsed() - export_start_wallclock;
+                    float video_done = media_container_mgr.in_elapsed() - export_start_video_elapsed;
+                    float video_remaining = media_container_mgr.in_duration() - media_container_mgr.in_elapsed();
+                    // Seconds of wall-clock per second of video encoded so far, applied to
+                    // what's left -- self-corrects as encoding speed varies instead of
+                    // assuming a fixed rate.
+                    float eta_seconds = (video_done > 0.0f) ? (elapsed_wallclock / video_done) * video_remaining : 0.0f;
+                    int eta_minutes = (int)(eta_seconds / 60.0f);
+                    int eta_whole_seconds = (int)eta_seconds % 60;
+                    status_text = ffsw::format("Exporting %s. ETA %d:%02d", export_display_name.c_str(), eta_minutes, eta_whole_seconds);
+                } else {
+                    status_text = ffsw::format("Export done: %s", export_display_name.c_str());
+                }
+
+                ImGui::SetNextWindowPos(ImVec2(SCR_WIDTH / 2.0f, (float)(SCR_HEIGHT + UI_HEIGHT) - 12.0f),
+                    ImGuiCond_Always, ImVec2(0.5f, 1.0f));
+                ImGui::SetNextWindowBgAlpha(0.0f);
+                ImGui::Begin("ExportStatus", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
+                    ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav);
+                ImGui::TextUnformatted(status_text.c_str());
+                ImGui::End();
+            }
         }
 
         // Any click on the video itself that doesn't land on one of the widgets drawn over top of
@@ -303,11 +398,6 @@ int main()
         else {
             duration_avg = 0.95f * duration_avg + 0.05f * duration;
         }
-        
-        font_manager.add_string(
-            StringAndProperties(
-                ffsw::format("tel_ind: %d", env_config.telemetry_index()),
-                0, glm::vec2(-.98, -.98), glm::vec3(1.0, 1.0, 1.0), 1.0, 3.0));
 
         // render
         // ------
@@ -335,27 +425,41 @@ int main()
         save_frame_as_png(pending_overlay_screenshot_path);
         pending_overlay_screenshot_path.clear();
 
-        ImGui::Render();
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-        // glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
-        // -------------------------------------------------------------------------------
-        glfwSwapBuffers(window);
+        // Captured right here -- after every telemetry overlay above, before any of the
+        // ImGui chrome below -- so the exported frame has exactly the baked-in overlays and
+        // none of the menu bar/export status text. Runs every single frame regardless of
+        // do_present, since every frame has to make it into the encoded video; export_frame_buf
+        // is allocated once, outside the loop, rather than every frame.
         if (media_container_mgr.recording()) {
-            uint8_t* buf = new uint8_t[SCR_WIDTH * SCR_HEIGHT * 4];
-            //std::memset(buf, 0, SCR_WIDTH * SCR_HEIGHT * 3);
-            glReadPixels(0, UI_HEIGHT, SCR_WIDTH, SCR_HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, (void*)buf);
-            media_container_mgr.output_video_frame(buf);
-            delete[] buf;
+            glReadPixels(0, UI_HEIGHT, SCR_WIDTH, SCR_HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, (void*)export_frame_buf);
+            media_container_mgr.output_video_frame(export_frame_buf);
         }
+
+        // Paired with the ImGui::NewFrame()/menu-bar block up top -- see do_present there.
+        if (do_present) {
+            ImGui::Render();
+            ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+            glfwSwapBuffers(window);
+        }
+
+        // glfw: poll IO events (keys pressed/released, mouse moved etc.) -- always, even on a
+        // throttled-away frame, so Escape-to-cancel-export stays instant.
+        // -------------------------------------------------------------------------------
         glfwPollEvents();
 
-        if (!paused) {
+        // Exporting runs flat-out regardless of whatever `paused` happened to be set to when
+        // it started -- it isn't "playback", so pause doesn't apply to it. Either way, running
+        // off the end of the video no longer closes the app -- it just stops advancing on the
+        // last frame, same as an ordinary pause (and, if this was an export, advance_frame()
+        // already finalized the output file itself -- see its AVERROR_EOF handling).
+        if (!paused || media_container_mgr.recording()) {
             if (!media_container_mgr.advance_frame()) {
-                break;
+                paused = true;
             }
         }
     }
+
+    delete[] export_frame_buf;
 
     // Dear ImGui: tear down the backends and context.
     // -------------------------------------------------

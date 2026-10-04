@@ -2,12 +2,6 @@
   "dependencies": [
     "jsoncpp",
     "glfw3",
-    "freetype",
-    {
-      "name": "ffmpeg",
-      "features": [
-        "x264"
-      ]
-    }
+    "freetype"
   ]
 }
