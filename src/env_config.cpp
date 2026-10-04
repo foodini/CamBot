@@ -116,6 +116,7 @@ void EnvConfig::save_project() {
 	project_file_mgr->set_launch_time(m_launch_time);
 	project_file_mgr->set_telemetry_offset(TelemetryMgr::instance->offset());
 	project_file_mgr->set_window_start_elapsed(TelemetryMgr::instance->window_start_elapsed());
+	project_file_mgr->set_rotation_angle(media_mgr->rotation_angle());
 	project_file_mgr->save_project();
 }
 

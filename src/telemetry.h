@@ -2,6 +2,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <ctime>
+#include <limits>
 #include <utility>
 #include <string>
 #include <thread>
@@ -11,6 +13,10 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include "glm/glm.hpp"
+
+// Forward-declared rather than #include <json/json.h> here, so that header doesn't leak
+// into everything that includes telemetry.h -- only telemetry.cpp needs the real definition.
+namespace Json { class Value; }
 
 class TelemetryMgr;
 class WidgetBase;
@@ -32,7 +38,13 @@ struct pair_hash
 class TelemetrySlice {
 public:
 	TelemetrySlice();
-	TelemetrySlice(const std::string& line, float gps_altitude_offset);
+	// tz_correction is an in/out cache: pass the same time_t, initialized to
+	// TelemetrySlice::TZ_CORRECTION_UNCOMPUTED, across every slice built from one telemetry
+	// file. The first call computes it (same math as always); every call after that reuses
+	// it instead of recomputing an essentially-constant value up to ~200,000 times over. See
+	// the .cpp for why this is safe.
+	static constexpr time_t TZ_CORRECTION_UNCOMPUTED = std::numeric_limits<time_t>::min();
+	TelemetrySlice(const Json::Value& root, float gps_altitude_offset, time_t& tz_correction);
 
 	int year()         const { return m_timestruct.tm_year + 1900; }
 	int month()        const { return m_timestruct.tm_mon + 1; }
@@ -72,7 +84,10 @@ public:
 
 	//TODO(P1) get this behind an interface instead of public.
 	const TelemetrySlice& operator[](int64_t index) const;
-	uint32_t size() const { return (uint32_t)m_telemetry.size(); }
+	// Reads the atomic commit count rather than m_telemetry.size() -- see m_committed_size
+	// below for why. Safe to call from the render thread while the parse thread is still
+	// filling m_telemetry in the background.
+	uint32_t size() const { return m_committed_size.load(std::memory_order_acquire); }
 
 	/*
 	glm::vec2 get_current_coords();
@@ -117,6 +132,18 @@ public:
 
 private:
 	std::vector<TelemetrySlice> m_telemetry;
+	// How many entries of m_telemetry are actually safe to read right now. The parse thread
+	// reserve()s m_telemetry's final size up front (known after its first pass over the
+	// file), so push_back() never reallocates and never invalidates anything the render
+	// thread might be reading -- but the render thread still has no business reading an
+	// index the parse thread hasn't finished constructing yet, and m_telemetry.size() itself
+	// isn't safe to read concurrently with push_back(). This is what operator[]/size() read
+	// instead: the parse thread bumps it (release) only after a slice is fully written, and
+	// readers load it (acquire) first and never index past it. This -- not a mutex -- is what
+	// actually fixes the "crashes in the first ~15 seconds" race: that window is exactly how
+	// long the background parse used to take, with the render thread reading m_telemetry the
+	// whole time with no synchronization at all.
+	std::atomic<uint32_t>       m_committed_size;
 	std::thread                 m_parse_thread;
 	std::atomic<bool>           m_parse_done;
 	std::atomic<bool>           m_thread_running;

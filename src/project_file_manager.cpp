@@ -6,7 +6,8 @@ ProjectFileManager::ProjectFileManager() :
 	m_telemetry_file_path(""),
 	m_launch_time(0.0),
 	m_telemetry_offset(0.0),
-	m_window_start_elapsed(0.0)
+	m_window_start_elapsed(0.0),
+	m_rotation_angle(0.0)
 {
 	get_project();
 }
@@ -40,6 +41,7 @@ void ProjectFileManager::get_project() {
 		m_launch_time = 0.0f;
 		m_telemetry_offset = 0.0f;
 		m_window_start_elapsed = 0.0f;
+		m_rotation_angle = 0.0f;
 		save_project();
 	} else {
 		char line[1024];
@@ -61,6 +63,9 @@ void ProjectFileManager::get_project() {
 			else if (strncmp(line, "d_win", 3) == 0) {
 				m_window_start_elapsed = (float)atof(line + 6);
 			}
+			else if (strncmp(line, "d_rot", 3) == 0) {
+				m_rotation_angle = (float)atof(line + 6);
+			}
 		}
 		fclose(project_fd);
 	}
@@ -78,6 +83,7 @@ void ProjectFileManager::save_project() {
 	fprintf(project_fd, "d_tel:%f\n", m_telemetry_offset);
 	fprintf(project_fd, "d_lau:%f\n", m_launch_time);
 	fprintf(project_fd, "d_win:%f\n", m_window_start_elapsed);
+	fprintf(project_fd, "d_rot:%f\n", m_rotation_angle);
 
 	fclose(project_fd);
 }

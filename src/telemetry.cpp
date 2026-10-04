@@ -4,12 +4,11 @@
 #include "util.h"
 
 #include <chrono>
+#include <cstdio>
 #include <fstream>
 #include <iostream>
-#include <locale>
-#include <iomanip>
 #include <json/json.h>
-#include <sstream>
+#include <memory>
 #include <vector>
 
 #include "env_config.h"
@@ -33,23 +32,16 @@ TelemetrySlice::TelemetrySlice() :
 }
 
 //TODO(P2) init climb rate? (getting a warning that's worth looking at.)
-TelemetrySlice::TelemetrySlice(const std::string& line, float gps_altitude_offset) :
+// root is already-parsed JSON (see parse_telemetry_file -- it builds one Json::CharReader
+// and reuses it across every line, rather than this constructor building a fresh
+// istringstream + locale + reader per call, which used to be most of the per-line cost).
+TelemetrySlice::TelemetrySlice(const Json::Value& root, float gps_altitude_offset, time_t& tz_correction) :
 	m_pulse(false),
 	m_gps_alt(-1000000.0f)
 {
-	// decimal_point/unit/open_brace/close_brace/ms/baud used to be parsed here under an older,
-	// text-scanned telemetry format; they are unused now that this is parsed as JSON below, so
-	// they've been dropped. lat_dir/lon_dir are still needed and stay.
+	// lat_dir/lon_dir are still needed; decimal_point/unit/open_brace/close_brace/ms/baud used
+	// to be parsed here under an older, text-scanned telemetry format and are long gone.
 	char lat_dir, lon_dir;
-
-	std::istringstream ss(line);
-	ss.imbue(std::locale("en_US.utf-8"));
-	
-	Json::Value root;
-	Json::CharReaderBuilder builder;
-	std::string errs;
-
-	Json::parseFromStream(builder, ss, &root, &errs);
 
 	unsigned int gps_date = root.get("gps_date", "19700101").asUInt();
 	double gps_time_d = root.get("gps_time", "0.0").asDouble();
@@ -105,10 +97,20 @@ TelemetrySlice::TelemetrySlice(const std::string& line, float gps_altitude_offse
 	// going the wrong direction. This will have bugs, especially if you're eding video
 	// on the other side of a DST change. 
 	m_timestruct.tm_isdst = -1; 
-	time_t local_epoch = mktime(&m_timestruct);     // Assumes that the input is LOCALTIME
-	std::tm* new_timestruct = gmtime(&local_epoch); // Output provided assumed input was GMT.
-	time_t diff_epoch = mktime(new_timestruct);
-	local_epoch -= 2*(diff_epoch - local_epoch);
+	time_t local_epoch = mktime(&m_timestruct); // Assumes that the input is LOCALTIME
+	// tz_correction is 2*(mktime(gmtime(local_epoch)) - local_epoch) -- the local/GMT offset,
+	// as this (slightly odd) double round-trip computes it. That depends on the system's
+	// timezone and whatever DST state is in effect, not on which sample this is, so within one
+	// recording it's effectively constant: compute it from the first sample and reuse it for
+	// every other one, instead of redoing 2 of these 3 time-API calls up to ~200,000 times for
+	// the same answer. (Still has the pre-existing DST-boundary caveat noted above -- a flight
+	// that itself spans a DST change was never handled right either way.)
+	if (tz_correction == TZ_CORRECTION_UNCOMPUTED) {
+		std::tm* new_timestruct = gmtime(&local_epoch); // Output provided assumed input was GMT.
+		time_t diff_epoch = mktime(new_timestruct);
+		tz_correction = 2 * (diff_epoch - local_epoch);
+	}
+	local_epoch -= tz_correction;
 	std::tm* true_local = gmtime(&local_epoch);
 
 	m_timestruct.tm_year = true_local->tm_year;
@@ -124,6 +126,7 @@ float TelemetrySlice::course_rad() const {
 TelemetryMgr* TelemetryMgr::instance = nullptr;
 
 TelemetryMgr::TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* widgets, float initial_offset, float initial_window_start_elapsed) :
+	m_committed_size(0),
 	m_parse_done(false),
 	m_telemetry_offset(initial_offset),
 	m_window_start_elapsed(initial_window_start_elapsed),
@@ -169,6 +172,9 @@ TelemetryMgr::~TelemetryMgr() {
 }
 
 void TelemetryMgr::parse_telemetry_file(const std::string& path, std::vector<WidgetBase*>* widgets) {
+	// So we can actually measure the effect of parsing changes instead of going by feel.
+	auto parse_start_time = std::chrono::steady_clock::now();
+
 	//TODO(P2): User needs to know if there were issues with the file.
 	//TODO(P2): Check that the file exists (and feedback to the user.)
 	//TODO(P0): This accempts a non-existent file as being empty. Complain if file 1) DNE or 2) empty.
@@ -185,16 +191,32 @@ void TelemetryMgr::parse_telemetry_file(const std::string& path, std::vector<Wid
 		}
 	}
 
+	// m_telemetry.reserve()d to its final size (known now, from the pass above) before any
+	// push_back() below -- so push_back() never reallocates, and the render thread reading
+	// m_telemetry concurrently (see m_committed_size) never has the rug pulled out from under
+	// it. One Json::CharReader built once and reused for every line, instead of rebuilding an
+	// istringstream + locale + reader per line -- that reconstruction (the locale in
+	// particular) used to dominate the per-line cost far more than the JSON parsing itself.
+	m_telemetry.reserve(lines.size());
+	Json::CharReaderBuilder builder;
+	std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+	// See TelemetrySlice::TZ_CORRECTION_UNCOMPUTED -- computed once, from the first line, and
+	// reused for every line after that.
+	time_t tz_correction = TelemetrySlice::TZ_CORRECTION_UNCOMPUTED;
+
 	uint32_t index = 0;
 	const uint32_t climb_rate_index_lookback = 5;
 	float gps_altitude_offset = 0.0;
 	for (auto i = lines.begin(); i != lines.end(); index++, i++) {
-		TelemetrySlice slice = TelemetrySlice(*i, gps_altitude_offset);
+		Json::Value root;
+		std::string errs;
+		reader->parse(i->data(), i->data() + i->size(), &root, &errs);
+		TelemetrySlice slice = TelemetrySlice(root, gps_altitude_offset, tz_correction);
 
 		if (index == 0) {
 			// TODO(P1): work out what to do about correcting for barometric uncertainty using gps.
 			// gps_altitude_offset = slice.m_gps_alt - slice.m_alt[1];
-			// slice = TelemetrySlice(*i, gps_altitude_offset);
+			// slice = TelemetrySlice(root, gps_altitude_offset, tz_correction);
 			slice.m_total_distance = 0.0;
 		} else {
 			slice.m_total_distance =
@@ -203,6 +225,9 @@ void TelemetryMgr::parse_telemetry_file(const std::string& path, std::vector<Wid
 		}
 
 		m_telemetry.push_back(slice);
+		// Only safe to publish *after* the slice above is fully written into m_telemetry --
+		// see m_committed_size's comment in telemetry.h.
+		m_committed_size.store(index + 1, std::memory_order_release);
 		if (index < climb_rate_index_lookback) {
 			//TODO(P3): fix this so each slice has a climb rate, instead of dropping the first n.
 			slice.m_climb_rate[0] = slice.m_climb_rate[1] = slice.m_climb_rate[2] = 0.0;
@@ -221,6 +246,9 @@ void TelemetryMgr::parse_telemetry_file(const std::string& path, std::vector<Wid
 	}
 	m_default_slice = m_telemetry[0];
 
+	double parse_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - parse_start_time).count();
+	printf("Telemetry parse: %u lines in %.1f ms\n", (uint32_t)lines.size(), parse_ms);
+
 	//TODO(P2): Reap the thread when it's done. Better to do this when TelemetryMgr is receiving regular
 	//          calls and can periodically look at the bool & attempt to join().
 	m_parse_done = true;
@@ -228,7 +256,8 @@ void TelemetryMgr::parse_telemetry_file(const std::string& path, std::vector<Wid
 
 const TelemetrySlice& TelemetryMgr::operator[](int64_t index) const {
 	// if telemetry is empty, or we're indexing outside its bounds, return a thing that indicates no data available.
-	if ((uint64_t)index >= m_telemetry.size() || index < 0)
+	// size() reads m_committed_size, not m_telemetry.size() -- see that member's comment.
+	if ((uint64_t)index >= size() || index < 0)
 		return m_default_slice;
 	return m_telemetry[index];
 }

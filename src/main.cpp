@@ -133,6 +133,9 @@ int main()
     ProjectFileManager project_file_mgr;
 
     MediaContainerMgr media_container_mgr(project_file_mgr.get_video_file_path(), "3.3.shader.vert", "3.3.shader.frag", extents);
+    // Restore whatever rotation was saved with this project (see EnvConfig::save_project()
+    // and the "Save Project" menu item below for where it's written back out).
+    media_container_mgr.rotation_angle(project_file_mgr.get_rotation_angle());
     FontManager font_manager("c:\\Windows\\Fonts\\courbd.ttf", 48, SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT);
     //TODO(P1) Hand the telemetry_mgr, instead of its vector, into the env_config.
     EnvConfig env_config(&media_container_mgr, &font_manager, &project_file_mgr, (float)SCR_WIDTH, (float)SCR_HEIGHT + (float)UI_HEIGHT, (float)UI_HEIGHT);
@@ -250,7 +253,13 @@ int main()
             if (ImGui::BeginMainMenuBar()) {
                 if (ImGui::BeginMenu("File")) {
                     if (ImGui::MenuItem("Save Project")) {
-                        project_file_mgr.save_project();
+                        // Goes through EnvConfig, not project_file_mgr directly -- that's
+                        // what actually pulls the *current* rotation (and telemetry offset,
+                        // launch time, etc.) out of their live owners first. Calling
+                        // project_file_mgr.save_project() straight would just re-write
+                        // whatever was last pushed into it, which for anything only changed
+                        // via a nudge/held key (rotation included) could be stale.
+                        EnvConfig::instance->save_project();
                     }
                     ImGui::Separator();
                     if (ImGui::MenuItem("Save Raw Video Frame...")) {

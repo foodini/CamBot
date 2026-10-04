@@ -299,10 +299,23 @@ void MediaContainerMgr::render() {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width / 2, height / 2, 0, GL_RED, GL_UNSIGNED_BYTE, m_last_video_frame->data[2]);
     glGenerateMipmap(GL_TEXTURE_2D);
 
+    // The GL viewport (see main.cpp's glViewport call) spans the video display area AND
+    // the UI strip below it, so the hardware only clips this quad's rotated corners at the
+    // actual window edges -- which is why the sides and top (which coincide with those
+    // edges) were already trimmed correctly, but the bottom (which doesn't -- there's UI
+    // strip left below it) wasn't: a rotated corner could poke down past the video rect's
+    // real bottom edge and into the UI strip's screen space, showing up as a stray diagonal.
+    // Scissoring to exactly the video rect (same rectangle glReadPixels() captures for
+    // screenshots/export, just in GL's bottom-left-origin convention) makes the bottom edge
+    // a hard clip too, consistent with the other three.
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(0, (int)env_config->ui_height(), (int)viewport_width, (int)video_rect_height);
+
     // render the tristrip
     glBindVertexArray(m_VAO);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
+    glDisable(GL_SCISSOR_TEST);
 }
 
 bool MediaContainerMgr::advance_frame() {
