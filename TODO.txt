@@ -1,5 +1,6 @@
 * The .exe needs an icon.
 * audio in UI mode
+* Pull ground speed out of the map and put it above km.
 * Tell the user that frames are currently being cached while doing a right-click scrub
   if the next required frame is being delayed.
 * We need an aesthetic pass over the map. lift/sync should be averaged over the last n
@@ -13,6 +14,7 @@
   potentially the frame rate being traversed.
 * When playing forward, hold on to a bunch of frames so reverse scrubbing will have them
   cached?
+* Make climb/sink rate look like an avionic? 
 * Require user to hold down control key to affect TelemetryScrubWidget, since a mis-click
   there requires the user to re-sync the telemetry.
 * Do you have any control over the quality of the exported video?
