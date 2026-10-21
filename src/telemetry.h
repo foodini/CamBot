@@ -116,10 +116,10 @@ public:
 	float offset() const                  { return m_telemetry_offset; }
 	bool  set_offset(float offset)        { m_telemetry_offset = offset; return true; }
 
-	// Telemetry's own elapsed seconds marking where the usable window of telemetry begins --
-	// set once, whenever the launch marker is (re)placed (see EnvConfig::launch_time()), and
-	// otherwise held fixed, so it never drifts just because the TSW's sync offset gets
-	// tweaked afterward.
+	// Telemetry's own elapsed seconds at the launch marker -- set once, whenever the marker is
+	// (re)placed (see EnvConfig::launch_time()), and otherwise held fixed, so it never drifts just
+	// because the TSW's sync offset gets tweaked afterward. EnvConfig derives the window of
+	// telemetry that's rendered (starting at the video's first frame) from it.
 	float window_start_elapsed() const           { return m_window_start_elapsed; }
 	bool  set_window_start_elapsed(float elapsed) { m_window_start_elapsed = elapsed; return true; }
 

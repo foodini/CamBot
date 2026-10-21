@@ -31,7 +31,8 @@ public:
 		scale(_scale),
 		dropshadow(_dropshadow),
 		v_align(_v_align),
-		h_align(_h_align)
+		h_align(_h_align),
+		alpha(1.0f)
 	{}
 	
 	StringAndProperties(int _ttl, const glm::vec2& _pos, const glm::vec3& _color, float _scale, float _dropshadow, 
@@ -83,6 +84,7 @@ public:
 	float            dropshadow;
 	V_ALIGN          v_align;
 	H_ALIGN          h_align;
+	float            alpha;   // 1 = opaque; set after construction for fades (the drop shadow fades with it).
 };
 
 class FontManager {
@@ -93,6 +95,10 @@ public:
 	void add_string(const StringAndProperties& string_properties);
 	void update_time(uint64_t timestamp);
 	void purge_expired_strings();
+	// Layout helpers for callers that line text up themselves: a string's width in pixels at a
+	// given scale, and the font's nominal height in pixels at scale 1.
+	float string_width_pixels(const std::string& str, float scale) { return get_string_width(str) * scale; }
+	int   font_size() const { return m_size; }
 
 private:
 	typedef std::pair<StringAndProperties, std::string> QueuePair;

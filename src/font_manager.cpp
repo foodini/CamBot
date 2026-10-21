@@ -103,6 +103,7 @@ void FontManager::render_string(const StringAndProperties& sap) {
     const EnvConfig* env_config = EnvConfig::instance;
     
     glUniform3f(glGetUniformLocation(m_shader.ID, "textColor"), sap.color.r, sap.color.g, sap.color.b);
+    glUniform1f(glGetUniformLocation(m_shader.ID, "textAlpha"), sap.alpha);
 
     glm::vec4 xformed_pos = env_config->screen_to_pixel_space_projection() * glm::vec4(sap.pos, 0.0f, 1.0f);
     float x = xformed_pos.x - sap.dropshadow;

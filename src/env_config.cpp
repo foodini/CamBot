@@ -101,11 +101,16 @@ const TelemetrySlice& EnvConfig::telemetry_slice() const {
 	return TelemetryMgr::instance->slice_at(media_in_elapsed());
 }
 
+// TelemetryMgr::window_start_elapsed() is where the launch marker falls in telemetry. The window
+// itself starts as far before that as the marker is into the video -- i.e. at the video's own
+// first frame -- so it spans exactly what is rendered, whether or not there's footage before
+// launch. (It used to start at the launch marker and run one video-duration from there, which
+// overshot the end of the video by however much footage preceded launch.)
 float EnvConfig::telemetry_window_start_elapsed() const {
-	return TelemetryMgr::instance->window_start_elapsed();
+	return TelemetryMgr::instance->window_start_elapsed() - m_launch_time;
 }
 
-int32_t EnvConfig::telemetry_window_start_index() const {
+int32_t EnvConfig::telemetry_launch_index() const {
 	int32_t index = TelemetryMgr::instance->index_for_elapsed(TelemetryMgr::instance->window_start_elapsed());
 	int32_t last_valid = (int32_t)TelemetryMgr::instance->size() - 1;
 	if (index < 0) {
@@ -116,8 +121,19 @@ int32_t EnvConfig::telemetry_window_start_index() const {
 	return index;
 }
 
+int32_t EnvConfig::telemetry_window_start_index() const {
+	int32_t index = TelemetryMgr::instance->index_for_elapsed(telemetry_window_start_elapsed());
+	int32_t last_valid = (int32_t)TelemetryMgr::instance->size() - 1;
+	if (index < 0) {
+		return 0;
+	} else if (index > last_valid) {
+		return last_valid;
+	}
+	return index;
+}
+
 int32_t EnvConfig::telemetry_window_end_index() const {
-	int32_t index = TelemetryMgr::instance->index_for_elapsed(TelemetryMgr::instance->window_start_elapsed() + media_in_duration());
+	int32_t index = TelemetryMgr::instance->index_for_elapsed(telemetry_window_start_elapsed() + media_in_duration());
 	int32_t last_valid = (int32_t)TelemetryMgr::instance->size() - 1;
 	if (index < 0) {
 		return 0;
@@ -149,8 +165,10 @@ void EnvConfig::sync_altitude_correction() {
 }
 
 float EnvConfig::telemetry_distance_flown() const {
-	const TelemetrySlice& window_start_slice = (*TelemetryMgr::instance)[telemetry_window_start_index()];
-	return telemetry_slice().m_total_distance - window_start_slice.m_total_distance;
+	// From the launch marker, not the start of the window: footage of the walk up to launch
+	// isn't distance flown. Zero until launch.
+	const TelemetrySlice& launch_slice = (*TelemetryMgr::instance)[telemetry_launch_index()];
+	return (std::max)(0.0f, telemetry_slice().m_total_distance - launch_slice.m_total_distance);
 }
 
 void EnvConfig::save_project() {

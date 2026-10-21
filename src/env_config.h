@@ -52,6 +52,8 @@ public:
 	// Map course trace widths and recent period. Same deal: set freely every frame, then
 	// save_user_settings() when the user lets go.
 	void map_trace_settings(const MapTraceSettings& settings) { m_user_settings.map_trace = settings; }
+	// Flight summary duration and XC toggle. Same deal: set freely, then save_user_settings() on release.
+	void summary_settings(const SummarySettings& settings) { m_user_settings.summary = settings; }
 	void save_user_settings() const                        { m_user_settings.save(); }
 	// The true altitudes (ft) the user gave for the start and end of the video. These belong to
 	// the project (they're about this video's location), so setting them saves the project file.
@@ -86,6 +88,7 @@ public:
 	const MapZoomSettings&  map_zoom_settings()      const { return m_user_settings.map_zoom; }
 	float                   climb_color_range()      const { return m_user_settings.climb_color_range; }
 	const MapTraceSettings& map_trace_settings()     const { return m_user_settings.map_trace; }
+	const SummarySettings&  summary_settings()       const { return m_user_settings.summary; }
 	const AltitudeReferences& altitude_references()  const { return m_altitude_refs; }
 	// Where the first and last frames of the video fall in telemetry, as sample indices clamped
 	// to the recording -- the moments the altitude references describe.
@@ -95,22 +98,25 @@ public:
 	// TelemetryMgr::duration()/elapsed_at(). Used by TelemetryScrubWidget.
 	float                   telemetry_duration()      const;
 	float                   telemetry_elapsed()       const;
-	// Telemetry's own elapsed time at the launch marker, snapshotted once, whenever the launch
-	// marker is (re)placed by launch_time() above -- not a live function of the current sync
-	// offset, so an ordinary TSW drag afterward can't move it. This is the start of the window
-	// the map, the altitude graph, and distance-flown restrict themselves to, and what
+	// Where the video's first frame falls in telemetry, as of the last time the launch marker
+	// was (re)placed by launch_time() above: telemetry's elapsed time at the marker (snapshotted
+	// then -- not a live function of the current sync offset, so an ordinary TSW drag afterward
+	// can't move it), less how far into the video the marker is. This is the start of the window
+	// the map, the altitude graph and the flight summary restrict themselves to, and what
 	// TelemetryScrubWidget's left cutoff marker displays.
 	float                   telemetry_window_start_elapsed() const;
-	// The telemetry index range backing that launch-anchored, video-duration-wide window --
-	// clamped to the telemetry file's actual recorded bounds. Used by the map, the altitude
-	// graph, and telemetry_distance_flown() below so none of them pull in telemetry recorded
-	// outside that window (TelemetryMgr itself stays video/launch-agnostic, so this combination
-	// lives here rather than there).
+	// The telemetry index range backing that window -- one video-duration wide, so it covers
+	// exactly the telemetry that's rendered -- clamped to the telemetry file's actual recorded
+	// bounds. Used by the map, the altitude graph and the flight summary so none of them pull in
+	// telemetry recorded outside that window (TelemetryMgr itself stays video/launch-agnostic, so
+	// this combination lives here rather than there).
 	int32_t                 telemetry_window_start_index() const;
 	int32_t                 telemetry_window_end_index()   const;
-	// Distance flown (km), from the start of that window to the current playhead -- replaces a
-	// plain telemetry_slice().m_total_distance read, which was cumulative since telemetry
-	// recording began rather than since the video's own start.
+	// Where the launch marker falls in telemetry (clamped to the recording).
+	int32_t                 telemetry_launch_index() const;
+	// Distance flown (km), from the launch marker to the current playhead (zero before launch) --
+	// replaces a plain telemetry_slice().m_total_distance read, which was cumulative since
+	// telemetry recording began.
 	float                   telemetry_distance_flown() const;
 	float                   media_in_elapsed()       const; // Wall time passed since start of video.
 	float                   media_in_duration()      const; // Wall time length of video.

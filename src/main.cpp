@@ -18,6 +18,7 @@
 #include "stb_image_write.h"
 
 #include "env_config.h"
+#include "flight_summary_overlay.h"
 #include "font_manager.h"
 #include "interaction_manager.h"
 #include "lines.h"
@@ -271,6 +272,49 @@ static void draw_map_settings_window(bool* open, bool* resync, bool zoom_locked)
     ImGui::End();
 }
 
+// The "Flight Summary" window: how long the summary stays up at the end of the video, and whether
+// it includes the cross-country statistics. Both are the user's (saved with the other user
+// settings). Locked while exporting so the summary can't change partway through a render.
+static void draw_summary_settings_window(bool* open, bool* resync, bool exporting) {
+    EnvConfig* env_config = EnvConfig::instance;
+
+    static SummarySettings edit;
+    if (*resync) {
+        edit = env_config->summary_settings();
+        *resync = false;
+    }
+
+    if (!ImGui::Begin("Flight Summary", open, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::End();
+        return;
+    }
+
+    if (exporting) {
+        ImGui::TextWrapped("The summary settings are locked while exporting.");
+    }
+    ImGui::BeginDisabled(exporting);
+    bool changed = false;
+    bool released = false;
+    changed |= ImGui::SliderFloat("Show for the last (s)", &edit.seconds, 3.0f, 60.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp);
+    released |= ImGui::IsItemDeactivatedAfterEdit();
+    if (ImGui::Checkbox("Cross-country statistics", &edit.show_xc)) {
+        changed = true;
+        released = true;
+    }
+    ImGui::EndDisabled();
+    ImGui::TextDisabled("Adds distance covered, best ground glide, circles, and time circling.");
+    ImGui::TextDisabled("Statistics cover the same stretch of flight as the altitude graph.");
+
+    if (changed && !exporting) {
+        env_config->summary_settings(edit);
+    }
+    if (released && !exporting) {
+        env_config->save_user_settings();
+    }
+
+    ImGui::End();
+}
+
 // The "Altitude Reference" window: the true altitude (ft) at the start and at the end of the
 // video, which the barometer is gently re-based on (see altitude_reference.h). It's the
 // project's, not the user's, since it describes where this video was shot. A change applies as
@@ -433,7 +477,10 @@ int main()
 
     MapWidget map_widget(.35f, .35f*SCR_WIDTH/(SCR_HEIGHT+UI_HEIGHT), 0.6f, -0.765f);
     ClimbWidget climb_widget(.02f, .35f * SCR_WIDTH / (SCR_HEIGHT + UI_HEIGHT), 0.9625f, -0.765f);
-    GraphWidget graph_widget(.5f, .3f, -0.99f, -1.0f + .24f);
+    // The flight summary's last line sits at the graph's bottom edge, so both are the same distance off the bottom of the video.
+    const float GRAPH_BOTTOM_NDC = -1.0f + .24f;
+    GraphWidget graph_widget(.5f, .3f, -0.99f, GRAPH_BOTTOM_NDC);
+    FlightSummaryOverlay flight_summary_overlay(GRAPH_BOTTOM_NDC);
     //TODO(P0): This is dumb. Have each widget know whether it needs a poly call. The TelemetryMgr can call all widgets and
     //construct the list of the ones that need data.
     std::vector<WidgetBase*> polygonalized_widgets;
@@ -474,6 +521,8 @@ int main()
     bool map_settings_resync = false;
     bool show_altitude_settings = false;
     bool altitude_settings_resync = false;
+    bool show_summary_settings = false;
+    bool summary_settings_resync = false;
     // Set by the two "Save ... Frame" menu items below; consumed (and cleared) at the exact
     // point in this same frame's render sequence that produces the right pixels -- see the two
     // save_frame_as_png() call sites further down.
@@ -607,6 +656,10 @@ int main()
                         show_altitude_settings = true;
                         altitude_settings_resync = true;
                     }
+                    if (ImGui::MenuItem("Flight Summary...")) {
+                        show_summary_settings = true;
+                        summary_settings_resync = true;
+                    }
                     ImGui::EndMenu();
                 }
                 if (ImGui::BeginMenu("Help")) {
@@ -647,6 +700,10 @@ int main()
 
             if (show_altitude_settings) {
                 draw_altitude_window(&show_altitude_settings, &altitude_settings_resync, media_container_mgr.recording());
+            }
+
+            if (show_summary_settings) {
+                draw_summary_settings_window(&show_summary_settings, &summary_settings_resync, media_container_mgr.recording());
             }
 
             // Export status, bottom-center. Drawn through ImGui -- rather than font_manager,
@@ -752,6 +809,7 @@ int main()
         map_widget.render();
         climb_widget.render();
         graph_widget.render();
+        flight_summary_overlay.render();
         font_manager.render();
         save_frame_as_png(pending_overlay_screenshot_path);
         pending_overlay_screenshot_path.clear();

@@ -31,9 +31,19 @@ struct MapTraceSettings {
 	float recent_seconds;
 };
 
+// The flight summary shown over the end of the video (see flight_summary_overlay.h): how many
+// seconds of the end of the video it covers, and whether it includes the cross-country statistics
+// (distance covered, best glide, circles and time circling).
+struct SummarySettings {
+	SummarySettings() : seconds(10.0f), show_xc(false) {}
+
+	float seconds;
+	bool  show_xc;
+};
+
 class UserSettings {
 public:
-	UserSettings() : climb_filter(), climb_color_range(800.0f), map_trace(), map_zoom() {
+	UserSettings() : climb_filter(), climb_color_range(800.0f), map_trace(), map_zoom(), summary() {
 		load();
 	}
 
@@ -41,6 +51,7 @@ public:
 	float               climb_color_range;   // +/- ft/min spanned by the map course colors and the climb indicator
 	MapTraceSettings    map_trace;
 	MapZoomSettings     map_zoom;
+	SummarySettings     summary;
 
 	// Where the settings file lives. create_directory makes the CamBot folder if it's missing.
 	static std::string file_path(bool create_directory) {
@@ -87,6 +98,8 @@ public:
 			else if (strcmp(key, "zoom_min_km") == 0)        { if (value >= 0.2f && value <= 20.0f)    map_zoom.min_width_km = value; }
 			else if (strcmp(key, "zoom_max_km") == 0)        { if (value >= 0.2f && value <= 20.0f)    map_zoom.max_width_km = value; }
 			else if (strcmp(key, "zoom_transition_s") == 0)  { if (value >= 1.0f && value <= 120.0f)  map_zoom.transition_seconds = value; }
+			else if (strcmp(key, "summary_s") == 0)          { if (value >= 1.0f && value <= 120.0f)  summary.seconds = value; }
+			else if (strcmp(key, "summary_xc") == 0)         { summary.show_xc = (value != 0.0f); }
 		}
 		fclose(fd);
 		if (map_zoom.max_width_km < map_zoom.min_width_km)
@@ -107,6 +120,8 @@ public:
 		fprintf(fd, "zoom_min_km:%f\n", map_zoom.min_width_km);
 		fprintf(fd, "zoom_max_km:%f\n", map_zoom.max_width_km);
 		fprintf(fd, "zoom_transition_s:%f\n", map_zoom.transition_seconds);
+		fprintf(fd, "summary_s:%f\n", summary.seconds);
+		fprintf(fd, "summary_xc:%d\n", summary.show_xc ? 1 : 0);
 		fclose(fd);
 		return true;
 	}
