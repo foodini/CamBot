@@ -66,6 +66,18 @@ void ProjectFileManager::get_project() {
 			else if (strncmp(line, "d_rot", 3) == 0) {
 				m_rotation_angle = (float)atof(line + 6);
 			}
+			// True altitudes (ft) at the start and end of the video; see altitude_reference.h.
+			// Note the 3-character prefixes ("s_a", "e_a", "sam") have to stay distinct from each other
+			// and from the keys above.
+			else if (strncmp(line, "s_alt", 3) == 0) {
+				m_altitude_refs.start_ft = (float)atof(line + 6);
+			}
+			else if (strncmp(line, "e_alt", 3) == 0) {
+				m_altitude_refs.end_ft = (float)atof(line + 6);
+			}
+			else if (strncmp(line, "same_", 3) == 0) {
+				m_altitude_refs.end_same_as_start = (atoi(line + 6) != 0);
+			}
 		}
 		fclose(project_fd);
 	}
@@ -84,6 +96,9 @@ void ProjectFileManager::save_project() {
 	fprintf(project_fd, "d_lau:%f\n", m_launch_time);
 	fprintf(project_fd, "d_win:%f\n", m_window_start_elapsed);
 	fprintf(project_fd, "d_rot:%f\n", m_rotation_angle);
+	fprintf(project_fd, "s_alt:%f\n", m_altitude_refs.start_ft);
+	fprintf(project_fd, "e_alt:%f\n", m_altitude_refs.end_ft);
+	fprintf(project_fd, "same_:%d\n", m_altitude_refs.end_same_as_start ? 1 : 0);
 
 	fclose(project_fd);
 }

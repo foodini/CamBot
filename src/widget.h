@@ -141,6 +141,9 @@ private:
 	// whenever the TSW's offset or cutoffs move.
 	int32_t               m_window_start_index = -1;
 	int32_t               m_window_end_index = -1;
+	// TelemetryMgr::climb_version() the course colors were last built from -- the course bakes
+	// each point's climb rate into its vertices, so it rebuilds when the smoothing changes.
+	uint32_t              m_climb_version = 0;
 	void                  rebuild_course_for_window(int32_t start_index, int32_t end_index);
 
 	Shader                m_shader_course;
@@ -198,6 +201,9 @@ private:
 	// and re-runs whenever the TSW's offset or cutoffs move.
 	int32_t            m_window_start_index = -1;
 	int32_t            m_window_end_index = -1;
+	// TelemetryMgr::altitude_version() the graph was last built from -- it bakes altitudes into
+	// geometry, so a change to the altitude references means a rebuild.
+	uint32_t           m_alt_version = 0;
 	void               rebuild_windowed_data(int32_t start_index, int32_t end_index);
 };
 

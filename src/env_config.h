@@ -5,7 +5,9 @@
 
 #include "font_manager.h"
 #include "media_container_manager.h"
+#include "altitude_reference.h"
 #include "project_file_manager.h"
+#include "user_settings.h"
 //#include "telemetry.h"
 
 class TelemetryMgr;
@@ -36,6 +38,28 @@ public:
 	bool seek_to_parametric_fast(float parametric)         { return media_mgr->seek_to_parametric_fast(parametric); }
 	bool seek_by_frames_fast(int64_t frame_delta)          { return media_mgr->seek_by_frames_fast(frame_delta); }
 	bool launch_time(float launch_time);
+	// The settings below belong to the user, not the project (see user_settings.h), so a look
+	// dialed in once carries over to every video.
+	//
+	// Re-smooths every telemetry slice's climb rate with new settings (TelemetryMgr does the work)
+	// and saves the user settings. False, changing nothing, while telemetry is still loading.
+	bool climb_filter_settings(const ClimbFilterSettings& settings);
+	// Re-fits every slice's map zoom to new limits; same rules as above.
+	bool map_zoom_settings(const MapZoomSettings& settings);
+	// +/- ft/min that the map course colors and the climb indicator span. Doesn't save by itself
+	// (it's set every frame while a slider is dragged) -- call save_user_settings() when done.
+	void climb_color_range(float range)                    { m_user_settings.climb_color_range = range; }
+	// Map course trace widths and recent period. Same deal: set freely every frame, then
+	// save_user_settings() when the user lets go.
+	void map_trace_settings(const MapTraceSettings& settings) { m_user_settings.map_trace = settings; }
+	void save_user_settings() const                        { m_user_settings.save(); }
+	// The true altitudes (ft) the user gave for the start and end of the video. These belong to
+	// the project (they're about this video's location), so setting them saves the project file.
+	// They take effect through sync_altitude_correction().
+	void altitude_references(const AltitudeReferences& refs) { m_altitude_refs = refs; save_project(); }
+	// Call once per frame: (re)applies the altitude references to the telemetry whenever they,
+	// or where the video starts and ends in telemetry time, have changed. Cheap otherwise.
+	void sync_altitude_correction();
 	// Pauses normal playback (used when an interactive scrub/scan begins); there's no un-pause
 	// call here because nothing currently auto-resumes -- releasing the mouse just leaves it paused.
 	void pause()                                           { paused = true; }
@@ -57,6 +81,16 @@ public:
 	int32_t                 telemetry_index()        const;
 	const TelemetrySlice&   telemetry_slice()        const;
 	float                   telemetry_offset()       const;
+	const UserSettings&     user_settings()          const { return m_user_settings; }
+	const ClimbFilterSettings& climb_filter_settings() const { return m_user_settings.climb_filter; }
+	const MapZoomSettings&  map_zoom_settings()      const { return m_user_settings.map_zoom; }
+	float                   climb_color_range()      const { return m_user_settings.climb_color_range; }
+	const MapTraceSettings& map_trace_settings()     const { return m_user_settings.map_trace; }
+	const AltitudeReferences& altitude_references()  const { return m_altitude_refs; }
+	// Where the first and last frames of the video fall in telemetry, as sample indices clamped
+	// to the recording -- the moments the altitude references describe.
+	int32_t                 telemetry_video_start_index() const;
+	int32_t                 telemetry_video_end_index()   const;
 	// Telemetry's own recorded length, and the current media position mapped onto it -- see
 	// TelemetryMgr::duration()/elapsed_at(). Used by TelemetryScrubWidget.
 	float                   telemetry_duration()      const;
@@ -99,6 +133,8 @@ public:
 private:
 	void                    recompute_projections();
 	float                   m_launch_time;
+	AltitudeReferences      m_altitude_refs;
+	UserSettings            m_user_settings;
 
 	uint64_t                m_media_pts_start;
 	uint64_t                m_media_pts_end;

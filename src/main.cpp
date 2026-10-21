@@ -1,3 +1,5 @@
+#include "version.h"
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <stdio.h>
@@ -85,6 +87,291 @@ static void save_frame_as_png(const std::string& path) {
     stbi_write_png(path.c_str(), SCR_WIDTH, SCR_HEIGHT, 3, buf.data(), SCR_WIDTH * 3);
 }
 
+// The "Climb Rate Settings" window: which causal filter smooths the climb rate (see
+// climb_filter.h), how long its window is, and the +/- ft/min the map/indicator colors span.
+// Because the telemetry is already in memory, changing the filter just re-runs it over every
+// slice and rebuilds the map's course -- but that takes a moment, so the sliders keep their own
+// working copy and only apply it on release (a drag would redo all of it every frame).
+static void draw_climb_settings_window(bool* open, bool* resync, bool exporting) {
+    EnvConfig* env_config = EnvConfig::instance;
+    TelemetryMgr* telemetry_mgr = TelemetryMgr::instance;
+
+    static ClimbFilterSettings edit;
+    static float edit_range = 800.0f;
+    if (*resync) {
+        edit = env_config->climb_filter_settings();
+        edit_range = env_config->climb_color_range();
+        *resync = false;
+    }
+
+    if (!ImGui::Begin("Climb Rate Settings", open, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::End();
+        return;
+    }
+
+    const bool loading = !telemetry_mgr->parsing_done();
+    if (loading) {
+        ImGui::TextWrapped("Telemetry is still loading. The filter settings unlock when it finishes.");
+    } else if (exporting) {
+        ImGui::TextWrapped("The filter settings are locked while exporting.");
+    }
+
+    ImGui::BeginDisabled(loading || exporting);
+
+    bool apply_filter = false;
+    const char* filter_names[CLIMB_FILTER_TYPE_COUNT] = { "Trailing-window slope", "Alpha-beta (critically damped)" };
+    if (ImGui::Combo("Filter", &edit.type, filter_names, CLIMB_FILTER_TYPE_COUNT)) {
+        apply_filter = true;
+    }
+
+    const bool windowed = (edit.type == CLIMB_FILTER_WINDOWED_SLOPE);
+    float* param = windowed ? &edit.window_seconds : &edit.time_constant_seconds;
+    ImGui::SliderFloat(windowed ? "Window (s)" : "Time constant (s)", param,
+        windowed ? 0.2f : 0.1f, windowed ? 20.0f : 10.0f, "%.2f",
+        ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        apply_filter = true;
+    }
+
+    // What a setting costs. Longer smooths more but runs further behind reality; shorter is
+    // quicker but noisier. The noise figures are a floor: they assume independent (white)
+    // barometer noise of the size measured from this recording's center sensor, and the real
+    // noise is partly correlated, which averaging removes much less well.
+    const float sample_hz = (float)TELEMETRY_FREQUENCY;
+    const float sigma_m = telemetry_mgr->alt_noise_sigma_m();
+    const float fpm = METERS_PER_SECOND_TO_FEET_PER_MINUTE;
+    ImGui::Spacing();
+    ImGui::Text("Selected:  noise floor ~%.1f ft/min,  lag ~%.1f s",
+        climb_filter_expected_noise_mps(edit.type, *param, sigma_m, sample_hz) * fpm,
+        climb_filter_expected_lag_seconds(edit.type, *param, sample_hz));
+    ImGui::TextDisabled("Noise floor assumes independent barometer noise of %.2f m rms (measured from this flight's center sensor).", sigma_m);
+    ImGui::TextDisabled("Real jitter runs higher, especially for long windows, because that noise is partly correlated.");
+    ImGui::TextDisabled("Longer = smoother but later. Shorter = quicker but noisier.");
+    ImGui::Spacing();
+
+    if (ImGui::BeginTable("climb_filter_hints", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit)) {
+        ImGui::TableSetupColumn(windowed ? "Window" : "Time constant");
+        ImGui::TableSetupColumn("Noise floor (ft/min)");
+        ImGui::TableSetupColumn("Lag (s)");
+        ImGui::TableHeadersRow();
+
+        // For reference: how the climb rate was computed before these filters existed.
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::TextUnformatted("old: 0.5 s difference");
+        ImGui::TableSetColumnIndex(1);
+        ImGui::Text("%.1f", sigma_m * sqrtf(2.0f) / 0.5f * fpm);
+        ImGui::TableSetColumnIndex(2);
+        ImGui::Text("%.2f", 0.25f);
+
+        static const float windows[6] = { 0.5f, 1.0f, 2.0f, 3.0f, 5.0f, 10.0f };
+        static const float time_constants[6] = { 0.25f, 0.5f, 1.0f, 1.5f, 2.5f, 5.0f };
+        for (int row = 0; row < 6; row++) {
+            const float value = windowed ? windows[row] : time_constants[row];
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%.2f s", value);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%.1f", climb_filter_expected_noise_mps(edit.type, value, sigma_m, sample_hz) * fpm);
+            ImGui::TableSetColumnIndex(2);
+            ImGui::Text("%.2f", climb_filter_expected_lag_seconds(edit.type, value, sample_hz));
+        }
+        ImGui::EndTable();
+    }
+
+    ImGui::EndDisabled();
+
+    if (apply_filter) {
+        env_config->climb_filter_settings(edit);
+    }
+
+    // The color scale is just a shader uniform, so it follows the slider live; the project file
+    // is only written when the slider is let go.
+    ImGui::Separator();
+    if (ImGui::SliderFloat("Color range (+/- ft/min)", &edit_range, 100.0f, 2000.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp)) {
+        env_config->climb_color_range(edit_range);
+    }
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        env_config->save_user_settings();
+    }
+
+    ImGui::End();
+}
+
+// The "Map Settings" window: how wide the map's course trace is drawn for the most recent
+// stretch of flight, how wide for everything older, how long "recent" is, and how far the map
+// may zoom in and out. The trace settings are just shader uniforms, so they show immediately;
+// the zoom limits re-fit every telemetry slice, which takes a moment, so those apply when a
+// slider is let go. Everything is saved to the user settings (not the project) on release.
+static void draw_map_settings_window(bool* open, bool* resync, bool zoom_locked) {
+    EnvConfig* env_config = EnvConfig::instance;
+
+    static MapTraceSettings trace;
+    static MapZoomSettings zoom;
+    if (*resync) {
+        trace = env_config->map_trace_settings();
+        zoom = env_config->map_zoom_settings();
+        *resync = false;
+    }
+
+    if (!ImGui::Begin("Map Settings", open, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::End();
+        return;
+    }
+
+    ImGui::TextUnformatted("Trace");
+    bool trace_changed = false;
+    bool trace_released = false;
+    trace_changed |= ImGui::SliderFloat("Recent trace width (px)", &trace.recent_width_px, 2.0f, 8.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+    trace_released |= ImGui::IsItemDeactivatedAfterEdit();
+    trace_changed |= ImGui::SliderFloat("Older trace width (px)", &trace.old_width_px, 2.0f, 8.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+    trace_released |= ImGui::IsItemDeactivatedAfterEdit();
+    trace_changed |= ImGui::SliderFloat("Recent period (s)", &trace.recent_seconds, 30.0f, 600.0f, "%.0f", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
+    trace_released |= ImGui::IsItemDeactivatedAfterEdit();
+    ImGui::TextDisabled("The most recent period is drawn at the recent width, easing to the older width over");
+    ImGui::TextDisabled("the 10 s after it. Trace the glider hasn't flown yet is muted, at the older width.");
+    if (trace_changed) {
+        env_config->map_trace_settings(trace);
+    }
+    if (trace_released) {
+        env_config->save_user_settings();
+    }
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Zoom");
+    const bool loading = !TelemetryMgr::instance->parsing_done();
+    if (loading) {
+        ImGui::TextWrapped("Telemetry is still loading. The zoom settings unlock when it finishes.");
+    } else if (zoom_locked) {
+        ImGui::TextWrapped("The zoom settings are locked while exporting.");
+    }
+    ImGui::BeginDisabled(loading || zoom_locked);
+    bool zoom_released = false;
+    // The closest zoom can't be wider than the farthest: whichever slider is moved past the
+    // other pushes it along.
+    if (ImGui::SliderFloat("Closest zoom: map width (km)", &zoom.min_width_km, 0.2f, 20.0f, "%.2f", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp)) {
+        zoom.max_width_km = (std::max)(zoom.max_width_km, zoom.min_width_km);
+    }
+    zoom_released |= ImGui::IsItemDeactivatedAfterEdit();
+    if (ImGui::SliderFloat("Farthest zoom: map width (km)", &zoom.max_width_km, 0.2f, 20.0f, "%.2f", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp)) {
+        zoom.min_width_km = (std::min)(zoom.min_width_km, zoom.max_width_km);
+    }
+    zoom_released |= ImGui::IsItemDeactivatedAfterEdit();
+    ImGui::SliderFloat("Zoom transition (s)", &zoom.transition_seconds, 2.0f, 60.0f, "%.0f", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
+    zoom_released |= ImGui::IsItemDeactivatedAfterEdit();
+    ImGui::TextDisabled("In straight flight the map shows the farthest zoom. After a full circle within 45 s it");
+    ImGui::TextDisabled("zooms in to fit the last 45 s of path (never past the closest zoom), and back out once");
+    ImGui::TextDisabled("the turning stops. Always centered on the pilot.");
+    ImGui::EndDisabled();
+
+    if (zoom_released && !loading && !zoom_locked) {
+        env_config->map_zoom_settings(zoom);
+    }
+
+    ImGui::End();
+}
+
+// The "Altitude Reference" window: the true altitude (ft) at the start and at the end of the
+// video, which the barometer is gently re-based on (see altitude_reference.h). It's the
+// project's, not the user's, since it describes where this video was shot. A change applies as
+// soon as the number is committed (Enter, or clicking away) or a box is ticked.
+static void draw_altitude_window(bool* open, bool* resync, bool exporting) {
+    EnvConfig* env_config = EnvConfig::instance;
+    TelemetryMgr* telemetry_mgr = TelemetryMgr::instance;
+
+    static bool use_start = false;
+    static bool use_end = false;
+    static bool same_as_start = false;
+    static float start_ft = 0.0f;
+    static float end_ft = 0.0f;
+    if (*resync) {
+        const AltitudeReferences& refs = env_config->altitude_references();
+        use_start = refs.has_start();
+        start_ft = use_start ? refs.start_ft : 0.0f;
+        use_end = AltitudeReferences::is_set(refs.end_ft);
+        end_ft = use_end ? refs.end_ft : 0.0f;
+        same_as_start = refs.end_same_as_start;
+        *resync = false;
+    }
+
+    if (!ImGui::Begin("Altitude Reference", open, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::End();
+        return;
+    }
+
+    const bool loading = !telemetry_mgr->parsing_done();
+    if (loading) {
+        ImGui::TextWrapped("Telemetry is still loading. This unlocks when it finishes.");
+    } else if (exporting) {
+        ImGui::TextWrapped("The altitude references are locked while exporting.");
+    }
+
+    ImGui::TextWrapped("Enter the true altitude at the start and at the end of the video. The barometer "
+        "is shifted to match, and the shift changes smoothly from one to the other, so slow drift "
+        "disappears. Enter just one to shift the whole flight by a constant.");
+    ImGui::Spacing();
+
+    ImGui::BeginDisabled(loading || exporting);
+    bool changed = false;
+
+    changed |= ImGui::Checkbox("Start of video (ft)", &use_start);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!use_start);
+    ImGui::SetNextItemWidth(110.0f);
+    ImGui::InputFloat("##start_ft", &start_ft, 0.0f, 0.0f, "%.1f");
+    changed |= ImGui::IsItemDeactivatedAfterEdit();
+    ImGui::EndDisabled();
+
+    changed |= ImGui::Checkbox("End of video (ft)", &use_end);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!use_end || same_as_start);
+    ImGui::SetNextItemWidth(110.0f);
+    float shown_end_ft = same_as_start ? start_ft : end_ft;
+    if (ImGui::InputFloat("##end_ft", &shown_end_ft, 0.0f, 0.0f, "%.1f") && !same_as_start) {
+        end_ft = shown_end_ft;
+    }
+    changed |= ImGui::IsItemDeactivatedAfterEdit();
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    changed |= ImGui::Checkbox("Same as start", &same_as_start);
+
+    ImGui::EndDisabled();
+
+    if (changed && !loading && !exporting) {
+        AltitudeReferences refs;
+        refs.start_ft = use_start ? start_ft : ALTITUDE_REF_UNSET;
+        refs.end_ft = use_end ? end_ft : ALTITUDE_REF_UNSET;
+        refs.end_same_as_start = same_as_start;
+        env_config->altitude_references(refs);
+    }
+
+    if (!loading) {
+        const AltitudeCorrectionInfo& info = telemetry_mgr->altitude_correction_info();
+        const float ft_per_m = 3.28084f;
+        ImGui::Separator();
+        if (!info.has_start && !info.has_end) {
+            ImGui::TextDisabled("No correction applied: the overlay shows the barometer as logged.");
+        }
+        if (info.has_start) {
+            ImGui::Text("Start: the barometer read %.0f ft here; shifted by %+.1f ft.", info.start_baro_m * ft_per_m, info.start_offset_m * ft_per_m);
+        }
+        if (info.has_end) {
+            ImGui::Text("End: the barometer read %.0f ft here; shifted by %+.1f ft.", info.end_baro_m * ft_per_m, info.end_offset_m * ft_per_m);
+        }
+        if (info.has_start && info.has_end) {
+            const float drift_m = info.drift_m();
+            ImGui::Text("The barometer drifted %+.1f ft (%+.1f m) between the two.", drift_m * ft_per_m, drift_m);
+            if (fabsf(drift_m) > 15.0f) {
+                ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f),
+                    "That's more than sensor drift usually accounts for. Check the numbers, or the weather moved a lot.");
+            }
+        }
+        ImGui::TextDisabled("The climb rate always uses the barometer as logged.");
+    }
+
+    ImGui::End();
+}
+
 int main()
 {
     // glfw: initialize and configure
@@ -165,7 +452,7 @@ int main()
     all_widgets.push_back(&climb_widget);
     all_widgets.push_back(&graph_widget);
 
-    TelemetryMgr telemetry_mgr(project_file_mgr.get_telemetry_file_path(), &polygonalized_widgets, project_file_mgr.get_telemetry_offset(), project_file_mgr.get_window_start_elapsed());
+    TelemetryMgr telemetry_mgr(project_file_mgr.get_telemetry_file_path(), &polygonalized_widgets, project_file_mgr.get_telemetry_offset(), project_file_mgr.get_window_start_elapsed(), env_config.user_settings().climb_filter, env_config.user_settings().map_zoom);
 
     InteractionMgr* interaction_mgr = InteractionMgr::instance();
     // Pause toggle stays owned here for now rather than by a specific subsystem -- see the
@@ -179,6 +466,14 @@ int main()
     float prev_frame_time = frame_time;
     float duration_avg = -1.0;
     bool show_about_popup = false;
+    // The Climb Rate Settings window (View menu): open flag, plus a request for the window to
+    // reload its sliders from the live settings the next time it draws.
+    bool show_climb_settings = false;
+    bool climb_settings_resync = false;
+    bool show_map_settings = false;
+    bool map_settings_resync = false;
+    bool show_altitude_settings = false;
+    bool altitude_settings_resync = false;
     // Set by the two "Save ... Frame" menu items below; consumed (and cleared) at the exact
     // point in this same frame's render sequence that produces the right pixels -- see the two
     // save_frame_as_png() call sites further down.
@@ -300,7 +595,18 @@ int main()
                     ImGui::EndMenu();
                 }
                 if (ImGui::BeginMenu("View")) {
-                    ImGui::MenuItem("(nothing here yet)", nullptr, false, false);
+                    if (ImGui::MenuItem("Climb Rate Settings...")) {
+                        show_climb_settings = true;
+                        climb_settings_resync = true;
+                    }
+                    if (ImGui::MenuItem("Map Settings...")) {
+                        show_map_settings = true;
+                        map_settings_resync = true;
+                    }
+                    if (ImGui::MenuItem("Altitude Reference...")) {
+                        show_altitude_settings = true;
+                        altitude_settings_resync = true;
+                    }
                     ImGui::EndMenu();
                 }
                 if (ImGui::BeginMenu("Help")) {
@@ -317,7 +623,7 @@ int main()
                 show_about_popup = false;
             }
             if (ImGui::BeginPopupModal("About CamBot", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-                ImGui::Text("CamBot");
+                ImGui::Text("CamBot %s", CAMBOT_VERSION_STRING);
                 ImGui::Separator();
                 ImGui::TextWrapped("Overlays custom flight telemetry onto GoPro video for glider flying.");
                 ImGui::Spacing();
@@ -325,6 +631,22 @@ int main()
                     ImGui::CloseCurrentPopup();
                 }
                 ImGui::EndPopup();
+            }
+
+            // Re-bases the barometer on the altitude references whenever they (or where the video
+            // falls in the telemetry) change; a no-op the rest of the time.
+            env_config.sync_altitude_correction();
+
+            if (show_climb_settings) {
+                draw_climb_settings_window(&show_climb_settings, &climb_settings_resync, media_container_mgr.recording());
+            }
+
+            if (show_map_settings) {
+                draw_map_settings_window(&show_map_settings, &map_settings_resync, media_container_mgr.recording());
+            }
+
+            if (show_altitude_settings) {
+                draw_altitude_window(&show_altitude_settings, &altitude_settings_resync, media_container_mgr.recording());
             }
 
             // Export status, bottom-center. Drawn through ImGui -- rather than font_manager,

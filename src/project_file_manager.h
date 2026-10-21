@@ -2,6 +2,8 @@
 
 #include <string>
 
+#include "altitude_reference.h"
+
 class ProjectFileManager {
 public:
 	ProjectFileManager();
@@ -18,12 +20,14 @@ public:
 	float get_telemetry_offset() { return m_telemetry_offset; }
 	float get_window_start_elapsed() { return m_window_start_elapsed; }
 	float get_rotation_angle() { return m_rotation_angle; }
+	const AltitudeReferences& get_altitude_references() { return m_altitude_refs; }
 
 	// Setters;
 	void set_launch_time(float t) { m_launch_time = t; }
 	void set_telemetry_offset(float offset) { m_telemetry_offset = offset; }
 	void set_window_start_elapsed(float t) { m_window_start_elapsed = t; }
 	void set_rotation_angle(float r) { m_rotation_angle = r; }
+	void set_altitude_references(const AltitudeReferences& refs) { m_altitude_refs = refs; }
 
 private:
 	std::string  m_project_file_path;
@@ -34,4 +38,5 @@ private:
 	float        m_telemetry_offset;      // Represents the contents of the file, not necessarily current config.
 	float        m_window_start_elapsed;  // Represents the contents of the file, not necessarily current config.
 	float        m_rotation_angle;       // Represents the contents of the file, not necessarily current config.
+	AltitudeReferences m_altitude_refs;  // Same.
 };

@@ -4,6 +4,8 @@ out vec4 FragColor;
 in vec2 uv;
 
 uniform vec3 climb_rates;
+// +/- ft/min spanned by the indicator (EnvConfig::climb_color_range()).
+uniform float climb_range;
 
 //TODO(P1): there's got to be a #include for frag shaders. The color array and the Bezier 
 //          computation shouldn't be repeated here and in the course shader. I gather
@@ -28,8 +30,8 @@ void main() {
     float climb_rate = (uv.x <  0.3333333 ? 1.0 : 0.0) * climb_rates.x +
                        (uv.x >= 0.3333333 && uv.x <= 0.6666667 ? 1.0 : 0.0) * climb_rates.y +
                        (uv.x > 0.6666667 ? 1.0 : 0.0) * climb_rates.z;
-    climb_rate = max(-800.0, min(800.0, climb_rate));
-    float line_height = (climb_rate + 800.0 ) / 1600.0;
+    climb_rate = max(-climb_range, min(climb_range, climb_rate));
+    float line_height = (climb_rate + climb_range) / (2.0 * climb_range);
     FragColor.rgb -= pow(1.0-abs(0.5-uv.y),240.0);
     FragColor += vec4(vec3(pow(1.0-abs(line_height-uv.y),120.0)), 0.0);
 }

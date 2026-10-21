@@ -18,7 +18,9 @@ public:
 
 	size_t size() { return m_vert_count; } // Returns NUMBER OF VERTS!
 	void clear() { m_dot_vector.clear(); m_vert_count = 0; }
-	void render(void(*set_vertex_attribs)() = nullptr);
+	// upload_data = false draws the points uploaded by the previous render() again without
+	// re-uploading them -- for drawing the same vertices twice with different shader settings.
+	void render(void(*set_vertex_attribs)() = nullptr, bool upload_data = true);
 private:
 	void push_vert(glm::vec2& xy, std::vector<float>& start_vals, std::vector<float>& end_vals, float t);
 

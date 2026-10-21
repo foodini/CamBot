@@ -324,7 +324,7 @@ MapWidget::MapWidget(float width, float height, float x_pos, float y_pos) :
 	m_center_lat(nanf("")),
 	m_center_lon(nanf("")),
 	m_course_lines(8.0, 0.5),
-	m_vertex_attrib_sizes{2, 1}
+	m_vertex_attrib_sizes{2, 1, 1}
 {
 	glGenVertexArrays(1, &m_course_vao);
 	glGenBuffers(1, &m_course_vbo);
@@ -353,6 +353,7 @@ void MapWidget::polygonalize(TelemetrySlice& slice, uint32_t index, uint32_t num
 
 	std::vector<float> supp;
 	supp.push_back(slice.m_climb_rate[1]);
+	supp.push_back((float)index);
 
 	m_course_lines.add_segment(xy, supp);
 }
@@ -370,6 +371,17 @@ void MapWidget::_set_uniforms(Shader& shader) {
 	shader.setFloat("time_parametric", env_config->time_parametric());
 	shader.setFloat("course", env_config->telemetry_slice().course_rad());
 	shader.setFloat("speed", env_config->telemetry_slice().speed_mph());
+	shader.setFloat("climb_range", env_config->climb_color_range());
+
+	// How the course trace is drawn: sized by age, with whatever the glider hasn't reached yet
+	// muted. Indexes are telemetry sample indexes (what each course vertex carries), so the
+	// playhead is expressed the same way, as a fraction of a sample.
+	const MapTraceSettings& trace = env_config->map_trace_settings();
+	shader.setFloat("trace_current_index", env_config->telemetry_elapsed() * (float)TELEMETRY_FREQUENCY);
+	shader.setFloat("trace_sample_hz", (float)TELEMETRY_FREQUENCY);
+	shader.setFloat("trace_recent_seconds", trace.recent_seconds);
+	shader.setFloat("trace_recent_width", trace.recent_width_px);
+	shader.setFloat("trace_old_width", trace.old_width_px);
 }
 
 void MapWidget::set_uniforms() {
@@ -381,10 +393,12 @@ void MapWidget::set_uniforms() {
 //TODO(P1): make this a member of MapWidget
 void set_map_widget_vertex_attrib_pointers() {
 	// The first value is the ID of the attribute in the shader layout
-	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)(0 * sizeof(float)));  //xy
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(0 * sizeof(float)));  //xy
 	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)(2 * sizeof(float)));  // 1-float color
+	glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));  // 1-float color
 	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(3 * sizeof(float)));  // telemetry sample index (age)
+	glEnableVertexAttribArray(2);
 }
 
 
@@ -408,17 +422,17 @@ void MapWidget::render_course() {
 	glm::vec2 position = latlon_to_coords(ts.m_gps_lat, ts.m_gps_lon);
 	projection = glm::translate(identity, glm::vec3(-position, 0.0)) * projection;
 
-	// Scale the data to have the displayed data in the [-1.0..1.0, -1.0..1.0] ranges
-	static float last_speed_scale = 1.0; //TODO(P0) move this to be a member.
-	float speed_scale = glm::min(1.0f, 1.0f / env_config->telemetry_slice().speed_mph() + 0.3f);
-	last_speed_scale = speed_scale * 0.01f + last_speed_scale * 0.99f;
+	// Scale the data to have the displayed data in the [-1.0..1.0, -1.0..1.0] ranges. How many meters
+	// wide the map is comes from the telemetry itself (TelemetrySlice::m_map_width_m -- zoomed in on
+	// circling, out in straight flight; see map_zoom.h), so it's the same however the video got to
+	// this frame.
+	float map_width_m = ts.m_map_width_m;
+	if (!(map_width_m >= 1.0f)) {
+		map_width_m = 2000.0f;
+	}
 	float widget_dimension_scale = max_clip.x - min_clip.x;
-	glm::vec3 scale_vec(0.01f * last_speed_scale * widget_dimension_scale);  // 0.01 to make the widget 200m tall when pilot stationary.
+	glm::vec3 scale_vec(widget_dimension_scale / map_width_m);
 	projection = glm::scale(identity, scale_vec) * projection;
-	env_config->font_mgr->add_string(
-		StringAndProperties(
-			ffsw::format("scale: %f", last_speed_scale),
-			0, glm::vec2(m_x_pos, m_y_pos + m_height), glm::vec3(1, 1, 1), 0.5, 2.0));
 
 	// Recenter the draw over the center of the widget
 	glm::mat4 xlate = glm::translate(identity, glm::vec3((max_clip.x + min_clip.x) / 2.0f, (max_clip.y + min_clip.y) / 2.0f, 0.0f));
@@ -431,7 +445,21 @@ void MapWidget::render_course() {
 
 	glUniformMatrix4fv(glGetUniformLocation(m_shader_course.ID, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
+	// The vertex shader sizes each dot itself (by age -- see map_widget_1_course.vert), which
+	// only takes effect with GL_PROGRAM_POINT_SIZE on; Lines::render()'s glPointSize() is then
+	// ignored. Off again afterward so nothing else drawn this frame is affected.
+	glEnable(GL_PROGRAM_POINT_SIZE);
+	// Two passes over the same vertices: first everything except the most recent stretch (the older
+	// trace, and the muted trace the glider hasn't flown yet), then the most recent stretch on top
+	// of all of it, fully opaque. Without the split, the not-yet-flown trace -- which comes later in
+	// the vertex buffer -- would be drawn over the top of it wherever the two cross. The shader
+	// decides which dots belong to which pass (trace_pass); the second pass reuses the data the
+	// first uploaded.
+	m_shader_course.setFloat("trace_pass", 0.0f);
 	m_course_lines.render(set_map_widget_vertex_attrib_pointers);
+	m_shader_course.setFloat("trace_pass", 1.0f);
+	m_course_lines.render(set_map_widget_vertex_attrib_pointers, false);
+	glDisable(GL_PROGRAM_POINT_SIZE);
 }
 
 // Rebuilds m_course_lines (and recenters the local lat/lon projection on the window's own
@@ -454,6 +482,7 @@ void MapWidget::rebuild_course_for_window(int32_t start_index, int32_t end_index
 
 		std::vector<float> supp;
 		supp.push_back(slice.m_climb_rate[1]);
+		supp.push_back((float)i);
 
 		m_course_lines.add_segment(xy, supp);
 	}
@@ -464,10 +493,12 @@ void MapWidget::render() {
 		const EnvConfig* env_config = EnvConfig::instance;
 		int32_t start_index = env_config->telemetry_window_start_index();
 		int32_t end_index = env_config->telemetry_window_end_index();
-		if (start_index != m_window_start_index || end_index != m_window_end_index) {
+		uint32_t climb_version = TelemetryMgr::instance->climb_version();
+		if (start_index != m_window_start_index || end_index != m_window_end_index || climb_version != m_climb_version) {
 			rebuild_course_for_window(start_index, end_index);
 			m_window_start_index = start_index;
 			m_window_end_index = end_index;
+			m_climb_version = climb_version;
 		}
 	}
 
@@ -735,10 +766,12 @@ void GraphWidget::render() {
 		const EnvConfig* env_config = EnvConfig::instance;
 		int32_t start_index = env_config->telemetry_window_start_index();
 		int32_t end_index = env_config->telemetry_window_end_index();
-		if (start_index != m_window_start_index || end_index != m_window_end_index) {
+		uint32_t alt_version = TelemetryMgr::instance->altitude_version();
+		if (start_index != m_window_start_index || end_index != m_window_end_index || alt_version != m_alt_version) {
 			rebuild_windowed_data(start_index, end_index);
 			m_window_start_index = start_index;
 			m_window_end_index = end_index;
+			m_alt_version = alt_version;
 		}
 	}
 
@@ -779,6 +812,7 @@ void ClimbWidget::render() {
 	const TelemetrySlice& ts = env_config->telemetry_slice();
 
 	m_shader.setFloat3("climb_rates", ts.m_climb_rate[0], ts.m_climb_rate[1], ts.m_climb_rate[2]);
+	m_shader.setFloat("climb_range", env_config->climb_color_range());
 
 	WidgetBase::render(m_shader);
 }

@@ -80,7 +80,7 @@ void Lines::add_segment(glm::vec2& xy, std::vector<float>& supplementary) {
 // MAKE SURE you call shader.use() (and set your uniforms) on your shader before calling this thing.
 // When use() is run, it wipes any old values, so I changed render() to not call use() and depend
 // upon the caller to do so.
-void Lines::render(void(*set_vertex_attribs)()) {
+void Lines::render(void(*set_vertex_attribs)(), bool upload_data) {
 	if (m_dot_vector.size() == 0)
 		return;
 
@@ -92,7 +92,9 @@ void Lines::render(void(*set_vertex_attribs)()) {
 	glPointSize(m_line_width);
 
 	glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(float) * m_dot_vector.size(), m_dot_vector.data(), GL_DYNAMIC_DRAW);
+	if (upload_data) {
+		glBufferData(GL_ARRAY_BUFFER, sizeof(float) * m_dot_vector.size(), m_dot_vector.data(), GL_DYNAMIC_DRAW);
+	}
 
 	if (set_vertex_attribs) {
 		(*set_vertex_attribs)();

@@ -8,8 +8,6 @@
   straight-line flight needs to dip considerably further.
 * Show grid lines for 3-5 seconds after each rotation.
 * Altitude graph needs the blue dot to be more opaque at the center/stand out more.
-* Allow user to input actual altitude at launch and landing. From then on, displayed 
-  altitude is offset by the interpolated difference between measured and actual values.
 * Add something to the scrub widget to display the center of right-click scrubbing, and
   potentially the frame rate being traversed.
 * When playing forward, hold on to a bunch of frames so reverse scrubbing will have them

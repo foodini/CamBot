@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "env_config.h"
 #include "media_container_manager.h"
 #include "telemetry.h"
@@ -10,6 +12,8 @@ EnvConfig::EnvConfig(MediaContainerMgr* mcm, FontManager* fm, ProjectFileManager
 	font_mgr(fm),
 	project_file_mgr(pfm),
 	m_launch_time(pfm->get_launch_time()),
+	m_altitude_refs(pfm->get_altitude_references()),
+	m_user_settings(),
 	m_screen_width(screen_width),
 	m_screen_height(screen_height),
 	m_ui_height(ui_height),
@@ -53,6 +57,22 @@ bool EnvConfig::telemetry_offset(float offset) {
 
 float EnvConfig::telemetry_offset() const {
 	return TelemetryMgr::instance->offset();
+}
+
+bool EnvConfig::climb_filter_settings(const ClimbFilterSettings& settings) {
+	if (!TelemetryMgr::instance->set_climb_filter_settings(settings))
+		return false;
+	m_user_settings.climb_filter = settings;
+	save_user_settings();
+	return true;
+}
+
+bool EnvConfig::map_zoom_settings(const MapZoomSettings& settings) {
+	if (!TelemetryMgr::instance->set_map_zoom_settings(settings))
+		return false;
+	m_user_settings.map_zoom = settings;
+	save_user_settings();
+	return true;
 }
 
 float EnvConfig::telemetry_duration() const {
@@ -107,6 +127,27 @@ int32_t EnvConfig::telemetry_window_end_index() const {
 	return index;
 }
 
+int32_t EnvConfig::telemetry_video_start_index() const {
+	TelemetryMgr* telemetry = TelemetryMgr::instance;
+	int32_t index = telemetry->index_for_elapsed(telemetry->elapsed_at(0.0f));
+	int32_t last_valid = (int32_t)telemetry->size() - 1;
+	return (std::max)(0, (std::min)(index, last_valid));
+}
+
+int32_t EnvConfig::telemetry_video_end_index() const {
+	TelemetryMgr* telemetry = TelemetryMgr::instance;
+	int32_t index = telemetry->index_for_elapsed(telemetry->elapsed_at(media_in_duration()));
+	int32_t last_valid = (int32_t)telemetry->size() - 1;
+	return (std::max)(0, (std::min)(index, last_valid));
+}
+
+void EnvConfig::sync_altitude_correction() {
+	TelemetryMgr* telemetry = TelemetryMgr::instance;
+	if (telemetry == nullptr || !telemetry->parsing_done())
+		return;
+	telemetry->set_altitude_references(m_altitude_refs, telemetry_video_start_index(), telemetry_video_end_index());
+}
+
 float EnvConfig::telemetry_distance_flown() const {
 	const TelemetrySlice& window_start_slice = (*TelemetryMgr::instance)[telemetry_window_start_index()];
 	return telemetry_slice().m_total_distance - window_start_slice.m_total_distance;
@@ -117,6 +158,7 @@ void EnvConfig::save_project() {
 	project_file_mgr->set_telemetry_offset(TelemetryMgr::instance->offset());
 	project_file_mgr->set_window_start_elapsed(TelemetryMgr::instance->window_start_elapsed());
 	project_file_mgr->set_rotation_angle(media_mgr->rotation_angle());
+	project_file_mgr->set_altitude_references(m_altitude_refs);
 	project_file_mgr->save_project();
 }
 
