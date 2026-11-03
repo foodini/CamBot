@@ -1,0 +1,12 @@
+climb_filter:1
+climb_window_s:2.000000
+climb_tau_s:1.500000
+climb_color_range:600.000000
+trace_recent_px:6.000000
+trace_old_px:3.000000
+trace_recent_s:300.000000
+zoom_min_km:0.400000
+zoom_max_km:5.000000
+zoom_transition_s:15.000000
+summary_s:10.000000
+summary_xc:0

@@ -160,6 +160,11 @@ std::string ffsw::file_dialog(const wchar_t* extension, const wchar_t* title, bo
 
         // Pop up the dialog and interact with the user.
         hr = pfd->Show(NULL);
+        if (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
+            // The user pressed Cancel: not an error, just no answer.
+            pfd->Release();
+            return std::string("");
+        }
         _ffsw_util_check_result(hr, "FileDialog failed during (pfd->Show())");
 
         // Get the file the user selected:
@@ -179,10 +184,120 @@ std::string ffsw::file_dialog(const wchar_t* extension, const wchar_t* title, bo
         pfd->Release();
         return retval;
     }
-    catch (char* e) {
+    catch (const char* e) {
         fprintf(stderr, "ffsw::file_dialog() failed: %s\n", e);
         return std::string("");
     }
+}
+
+// The same dialog as file_dialog(), for picking several existing files at once.
+std::vector<std::string> ffsw::file_dialog_multi(const wchar_t* extension, const wchar_t* title) {
+    std::vector<std::string> paths;
+    try {
+        _ffsw_util_initialize_com();
+
+        IFileOpenDialog* pfd = NULL;
+        HRESULT hr = CoCreateInstance(
+            CLSID_FileOpenDialog,
+            NULL,
+            CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(&pfd));
+        _ffsw_util_check_result(hr, "Failed to create instance (CoCreateInstance())");
+
+        DWORD dwFlags;
+        hr = pfd->GetOptions(&dwFlags);
+        _ffsw_util_check_result(hr, "Failed to get current dialog options (IFileDialog::GetOptions())");
+        dwFlags |= FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_FILEMUSTEXIST | FOS_ALLOWMULTISELECT;
+        hr = pfd->SetOptions(dwFlags);
+        _ffsw_util_check_result(hr, "Failed to set dialog options (pfd->SetOptions())");
+
+        // "foo;bar" -> "*.foo;*.bar", as in file_dialog().
+        std::wstring exts(extension);
+        std::wstring pattern;
+        size_t pos = 0;
+        while (true) {
+            size_t sep = exts.find(L';', pos);
+            std::wstring one_ext = exts.substr(pos, sep == std::wstring::npos ? std::wstring::npos : sep - pos);
+            if (!pattern.empty()) pattern += L";";
+            pattern += L"*." + one_ext;
+            if (sep == std::wstring::npos) break;
+            pos = sep + 1;
+        }
+        std::wstring caption = title ? std::wstring(title) : std::wstring(L"Select Files (") + pattern + L")";
+
+        COMDLG_FILTERSPEC filter_specs[] = {
+            { caption.c_str(), pattern.c_str() },
+            { L"All Files (*.*)",  L"*.*" },
+        };
+        hr = pfd->SetFileTypes(ARRAYSIZE(filter_specs), filter_specs);
+        _ffsw_util_check_result(hr, "Failed to set file type filter (pfd->SetFileTypes())");
+        pfd->SetFileTypeIndex(1);
+        pfd->SetTitle(caption.c_str());
+        pfd->SetOkButtonLabel(L"Select");
+
+        hr = pfd->Show(NULL);
+        if (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
+            pfd->Release();
+            return paths;
+        }
+        _ffsw_util_check_result(hr, "FileDialog failed during (pfd->Show())");
+
+        IShellItemArray* results = NULL;
+        hr = pfd->GetResults(&results);
+        _ffsw_util_check_result(hr, "Failed to get results from pfd (pfd->GetResults())");
+        DWORD count = 0;
+        hr = results->GetCount(&count);
+        _ffsw_util_check_result(hr, "Failed to count the selected files (results->GetCount())");
+
+        using convert_type = std::codecvt_utf8<wchar_t>;
+        std::wstring_convert<convert_type, wchar_t> converter;
+        for (DWORD i = 0; i < count; i++) {
+            IShellItem* item = NULL;
+            hr = results->GetItemAt(i, &item);
+            _ffsw_util_check_result(hr, "Failed to get a selected file (results->GetItemAt())");
+            PWSTR pszFilePath = NULL;
+            hr = item->GetDisplayName(SIGDN_FILESYSPATH, &pszFilePath);
+            _ffsw_util_check_result(hr, "Failed to get a selected path (item->GetDisplayName())");
+            paths.push_back(converter.to_bytes(pszFilePath));
+            CoTaskMemFree(pszFilePath);
+            item->Release();
+        }
+        results->Release();
+        pfd->Release();
+    }
+    catch (const char* e) {
+        fprintf(stderr, "ffsw::file_dialog_multi() failed: %s\n", e);
+        paths.clear();
+    }
+    return paths;
+}
+
+static std::wstring _ffsw_util_widen(const std::string& utf8) {
+    if (utf8.empty()) return std::wstring();
+    int count = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), (int)utf8.size(), NULL, 0);
+    std::wstring wide(count, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), (int)utf8.size(), &wide[0], count);
+    return wide;
+}
+
+void ffsw::message_box(const std::string& title, const std::string& text, bool is_error) {
+    fprintf(stderr, "%s: %s\n", title.c_str(), text.c_str());
+    MessageBoxW(NULL, _ffsw_util_widen(text).c_str(), _ffsw_util_widen(title).c_str(),
+        MB_OK | MB_SETFOREGROUND | (is_error ? MB_ICONERROR : MB_ICONINFORMATION));
+}
+
+ffsw::Answer ffsw::yes_no_cancel_box(const std::string& title, const std::string& text) {
+    int answer = MessageBoxW(NULL, _ffsw_util_widen(text).c_str(), _ffsw_util_widen(title).c_str(),
+        MB_YESNOCANCEL | MB_SETFOREGROUND | MB_ICONQUESTION);
+    if (answer == IDYES) return ffsw::ANSWER_YES;
+    if (answer == IDNO) return ffsw::ANSWER_NO;
+    return ffsw::ANSWER_CANCEL;
+}
+
+bool ffsw::confirm_box(const std::string& title, const std::string& text) {
+    int answer = MessageBoxW(NULL, _ffsw_util_widen(text).c_str(), _ffsw_util_widen(title).c_str(),
+        MB_OKCANCEL | MB_SETFOREGROUND | MB_ICONQUESTION);
+    return answer == IDOK;
 }
 
 // TODO(P2): C++20 allows std::format("%d", 12345); Use it wherever possible, but keep this for everyone else?

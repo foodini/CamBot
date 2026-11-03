@@ -1,5 +1,55 @@
 # CamBot release notes
 
+## Unreleased
+
+### Multi-file flights, JSON projects
+
+- **One flight, many video files.** Cameras split a long recording into pieces; a new
+  project now takes all of them (select several files in the dialog) and plays them as one
+  continuous video. Scrubbing, frame stepping, the timeline and export all run across the
+  joins. The files have to match (same codec, resolution, frame rate and sound format);
+  if one doesn't, CamBot says which file and why. GoPro chapter names (`GX010123`,
+  `GX020123`, ...) and numbered names are put in recording order automatically, and the
+  order is shown for confirmation. Audio is carried across the joins; where one file's
+  sound overlaps the next by a few milliseconds the overlap is trimmed.
+- **Projects are JSON now.** The `.ffsw` file is readable JSON (version 2). Projects from
+  earlier builds are not read; make a new one. Saving writes to a temporary file and swaps
+  it in (retrying briefly if a virus scanner or editor has the file), so a crash or a full
+  disk can't leave a half-written project.
+- **Saving is explicit.** The project is only written by File > Save Project or Ctrl+S
+  (the S printed on your keyboard, whatever the layout). The title bar shows `name.ffsw *`
+  while there are unsaved changes, and closing with changes asks whether to save. A
+  recovery copy (`name.ffsw.autosave`) is written at most once a minute while there are
+  unsaved changes; if CamBot ends without saving, the next open offers to restore it. It
+  never replaces the project itself, and a normal exit deletes it.
+- **Menus and help.** Edit > Rotate 180 Degrees / Rotate Left a Little / Rotate Right a
+  Little. Help > Keyboard Shortcuts lists every key and mouse binding.
+- **Joins are visible.** The video scrub bar shows a thin yellow bar at each point where one
+  source file ends and the next begins, and the right end of the bar names the file the
+  frame on screen comes from (with its place in the sequence, such as "2 of 5").
+- **No frame lost at a join.** Garmin VIRB files mark their last frame "discard" and FFmpeg
+  then drops it, which cost one frame at every join. CamBot now keeps it. Stepping backward
+  across a join also works when a file's last frame isn't where its length says it should be.
+- **Letter shortcuts follow your keyboard layout.** F, comma, period and Ctrl+S are the keys
+  that make those characters in your current layout (so S is under the right little finger
+  on Dvorak and the left ring finger on QWERTY). The layout is re-checked about once a
+  second, so switching layouts while CamBot runs works. Space, the arrows and Esc don't
+  depend on layout. On layouts without Latin letters the QWERTY positions are used.
+- **Missing files.** If a video or the telemetry file has moved, CamBot looks beside the
+  project file first, then asks you to locate it (and remembers where the first one was
+  found for the rest).
+- **Errors instead of crashes.** A video that can't be opened, a file that doesn't match
+  the others, an export that can't start, and a project that can't be read or saved are
+  now explained in a message box. Cancelling the project dialog just closes the program.
+- **Playing on after stepping back** continues from the frame on screen instead of
+  jumping ahead, and stepping forward past the cached frames and back no longer skips.
+- **10-bit video** (e.g. HEVC from newer cameras) is shown by converting to 8-bit. A proper
+  high-bit-depth path comes with the output-resolution work.
+- **Tests.** `tests/run_tests.sh` (run it with `wsl ./tests/run_tests.sh`) builds and runs
+  the unit tests: climb filters, map zoom, flight statistics, altitude references, user
+  settings, the source timeline and file ordering, project reading, and the multi-file
+  decoder (against a fake FFmpeg that serves small synthetic files).
+
 ## 1.0.0 (October 2026)
 
 First release. CamBot overlays custom flight telemetry (altitude graph, map, climb/sink
@@ -82,6 +132,8 @@ hand, and exports the result as an MP4.
 ### Known limitations
 
 - Windows and Visual Studio only, and an NVIDIA GPU is required for export.
+- Export still renders at 1920x1080 whatever the source resolution; an output-size choice
+  is the next piece of work.
 - Telemetry loading is single-threaded. A 2-3 hour log (about 72,000-96,000 lines) still
   takes several seconds. Multithreaded parsing or a faster file format is the likely next
   step if that matters.

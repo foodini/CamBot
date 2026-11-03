@@ -5,6 +5,7 @@
 #include <GLFW/glfw3.h>
 #include "glm/glm.hpp"
 
+#include <string>
 #include <vector>
 
 extern "C" {
@@ -16,43 +17,40 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
+#include "media_decoder.h"
 #include "shader_s.h"
 
-// One decoded video frame, kept around so a GOP we have already decoded through once can be
-// replayed (forward or backward) without re-seeking/re-decoding. Plane data is copied out of
-// the decoder's AVFrame tightly packed (no linesize padding), since the decoder reuses/
-// overwrites its own frame buffer on every call.
-struct CachedFrame {
-	int64_t pts;
-	std::vector<uint8_t> y, u, v;
-};
-
+// Shows the frames a MediaDecoder produces (the OpenGL side), answers the rest of the program's
+// questions about "where are we in the video", and exports the result. Finding, decoding and
+// seeking frames, across however many files the flight was recorded in, is MediaDecoder's job.
 class MediaContainerMgr {
 public:
-	MediaContainerMgr(const std::string& infile, const std::string& vert, const std::string& frag, 
+	// `decoder` must already be open and must outlive this object.
+	MediaContainerMgr(MediaDecoder* decoder, const std::string& vert, const std::string& frag,
 		              const glm::vec3* extents);
 	~MediaContainerMgr();
+
+	// Next frame. At the end of the video returns false (and finishes an export in progress).
 	bool advance_frame();
+	// Lands on the first frame at or after `timestamp`, a count of decoder ticks (see
+	// MediaDecoder) from the beginning of the first file.
 	bool advance_to(int64_t timestamp);
-	// Checked by advance_to() before it seeks: if timestamp falls within the GOP we already
-	// decoded through and cached, serve it straight from the cache (no seek, no decode) and
-	// return true. See m_gop_cache below for what populates it.
-	bool try_serve_from_cache(int64_t timestamp);
 	bool advance_to_parametric(float parametric);
-	bool advance_by(uint64_t timestamp_delta);
-	bool rewind_by(uint64_t timestamp_delta);
-	// Fast, approximate seek: seeks to the nearest preceding keyframe and decodes exactly that one
-	// frame, no further -- O(1) regardless of GOP length or resolution, unlike advance_to() which
-	// can end up decoding an entire GOP to land on an exact target. Used for interactive dragging/
-	// scanning, where landing on the nearest keyframe (coarse) beats staying responsive at the cost
-	// of an exact frame; advance_to()/advance_by()/rewind_by() remain the precise tools for small,
-	// bounded moves (e.g. single-frame stepping).
+	bool advance_by(uint64_t frame_count);
+	bool rewind_by(uint64_t frame_count);
+	// Fast, approximate seek: lands on the nearest preceding keyframe and decodes exactly that
+	// one frame -- O(1) regardless of GOP length or resolution, unlike advance_to() which can
+	// end up decoding an entire GOP to land on an exact target. Used for interactive dragging/
+	// scanning, where landing on the nearest keyframe (coarse) beats staying responsive at the
+	// cost of an exact frame; advance_to()/advance_by()/rewind_by() remain the precise tools for
+	// small, bounded moves (e.g. single-frame stepping).
 	bool seek_to_keyframe_near(int64_t timestamp);
 	bool seek_to_parametric_fast(float parametric);
 	// Relative version of seek_to_keyframe_near, in frame-count units like advance_by()/
 	// rewind_by() -- lets a caller ask for "about N frames from here, fast" without having to
 	// reach for raw timestamps/tick units itself. Negative frame_delta moves backward.
 	bool seek_by_frames_fast(int64_t frame_delta);
+
 	float get_width() const { return (float)m_width; }
 	float get_height() const { return (float)m_height; }
 	uint64_t get_presentation_timestamp() const;
@@ -60,35 +58,33 @@ public:
 	float in_parametric() const; // Time in [0.0..1.0] since beginning of video
 	float in_elapsed() const;    // Time, in seconds, since beginning of video.
 	float in_duration() const;   // Length of video, in seconds.
-	int64_t in_end_timestamp() const { return m_format_context->duration; }
+	// The source files, for showing where the joins are. Positions are [0..1] along the whole flight.
+	int         source_file_count() const;
+	float       source_file_start_parametric(int index) const;   // Where file `index` begins.
+	int         current_file_index() const;                      // The file the frame on screen is from.
+	std::string current_file_name() const;                       // That file's name, without its folder.
 	void rotation_angle(float angle) { m_rotation_angle = angle; }
 	float rotation_angle() { return m_rotation_angle;  }
+	// Turns the picture by `radians` more (the same thing the F, comma and period keys do).
+	void rotate_by(float radians) { m_rotation_angle += radians; }
 
-	unsigned long int get_frame_time() const;
 	float frame_rate() const; // Native playback frame rate (frames/sec) of the video stream.
-	float timestamp_to_seconds(uint64_t timestamp) const;
 	void render();
 	bool recording() { return m_recording; }
 
 	// Major thanks to "shi-yan" who helped make this possible:
 	// https://github.com/shi-yan/videosamples/blob/master/libavmp4encoding/main.cpp
+	//
+	// Returns false (with last_error() saying why) if the export could not be started; nothing
+	// is left half-created in that case.
 	bool init_video_output(const std::string& video_file_name, unsigned int width, unsigned int height);
 	bool output_video_frame(uint8_t* buf);
 	bool finalize_output();
+	// A sentence about what went wrong with the last export step that failed, for the user.
+	const std::string& last_error() const { return m_last_error; }
 
 private:
-	AVFormatContext*   m_format_context;
-	const AVCodec*     m_video_input_codec;
-	const AVCodec*     m_audio_input_codec;
-	AVCodecParameters* m_video_codec_parameters;
-	AVCodecParameters* m_audio_codec_parameters;
-	AVCodecContext*    m_video_input_codec_context;
-	AVCodecContext*    m_audio_input_codec_context;
-	AVFrame*           m_last_video_frame;
-	AVFrame*           m_last_audio_frame;
-	AVPacket*          m_packet;
-	uint32_t           m_video_stream_index;
-	uint32_t           m_audio_stream_index;
+	MediaDecoder*      m_decoder;
 	uint32_t           m_height;
 	uint32_t           m_width;
 	uint32_t           m_ui_height;
@@ -102,25 +98,21 @@ private:
 	float              m_center_ndc_x;
 	float              m_center_ndc_y;
 
-	// Caches every frame decoded while walking forward from a keyframe (advance_to()'s existing
-	// seek-then-decode-to-target loop already does this walk for any backward move -- this just
-	// keeps what it decodes instead of throwing it away), so repeat visits within that same GOP
-	// -- the common case while scanning back and forth over a short stretch -- are instant.
-	// Holds at most one GOP at a time, cleared whenever a seek lands on a different keyframe.
-	std::vector<CachedFrame> m_gop_cache;
-	int64_t                  m_gop_cache_keyframe_pts = AV_NOPTS_VALUE;
-	
 	unsigned int       m_yuv_textures[3];
 	Shader             m_shader;
 	unsigned int       m_VAO;
 	unsigned int       m_VBO;
 
 	void init_rendering(const glm::vec3* extents);
-	int decode_packet();
 
 	// For writing the output video:
+	bool start_output(const std::string& video_file_name, unsigned int width, unsigned int height);
+	void abort_output();
 	void free_output_assets();
+	void write_pending_audio();
+	bool write_encoded_packets();
 	bool                   m_recording;
+	std::string            m_last_error;
 	const AVOutputFormat*  m_output_format;  // av_guess_format() now returns a const pointer
 	AVFormatContext*       m_output_format_context;
 	const AVCodec*         m_output_video_codec;
@@ -128,11 +120,13 @@ private:
 	AVFrame*               m_output_video_frame;
 	SwsContext*            m_output_scale_context;
 	AVStream*              m_output_video_stream;
-	
-	// Audio is a straight stream copy (see advance_frame()'s remux path), never decoded or
+
+	// Audio is a straight stream copy of the decoder's audio packets, never decoded or
 	// re-encoded -- the only thing needed for it is the output AVStream itself, with its
-	// codecpar copied from the input audio stream.
+	// codecpar copied from the input audio stream. Null if the video has no sound.
 	AVStream*              m_output_audio_stream;
+	int64_t                m_last_audio_dts;       // Of the last packet written, in the decoder's audio time base.
+	int                    m_dropped_audio_packets;
 };
 
 #endif

@@ -1,42 +1,72 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "altitude_reference.h"
+#include "project_data.h"
 
+// Finds, loads and saves the project file (.ffsw, JSON; see project_data.h) and holds what's in
+// it. The files it names are checked when the project is opened, so the rest of the program can
+// count on them existing.
 class ProjectFileManager {
 public:
 	ProjectFileManager();
 	~ProjectFileManager();
 
-	void get_project();
-	void save_project();
+	// Asks the user for a project file, either an existing one or the name of a new one (and, for
+	// a new one, the video files and the telemetry file that go in it). Returns true once there is
+	// a project to work on. Returns false if the user cancelled or something was wrong; in the
+	// second case they have already been told what.
+	bool open_interactive();
+
+	// Writes the project file, and clears the unsaved-changes state (and the recovery file, see
+	// below). On failure the user is told, and false comes back.
+	bool save_project();
+
+	// The project is only ever written when the user asks (File > Save, Ctrl+S, or "Yes" when
+	// closing with changes). So that a crash doesn't cost the work since the last save, while
+	// there are unsaved changes a copy goes to "<project>.autosave" at most once a minute. That
+	// file never replaces the project: opening a project that has a newer one offers to restore
+	// it, and a normal exit deletes it.
+	//
+	// True if the project differs from what was last saved (or restored from).
+	bool has_unsaved_changes() const { return m_data != m_saved_data; }
+	// Call every frame with the time in seconds; writes the recovery file when it's due.
+	void autosave_if_due(float now_seconds);
+	// Removes the recovery file, for a normal exit.
+	void discard_recovery();
 
 	// Getters;
-	const std::string& get_video_file_path() { return m_video_file_path; }
-	const std::string& get_telemetry_file_path() { return m_telemetry_file_path; }
-	const std::string& get_project_file_path() { return m_project_file_path; }
-	float get_launch_time() { return m_launch_time; }
-	float get_telemetry_offset() { return m_telemetry_offset; }
-	float get_window_start_elapsed() { return m_window_start_elapsed; }
-	float get_rotation_angle() { return m_rotation_angle; }
-	const AltitudeReferences& get_altitude_references() { return m_altitude_refs; }
+	const std::vector<std::string>& get_video_files() const { return m_data.video_files; }
+	const std::string& get_telemetry_file_path() const { return m_data.telemetry_file; }
+	const std::string& get_project_file_path() const { return m_project_file_path; }
+	float get_launch_time() const { return m_data.launch_time_s; }
+	float get_telemetry_offset() const { return m_data.telemetry_offset_s; }
+	float get_window_start_elapsed() const { return m_data.window_start_elapsed_s; }
+	float get_rotation_angle() const { return m_data.rotation_rad; }
+	const AltitudeReferences& get_altitude_references() const { return m_data.altitude_refs; }
 
 	// Setters;
-	void set_launch_time(float t) { m_launch_time = t; }
-	void set_telemetry_offset(float offset) { m_telemetry_offset = offset; }
-	void set_window_start_elapsed(float t) { m_window_start_elapsed = t; }
-	void set_rotation_angle(float r) { m_rotation_angle = r; }
-	void set_altitude_references(const AltitudeReferences& refs) { m_altitude_refs = refs; }
+	void set_launch_time(float t) { m_data.launch_time_s = t; }
+	void set_telemetry_offset(float offset) { m_data.telemetry_offset_s = offset; }
+	void set_window_start_elapsed(float t) { m_data.window_start_elapsed_s = t; }
+	void set_rotation_angle(float r) { m_data.rotation_rad = r; }
+	void set_altitude_references(const AltitudeReferences& refs) { m_data.altitude_refs = refs; }
 
 private:
-	std::string  m_project_file_path;
+	bool open_existing(const std::string& path);
+	bool create_new();
+	// Makes sure every file the project names exists, offering to look for or locate any that
+	// moved. *changed says whether any path was altered.
+	bool resolve_missing_files(bool* changed);
+	bool locate_file(std::string* path, const std::string& kind, const wchar_t* extensions, const std::string& search_directory,
+		std::string* last_found_directory);
 
-	std::string  m_video_file_path;
-	std::string  m_telemetry_file_path;
-	float        m_launch_time;           // Represents the contents of the file, not necessarily current config.
-	float        m_telemetry_offset;      // Represents the contents of the file, not necessarily current config.
-	float        m_window_start_elapsed;  // Represents the contents of the file, not necessarily current config.
-	float        m_rotation_angle;       // Represents the contents of the file, not necessarily current config.
-	AltitudeReferences m_altitude_refs;  // Same.
+	std::string  m_project_file_path;
+	ProjectData  m_data;   // The contents of the file, not necessarily the current config.
+	ProjectData  m_saved_data;       // What the project file on disk holds, as far as we know.
+	ProjectData  m_autosaved_data;   // What the recovery file holds (or m_saved_data if there is none).
+	float        m_last_autosave_seconds = -1000.0f;
+	std::string  recovery_path() const { return m_project_file_path + ".autosave"; }
 };

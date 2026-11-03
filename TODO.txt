@@ -1,23 +1,19 @@
 * The .exe needs an icon.
-* audio in UI mode
 * Pull ground speed out of the map and put it above km.
 * Tell the user that frames are currently being cached while doing a right-click scrub
   if the next required frame is being delayed.
-* We need an aesthetic pass over the map. lift/sync should be averaged over the last n
-  seconds, where n is configurable. The map needs to be wider/taller, and the scale during
-  straight-line flight needs to dip considerably further.
-* Show grid lines for 3-5 seconds after each rotation.
 * Altitude graph needs the blue dot to be more opaque at the center/stand out more.
 * Add something to the scrub widget to display the center of right-click scrubbing, and
   potentially the frame rate being traversed.
 * When playing forward, hold on to a bunch of frames so reverse scrubbing will have them
-  cached?
+  cached.
 * Make climb/sink rate look like an avionic? 
 * Require user to hold down control key to affect TelemetryScrubWidget, since a mis-click
   there requires the user to re-sync the telemetry.
-* Do you have any control over the quality of the exported video?
-* DVORAK!!!
 * Don't allow export while telemetry is still loading.
+* While telemetry is loading, just put "Loading Telemetry - XX%" in huge letters somewhere. 
+  * Don't render any of it during this time?
 * Orient the glider on the map according to magnetic telemetry so you can see it skidding?
-
-
+* As the rotate buttons are used, report back to the user how much rotation they've  
+  accumulated.
+* "Export Done" or "Export Cancelled" should probably be a popup requiring confirmation.

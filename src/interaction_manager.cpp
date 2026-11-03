@@ -11,6 +11,7 @@ InteractionMgr::InteractionMgr() :
 	m_keys_up(),
 	m_keys_held(),
 	m_keys_watched(),
+	m_last_char_refresh(-1000.0f),
 	m_mouse_button_down(false),
 	m_mouse_button_up(false),
 	m_mouse_button_held(-1.0),
@@ -32,6 +33,7 @@ InteractionMgr::~InteractionMgr() {
 void InteractionMgr::tick(GLFWwindow* window) {
 	static int count = -1;
 	count++;
+	refresh_char_bindings(false);
 	// GLFW_REPEAT is only sent to the callback, so we have to manufacture "held" ourselves.
 	for (auto i = m_keys_watched.begin(); i != m_keys_watched.end(); i++) {
 		if (glfwGetKey(window, *i) == GLFW_PRESS) {
@@ -146,4 +148,57 @@ void InteractionMgr::bind_key(int key, std::function<void()> on_down, std::funct
 	binding.on_up = on_up;
 	binding.on_held = on_held;
 	m_key_bindings[key] = binding;
+}
+
+int InteractionMgr::key_for_character(char character, int fallback_key) {
+	// glfwGetKeyName() reports the character a key makes in the current layout, unshifted.
+	for (int key = GLFW_KEY_SPACE; key <= GLFW_KEY_GRAVE_ACCENT; key++) {
+		const char* name = glfwGetKeyName(key, 0);
+		if (name != NULL && name[0] == character && name[1] == '\0')
+			return key;
+	}
+	return fallback_key;
+}
+
+void InteractionMgr::bind_char(char character, int fallback_key, std::function<void()> on_down, std::function<void()> on_up,
+                               std::function<void(float)> on_held) {
+	CharBinding char_binding;
+	char_binding.character = character;
+	char_binding.fallback_key = fallback_key;
+	char_binding.key = GLFW_KEY_UNKNOWN;
+	char_binding.binding.on_down = on_down;
+	char_binding.binding.on_up = on_up;
+	char_binding.binding.on_held = on_held;
+	m_char_bindings.push_back(char_binding);
+	refresh_char_bindings(true);
+}
+
+// Makes sure each character binding is on the key that carries its character in the layout the
+// user has now. Asking the layout takes a little work for every binding, so unless forced this
+// only looks about once a second.
+void InteractionMgr::refresh_char_bindings(bool force) {
+	if (m_char_bindings.empty())
+		return;
+	float now = ffsw::elapsed();
+	if (!force && now - m_last_char_refresh < 1.0f)
+		return;
+	m_last_char_refresh = now;
+
+	for (CharBinding& char_binding : m_char_bindings) {
+		int key = key_for_character(char_binding.character, char_binding.fallback_key);
+		if (key == char_binding.key)
+			continue;
+		// A key some other binding already owns can't be shared; stay where we are.
+		if (m_key_bindings.find(key) != m_key_bindings.end())
+			continue;
+		if (char_binding.key != GLFW_KEY_UNKNOWN) {
+			m_key_bindings.erase(char_binding.key);
+			m_keys_down.erase(char_binding.key);
+			m_keys_up.erase(char_binding.key);
+			m_keys_held.erase(char_binding.key);
+		}
+		char_binding.key = key;
+		m_key_bindings[key] = char_binding.binding;
+		watch_key(key);
+	}
 }

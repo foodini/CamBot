@@ -128,6 +128,12 @@ public:
         glUniform1f(glGetUniformLocation(ID, name.c_str()), value);
     }
 
+    // An array of floats, for a uniform declared like `uniform float name[N];`.
+    void setFloatArray(const std::string& name, const float* values, int count) const
+    {
+        glUniform1fv(glGetUniformLocation(ID, name.c_str()), count, values);
+    }
+
     void setFloat2(const std::string& name, float value_x, float value_y) const
     {
         glUniform2f(glGetUniformLocation(ID, name.c_str()), value_x, value_y);

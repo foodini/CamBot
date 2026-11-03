@@ -58,7 +58,7 @@ public:
 	// The true altitudes (ft) the user gave for the start and end of the video. These belong to
 	// the project (they're about this video's location), so setting them saves the project file.
 	// They take effect through sync_altitude_correction().
-	void altitude_references(const AltitudeReferences& refs) { m_altitude_refs = refs; save_project(); }
+	void altitude_references(const AltitudeReferences& refs) { m_altitude_refs = refs; }
 	// Call once per frame: (re)applies the altitude references to the telemetry whenever they,
 	// or where the video starts and ends in telemetry time, have changed. Cheap otherwise.
 	void sync_altitude_correction();
@@ -126,7 +126,16 @@ public:
 	float                   time_parametric()        const;
 	float                   flight_time()            const; // Wall time since launch. (negative: wall time until launch)
 	
-	void                    save_project();
+	// Writes the project file now (File > Save, Ctrl+S). Returns false, having told the user
+	// why, if it couldn't.
+	bool                    save_project();
+	// Call once per frame. Copies the live state (offset, launch, rotation, altitude references)
+	// into the project, so project_unsaved() is right however the state was changed (menus, keys
+	// or the scrub bars), and writes the recovery copy when one is due (see ProjectFileManager).
+	void                    poll_project();
+	bool                    project_unsaved() const   { return project_file_mgr->has_unsaved_changes(); }
+	// For a normal exit: the recovery copy is no longer wanted.
+	void                    discard_recovery()        { project_file_mgr->discard_recovery(); }
 
 	static EnvConfig*       instance;
 	FontManager*            font_mgr;
@@ -141,6 +150,7 @@ private:
 	float                   m_launch_time;
 	AltitudeReferences      m_altitude_refs;
 	UserSettings            m_user_settings;
+	void                    push_state_to_project();
 
 	uint64_t                m_media_pts_start;
 	uint64_t                m_media_pts_end;

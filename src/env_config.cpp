@@ -51,7 +51,6 @@ float EnvConfig::flight_time() const {
 
 bool EnvConfig::telemetry_offset(float offset) {
 	TelemetryMgr::instance->set_offset(offset);
-	save_project();
 	return true;
 }
 
@@ -89,7 +88,6 @@ bool EnvConfig::launch_time(float launch_time) {
 	// effect right now -- see TelemetryMgr::window_start_elapsed()'s doc comment for why this
 	// is a one-time snapshot rather than a live formula.
 	TelemetryMgr::instance->set_window_start_elapsed(TelemetryMgr::instance->elapsed_at(launch_time));
-	save_project();
 	return true;
 }
 
@@ -171,13 +169,25 @@ float EnvConfig::telemetry_distance_flown() const {
 	return (std::max)(0.0f, telemetry_slice().m_total_distance - launch_slice.m_total_distance);
 }
 
-void EnvConfig::save_project() {
+// The project file's idea of the state is only a copy: the live values belong to their owners
+// (telemetry owns the offset, the media manager owns the rotation, and so on), and the keys and
+// scrub bars change them directly. So the copy is refreshed from them whenever it's needed.
+void EnvConfig::push_state_to_project() {
 	project_file_mgr->set_launch_time(m_launch_time);
 	project_file_mgr->set_telemetry_offset(TelemetryMgr::instance->offset());
 	project_file_mgr->set_window_start_elapsed(TelemetryMgr::instance->window_start_elapsed());
 	project_file_mgr->set_rotation_angle(media_mgr->rotation_angle());
 	project_file_mgr->set_altitude_references(m_altitude_refs);
-	project_file_mgr->save_project();
+}
+
+void EnvConfig::poll_project() {
+	push_state_to_project();
+	project_file_mgr->autosave_if_due(ffsw::elapsed());
+}
+
+bool EnvConfig::save_project() {
+	push_state_to_project();
+	return project_file_mgr->save_project();
 }
 
 void EnvConfig::recompute_projections() {

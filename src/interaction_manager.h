@@ -4,6 +4,7 @@
 #include <functional>
 #include <map>
 #include <set>
+#include <vector>
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -34,6 +35,16 @@ public:
 	void bind_key(int key, std::function<void()> on_down, std::function<void()> on_up,
 	              std::function<void(float held_seconds)> on_held);
 
+	// Like bind_key(), but the key is named by the character printed on it, in whatever keyboard
+	// layout the user has, instead of by its place on a US keyboard. On Dvorak the "S" key is
+	// where QWERTY has ";", and bind_char('s', ...) follows it there. `fallback_key` is used if
+	// the layout has no key with that character (a non-Latin layout, say). The layout is looked
+	// at again about once a second, so switching layouts while running works.
+	void bind_char(char character, int fallback_key, std::function<void()> on_down, std::function<void()> on_up,
+	               std::function<void(float held_seconds)> on_held);
+	// The GLFW key that has `character` (lower case) printed on it right now, or `fallback_key`.
+	static int key_for_character(char character, int fallback_key);
+
 	bool mouse_button_down()    { return m_mouse_button_down; }
 	bool mouse_button_up()      { return m_mouse_button_up; }
 	float mouse_button_held()   { return m_mouse_button_held; }
@@ -54,12 +65,24 @@ private:
 		std::function<void(float)> on_held;
 	};
 
+	// A binding named by character. Whatever key currently carries the character is entered in
+	// m_key_bindings (as `key`), and moved if the layout changes.
+	struct CharBinding {
+		char       character;
+		int        fallback_key;
+		int        key;          // GLFW_KEY_UNKNOWN until first resolved.
+		KeyBinding binding;
+	};
+	void refresh_char_bindings(bool force);
+
 	static InteractionMgr*      c_instance;
 	std::set<int>               m_keys_down;
 	std::set<int>               m_keys_up;
 	std::map<int,float>         m_keys_held;
 	std::set<int>               m_keys_watched;
 	std::map<int,KeyBinding>    m_key_bindings;
+	std::vector<CharBinding>    m_char_bindings;
+	float                       m_last_char_refresh;
 	bool                        m_mouse_button_down;
 	bool                        m_mouse_button_up;
 	float                       m_mouse_button_held;

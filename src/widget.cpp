@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include "interaction_manager.h"
+#include "media_container_manager.h"
 #include "telemetry.h"
 #include "util.h"
 #include "widget.h"
@@ -212,6 +213,16 @@ void MediaScrubWidget::render() {
 	// Uniform settings must happen after a use() call
 	m_shader.use();
 	m_shader.setFloat("time_parametric", env_config->time_parametric());
+	// The joins between source files (the start of every file but the first).
+	const int MAX_BREAKS = 256;   // Matches the shader's array.
+	float breaks[MAX_BREAKS];
+	int break_count = 0;
+	for (int file = 1; file < env_config->media_mgr->source_file_count() && break_count < MAX_BREAKS; file++) {
+		breaks[break_count++] = env_config->media_mgr->source_file_start_parametric(file);
+	}
+	m_shader.setInt("break_count", break_count);
+	if (break_count > 0)
+		m_shader.setFloatArray("breaks", breaks, break_count);
 	WidgetBase::render(m_shader);
 
 	char buf[50];
@@ -223,6 +234,20 @@ void MediaScrubWidget::render() {
 			std::string(buf),
 			0, glm::vec2(m_x_pos + 0.005, m_y_pos + m_height * 0.5), glm::vec3(1.0, 1.0, 1.0), 0.33f, 1.0f,
 			StringAndProperties::V_ALIGN::V_CENTER));
+
+	// Which file the frame on screen comes from, at the right end of the bar, with its place in
+	// the sequence when there's more than one.
+	std::string file_label = env_config->media_mgr->current_file_name();
+	int file_count = env_config->media_mgr->source_file_count();
+	if (file_count > 1) {
+		file_label += "  (" + std::to_string(env_config->media_mgr->current_file_index() + 1) + " of " +
+			std::to_string(file_count) + ")";
+	}
+	env_config->font_mgr->add_string(
+		StringAndProperties(
+			file_label,
+			0, glm::vec2(m_x_pos + m_width - 0.005, m_y_pos + m_height * 0.5), glm::vec3(1.0, 1.0, 1.0), 0.33f, 1.0f,
+			StringAndProperties::V_ALIGN::V_CENTER, StringAndProperties::H_ALIGN::H_RIGHT));
 }
 
 TelemetryScrubWidget::TelemetryScrubWidget(float width, float height, float x_pos, float y_pos) :

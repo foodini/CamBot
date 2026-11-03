@@ -1,5 +1,6 @@
 #include "version.h"
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstring>
 #include <stdio.h>
@@ -18,12 +19,14 @@
 #include "stb_image_write.h"
 
 #include "env_config.h"
+#include "file_io.h"
 #include "flight_summary_overlay.h"
 #include "font_manager.h"
 #include "interaction_manager.h"
 #include "lines.h"
 #include "project_file_manager.h"
 #include "media_container_manager.h"
+#include "media_decoder.h"
 #include "telemetry.h"
 #include "util.h"
 #include "widget.h"
@@ -47,6 +50,80 @@ const unsigned int MENU_HEIGHT = 19;       // Exact pixel height ImGui renders t
                                             // change to match, or a gap/overlap will reappear here.
 
 bool paused = false;
+
+// Takes down the GUI libraries and GLFW, for leaving before the main loop ever starts (the user
+// cancelled the project dialog, or the video could not be opened).
+static void shut_down_gui() {
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+    glfwTerminate();
+}
+
+// Turns a request to close the window into a question when the project has unsaved changes.
+// True when it's time to leave for real.
+static bool exit_confirmed(GLFWwindow* window, EnvConfig& env_config, ProjectFileManager& project_file_mgr) {
+    if (!glfwWindowShouldClose(window))
+        return false;
+    env_config.poll_project();   // So changes from the last frame count.
+    if (!env_config.project_unsaved())
+        return true;
+    ffsw::Answer answer = ffsw::yes_no_cancel_box("CamBot",
+        "Save changes to \"" + fileio::base_name(project_file_mgr.get_project_file_path()) + "\" before closing?");
+    if (answer == ffsw::ANSWER_NO)
+        return true;
+    if (answer == ffsw::ANSWER_YES && env_config.save_project())
+        return true;
+    glfwSetWindowShouldClose(window, GLFW_FALSE);   // Cancelled, or the save failed.
+    return false;
+}
+
+// The Help > Keyboard Shortcuts window: every key and mouse binding, until the interface
+// explains itself well enough not to need it.
+static void draw_shortcuts_window(bool* open) {
+    if (!*open)
+        return;
+    ImGui::SetNextWindowSize(ImVec2(520.0f, 0.0f), ImGuiCond_Appearing);
+    if (!ImGui::Begin("Keyboard Shortcuts", open, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::End();
+        return;
+    }
+    // The letter shortcuts are bound by the character they make (see InteractionMgr::bind_char),
+    // so they follow the user's keyboard layout and are named here by that character.
+    const std::string rotate_flip_key = "F";
+    const std::string rotate_left_key = ",";
+    const std::string rotate_right_key = ".";
+
+    ImGui::TextDisabled("Letter keys follow your keyboard layout: they are the keys printed with these letters.");
+    ImGui::Spacing();
+    if (ImGui::BeginTable("shortcut_keys", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH)) {
+        ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthFixed, 150.0f);
+        ImGui::TableSetupColumn("Does", ImGuiTableColumnFlags_WidthStretch);
+        struct Row { std::string key; const char* does; };
+        const Row rows[] = {
+            { "Space", "Play / pause" },
+            { "Left / Right", "Step one frame back / forward (hold to repeat)" },
+            { "Up / Down", "Nudge the telemetry sync one sample (hold to repeat)" },
+            { rotate_flip_key, "Rotate the video 180 degrees" },
+            { rotate_left_key + " / " + rotate_right_key, "Rotate the video a little left / right (hold to repeat)" },
+            { "Ctrl+S", "Save the project" },
+            { "Esc", "Cancel an export in progress" },
+        };
+        for (const Row& row : rows) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted(row.key.c_str());
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(row.does);
+        }
+        ImGui::EndTable();
+    }
+    ImGui::Spacing();
+    ImGui::Text("On the video bar and the telemetry bar:");
+    ImGui::BulletText("Left-click and hold: jump there. On the telemetry bar this re-syncs\nthe telemetry to the frame on screen.");
+    ImGui::BulletText("Right-click and drag: scan forward / back. The farther you drag from\nwhere you clicked, the faster it goes.");
+    ImGui::End();
+}
 
 // glfw: whenever the window size changed (by OS or user resize) this callback function executes
 // ---------------------------------------------------------------------------------------------
@@ -462,8 +539,23 @@ int main()
     extents[3] = glm::vec3(1.0, 1.0, 0.0);
 
     ProjectFileManager project_file_mgr;
+    if (!project_file_mgr.open_interactive()) {
+        // Cancelled, or the project had a problem (which the user has already been told about).
+        shut_down_gui();
+        return 0;
+    }
 
-    MediaContainerMgr media_container_mgr(project_file_mgr.get_video_file_path(), "3.3.shader.vert", "3.3.shader.frag", extents);
+    // All the video files of the flight, played as one. This is where files that are damaged,
+    // or that don't belong together, turn up.
+    MediaDecoder media_decoder;
+    std::string open_error;
+    if (!media_decoder.open(project_file_mgr.get_video_files(), &open_error)) {
+        ffsw::message_box("CamBot - Cannot Open Video", open_error);
+        shut_down_gui();
+        return 1;
+    }
+
+    MediaContainerMgr media_container_mgr(&media_decoder, "3.3.shader.vert", "3.3.shader.frag", extents);
     // Restore whatever rotation was saved with this project (see EnvConfig::save_project()
     // and the "Save Project" menu item below for where it's written back out).
     media_container_mgr.rotation_angle(project_file_mgr.get_rotation_angle());
@@ -508,11 +600,24 @@ int main()
         []() { paused = !paused; },
         nullptr,
         nullptr);
+    // Ctrl+S saves the project. "S" is whichever key makes an S in the user's keyboard layout
+    // (under the right little finger on Dvorak, the left ring finger on QWERTY).
+    interaction_mgr->bind_char('s', GLFW_KEY_S,
+        [window, &env_config]() {
+            bool ctrl_down = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+                             glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+            if (ctrl_down)
+                env_config.save_project();
+        },
+        nullptr,
+        nullptr);
 
     float frame_time = ffsw::elapsed();
     float prev_frame_time = frame_time;
     float duration_avg = -1.0;
     bool show_about_popup = false;
+    bool show_shortcuts_window = false;
+    std::string window_title;          // What the title bar currently says (see the render loop).
     // The Climb Rate Settings window (View menu): open flag, plus a request for the window to
     // reload its sliders from the live settings the next time it draws.
     bool show_climb_settings = false;
@@ -551,9 +656,19 @@ int main()
 
     // render loop
     // -----------
-    while (!glfwWindowShouldClose(window))
+    while (!exit_confirmed(window, env_config, project_file_mgr))
     {
         telemetry_mgr.tick();
+        env_config.poll_project();
+
+        // The title bar shows the project and a * while it has unsaved changes.
+        std::string wanted_title = "CamBot - " + fileio::base_name(project_file_mgr.get_project_file_path()) +
+            (env_config.project_unsaved() ? " *" : "");
+        if (wanted_title != window_title) {
+            window_title = wanted_title;
+            glfwSetWindowTitle(window, window_title.c_str());
+        }
+
         interaction_mgr->tick(window);
         //TODO(P1) Find a way for these things to get their updates automatically, so I don't have to remember
         //         to do it for each widget that receives input.
@@ -596,7 +711,7 @@ int main()
 
             if (ImGui::BeginMainMenuBar()) {
                 if (ImGui::BeginMenu("File")) {
-                    if (ImGui::MenuItem("Save Project")) {
+                    if (ImGui::MenuItem("Save Project", "Ctrl+S")) {
                         // Goes through EnvConfig, not project_file_mgr directly -- that's
                         // what actually pulls the *current* rotation (and telemetry offset,
                         // launch time, etc.) out of their live owners first. Calling
@@ -627,7 +742,9 @@ int main()
                             // that seek happens).
                             export_start_video_elapsed = 0.0f;
                             show_export_done = false;
-                            media_container_mgr.init_video_output(export_path, SCR_WIDTH, SCR_HEIGHT);
+                            if (!media_container_mgr.init_video_output(export_path, SCR_WIDTH, SCR_HEIGHT)) {
+                                ffsw::message_box("CamBot - Cannot Export", media_container_mgr.last_error());
+                            }
                         }
                     }
                     ImGui::Separator();
@@ -640,6 +757,18 @@ int main()
                 if (ImGui::BeginMenu("Edit")) {
                     if (ImGui::MenuItem("Mark Launch Point")) {
                         env_config.launch_time(env_config.media_in_elapsed());
+                    }
+                    ImGui::Separator();
+                    // The same turns the keys bound in MediaContainerMgr's constructor make; the
+                    // shortcuts shown are letters, which follow the user's keyboard layout.
+                    if (ImGui::MenuItem("Rotate 180 Degrees", "F")) {
+                        media_container_mgr.rotate_by(3.141592653f);
+                    }
+                    if (ImGui::MenuItem("Rotate Left a Little", ",")) {
+                        media_container_mgr.rotate_by(3.141592653f / 720.0f);
+                    }
+                    if (ImGui::MenuItem("Rotate Right a Little", ".")) {
+                        media_container_mgr.rotate_by(-3.141592653f / 720.0f);
                     }
                     ImGui::EndMenu();
                 }
@@ -663,6 +792,9 @@ int main()
                     ImGui::EndMenu();
                 }
                 if (ImGui::BeginMenu("Help")) {
+                    if (ImGui::MenuItem("Keyboard Shortcuts...")) {
+                        show_shortcuts_window = true;
+                    }
                     if (ImGui::MenuItem("About CamBot")) {
                         show_about_popup = true;
                     }
@@ -705,6 +837,8 @@ int main()
             if (show_summary_settings) {
                 draw_summary_settings_window(&show_summary_settings, &summary_settings_resync, media_container_mgr.recording());
             }
+
+            draw_shortcuts_window(&show_shortcuts_window);
 
             // Export status, bottom-center. Drawn through ImGui -- rather than font_manager,
             // like the other overlays -- specifically because ImGui's own render pass happens
@@ -848,6 +982,7 @@ int main()
         }
     }
 
+    env_config.discard_recovery();   // Leaving normally: saved, or the user chose not to.
     delete[] export_frame_buf;
 
     // Dear ImGui: tear down the backends and context.
