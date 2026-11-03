@@ -26,6 +26,7 @@
 #include "lines.h"
 #include "project_file_manager.h"
 #include "media_container_manager.h"
+#include "render_target.h"
 #include "edit_model.h"
 #include "media_decoder.h"
 #include "project_data.h"
@@ -150,18 +151,18 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 
 // Captures the (0, UI_HEIGHT, SCR_WIDTH, SCR_HEIGHT) rectangle -- in pixel space, exactly the
 // rectangle the video is rendered into (see `extents` in main(), and the existing recording
-// capture below, both of which read this same rectangle) -- from whatever's currently in the
-// back buffer, and writes it out as a PNG at `path`. No-op if `path` is empty, so callers can
+// capture below, both of which read this same rectangle) -- from the picture the frame is being
+// drawn into, and writes it out as a PNG at `path`. No-op if `path` is empty, so callers can
 // just call this unconditionally once per frame and let it decide. Called at two different
 // points in the same frame's render sequence (see the call sites in the render loop below) so
 // each capture sees exactly the pixels it's supposed to: right after the video renders (raw, no
 // overlay yet) or right after every widget/text has (telemetry overlay baked in).
-static void save_frame_as_png(const std::string& path) {
+static void save_frame_as_png(const RenderTarget& canvas, const std::string& path) {
     if (path.empty())
         return;
     std::vector<uint8_t> buf((size_t)SCR_WIDTH * SCR_HEIGHT * 3);
-    glReadPixels(0, UI_HEIGHT, SCR_WIDTH, SCR_HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, buf.data());
-    // glReadPixels' first row is the bottom of the image; PNG (and stb_image_write) expect the
+    canvas.read_rgb(0, UI_HEIGHT, SCR_WIDTH, SCR_HEIGHT, buf.data());
+    // The first row read is the bottom of the image; PNG (and stb_image_write) expect the
     // first row to be the top, so flip on the way out rather than changing how we read.
     stbi_flip_vertically_on_write(1);
     stbi_write_png(path.c_str(), SCR_WIDTH, SCR_HEIGHT, 3, buf.data(), SCR_WIDTH * 3);
@@ -583,6 +584,17 @@ int main()
         project_file_mgr.adopt_model_state(normalized);
     }
 
+    // The frame is drawn into this picture and then copied to the window, rather than drawn into
+    // the window directly: exports and screenshots read the picture, so they don't depend on what
+    // the window is doing. It is the whole canvas the widgets are laid out on (the video, and the
+    // strip under it that holds the scrub bars).
+    RenderTarget canvas;
+    if (!canvas.create(SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT)) {
+        ffsw::message_box("CamBot - Cannot Start", "The graphics driver could not make the off-screen picture CamBot draws each frame into.");
+        shut_down_gui();
+        return 1;
+    }
+
     MediaContainerMgr media_container_mgr(&media_decoder, "3.3.shader.vert", "3.3.shader.frag", extents);
     // Restore whatever rotation was saved with this project (see EnvConfig::save_project()
     // and the "Save Project" menu item below for where it's written back out).
@@ -951,19 +963,19 @@ int main()
 
         // render
         // ------
+        // Everything is drawn into the off-screen canvas; it reaches the window further down.
+        // Its viewport is the whole canvas, and the MENU_HEIGHT strip of the window above it,
+        // where the ImGui menu bar goes, is never part of it. That keeps every existing NDC-based
+        // widget/video coordinate unchanged, and keeps the menu bar out of the pixels captured
+        // below for recording. ImGui's own render pass sets its own full-window viewport and
+        // restores this one afterward, so it must be reset here, every frame.
+        canvas.bind();
+        glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT);
         glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        // Restrict the 3D scene (video + widgets) to the original SCR_HEIGHT+UI_HEIGHT canvas at
-        // the bottom of the window, leaving the MENU_HEIGHT strip above it untouched for the ImGui
-        // menu bar. This keeps every existing NDC-based widget/video coordinate unchanged, and keeps
-        // the menu bar out of the pixels captured below for recording. ImGui's own render pass sets
-        // its own full-window viewport and restores this one afterward, so it must be reset here,
-        // every frame.
-        glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT);
-
         media_container_mgr.render();
-        save_frame_as_png(pending_raw_screenshot_path);
+        save_frame_as_png(canvas, pending_raw_screenshot_path);
         pending_raw_screenshot_path.clear();
         date_time_widget.render();
         media_scrub_widget.render();
@@ -973,7 +985,7 @@ int main()
         graph_widget.render();
         flight_summary_overlay.render();
         font_manager.render();
-        save_frame_as_png(pending_overlay_screenshot_path);
+        save_frame_as_png(canvas, pending_overlay_screenshot_path);
         pending_overlay_screenshot_path.clear();
 
         // Captured right here -- after every telemetry overlay above, before any of the
@@ -982,12 +994,19 @@ int main()
         // do_present, since every frame has to make it into the encoded video; export_frame_buf
         // is allocated once, outside the loop, rather than every frame.
         if (media_container_mgr.recording()) {
-            glReadPixels(0, UI_HEIGHT, SCR_WIDTH, SCR_HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, (void*)export_frame_buf);
+            canvas.read_rgb(0, UI_HEIGHT, SCR_WIDTH, SCR_HEIGHT, export_frame_buf);
             media_container_mgr.output_video_frame(export_frame_buf);
         }
 
+        // The window is only drawn to on frames that are presented: the canvas goes in at the
+        // bottom with the menu bar's strip above it, and the ImGui chrome is drawn over that.
+        RenderTarget::bind_window();
+
         // Paired with the ImGui::NewFrame()/menu-bar block up top -- see do_present there.
         if (do_present) {
+            glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+            canvas.copy_to_window();
             ImGui::Render();
             ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
             glfwSwapBuffers(window);
@@ -1012,6 +1031,7 @@ int main()
 
     env_config.discard_recovery();   // Leaving normally: saved, or the user chose not to.
     delete[] export_frame_buf;
+    canvas.destroy();   // Needs the OpenGL context, which glfwTerminate() ends.
 
     // Dear ImGui: tear down the backends and context.
     // -------------------------------------------------

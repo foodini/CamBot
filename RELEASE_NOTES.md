@@ -15,6 +15,10 @@
   and a camera clock that runs fast or slow can later be spread evenly between two points. One
   sync point behaves exactly like the old single offset (Up/Down nudge, dragging the telemetry
   bar). The launch marker is likewise tied to a file and a moment in it.
+- Each frame is now drawn into an off-screen picture (the video, the telemetry and the scrub-bar
+  strip, 1920x1214 as before) and then copied to the window. Exports and both screenshot
+  buttons read that picture rather than the window, so the saved frame no longer depends on
+  the window. Nothing should look different.
 - The telemetry windows (map, altitude graph, flight summary) still describe all the footage,
   not the cut video; that gets revisited when the timeline UI arrives.
 

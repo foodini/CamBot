@@ -176,6 +176,7 @@
     <ClCompile Include="glad.c" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="project_data.cpp" />
+    <ClCompile Include="render_target.cpp" />
     <ClCompile Include="project_model.cpp" />
     <ClCompile Include="project_file_manager.cpp" />
     <ClCompile Include="Source.cpp" />
@@ -237,6 +238,7 @@
     <ClInclude Include="media_decoder.h" />
     <ClInclude Include="media_order.h" />
     <ClInclude Include="project_data.h" />
+    <ClInclude Include="render_target.h" />
     <ClInclude Include="project_file_manager.h" />
     <ClInclude Include="stb_image.h" />
     <ClInclude Include="stb_image_write.h" />
