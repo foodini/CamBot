@@ -41,15 +41,22 @@ public:
 	const std::vector<std::string>& get_video_files() const { return m_data.video_files; }
 	const std::string& get_telemetry_file_path() const { return m_data.telemetry_file; }
 	const std::string& get_project_file_path() const { return m_project_file_path; }
-	float get_launch_time() const { return m_data.launch_time_s; }
-	float get_telemetry_offset() const { return m_data.telemetry_offset_s; }
 	float get_window_start_elapsed() const { return m_data.window_start_elapsed_s; }
 	float get_rotation_angle() const { return m_data.rotation_rad; }
 	const AltitudeReferences& get_altitude_references() const { return m_data.altitude_refs; }
 
+	// The whole project as read, for building the editing model from (see project_io::apply_to_model),
+	// and the live copy to write the model's state into (see project_io::fill_from_model). The copy
+	// is only a mirror: the model is the truth, and EnvConfig refreshes the copy every frame.
+	const ProjectData& get_data() const { return m_data; }
+	ProjectData*       mutable_data()   { return &m_data; }
+	// Call once, right after the model has been built from the project and mirrored back into the
+	// copy: `normalized` is what that gives. Reading a project and writing it back out can change
+	// how it is spelled (an older format, defaults filled in) without the user changing anything, so
+	// that is not counted as an unsaved change.
+	void adopt_model_state(const ProjectData& normalized);
+
 	// Setters;
-	void set_launch_time(float t) { m_data.launch_time_s = t; }
-	void set_telemetry_offset(float offset) { m_data.telemetry_offset_s = offset; }
 	void set_window_start_elapsed(float t) { m_data.window_start_elapsed_s = t; }
 	void set_rotation_angle(float r) { m_data.rotation_rad = r; }
 	void set_altitude_references(const AltitudeReferences& refs) { m_data.altitude_refs = refs; }

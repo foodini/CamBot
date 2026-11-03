@@ -16,6 +16,7 @@
 
 #include "altitude_reference.h"
 #include "climb_filter.h"
+#include "edit_model.h"
 #include "map_zoom.h"
 
 // Forward-declared rather than #include <json/json.h> here, so that header doesn't leak
@@ -92,7 +93,7 @@ public:
 //TODO(P1): TelemetryMgr[x] should return the x-th TelemetrySlice - or a default one.
 class TelemetryMgr {
 public:
-	TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* widgets, float initial_offset, float initial_window_start_elapsed, const ClimbFilterSettings& initial_climb_settings, const MapZoomSettings& initial_map_zoom_settings);
+	TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* widgets, EditModel* model, float initial_window_start_elapsed, const ClimbFilterSettings& initial_climb_settings, const MapZoomSettings& initial_map_zoom_settings);
 	~TelemetryMgr();
 
 	//Using a * to widgets instead of & since threads don't seem to like refs.
@@ -110,11 +111,13 @@ public:
 	std::pair<int32_t, int32_t> get_current_gridref();  // Really, only useful for debugging.
 	*/
 
-	// The fixed time offset between the video's clock and the telemetry device's clock (they aren't
-	// hardware-synced, so this has to be set by eye -- see TelemetryScrubWidget). Positive means the
-	// telemetry device started recording later than the camera did.
-	float offset() const                  { return m_telemetry_offset; }
-	bool  set_offset(float offset)        { m_telemetry_offset = offset; return true; }
+	// The time offset between the footage's clock (the flight clock, see edit_model.h) and the
+	// telemetry device's clock (they aren't hardware-synced, so this has to be set by eye -- see
+	// TelemetryScrubWidget). Positive means the telemetry device started recording later than the
+	// camera did. The sync itself lives in the EditModel, as sync points; with one sync point this
+	// is a plain constant, and these forward to the model's single-offset view of it.
+	float offset() const                  { return (float)m_model->offset(); }
+	bool  set_offset(float offset)        { m_model->set_offset((double)offset); return true; }
 
 	// Telemetry's own elapsed seconds at the launch marker -- set once, whenever the marker is
 	// (re)placed (see EnvConfig::launch_time()), and otherwise held fixed, so it never drifts just
@@ -161,16 +164,17 @@ public:
 	// window_start_elapsed() + video duration) into sample indices.
 	int32_t index_for_elapsed(float telemetry_elapsed) const { return (int32_t)(telemetry_elapsed * TELEMETRY_FREQUENCY); }
 
-	// Everything below combines telemetry's clock with the caller's notion of "now" on the video's
-	// clock (media_elapsed), rather than reaching for a MediaContainerMgr directly, so this class
-	// stays decoupled from anything video-related.
-	float elapsed_at(float media_elapsed) const;
+	// Everything below combines telemetry's clock with the caller's notion of "now" on the flight
+	// clock (flight_elapsed: seconds into the footage laid end to end in the order it was recorded,
+	// see edit_model.h), rather than reaching for a MediaContainerMgr directly, so this class stays
+	// decoupled from anything video-related.
+	float elapsed_at(float flight_elapsed) const;
 	// [0..1] across telemetry's own duration, clamped so an offset that pushes "now" outside the
 	// telemetry recording still yields a sane, renderable position instead of needing a special case
 	// downstream (e.g. in TelemetryScrubWidget's shader).
-	float parametric_at(float media_elapsed) const;
-	int32_t index_at(float media_elapsed) const;
-	const TelemetrySlice& slice_at(float media_elapsed) const { return (*this)[index_at(media_elapsed)]; }
+	float parametric_at(float flight_elapsed) const;
+	int32_t index_at(float flight_elapsed) const;
+	const TelemetrySlice& slice_at(float flight_elapsed) const { return (*this)[index_at(flight_elapsed)]; }
 
 	void tick();
 	bool parsing_done() { return m_parse_done && !m_thread_running; }
@@ -194,7 +198,7 @@ private:
 	std::atomic<bool>           m_parse_done;
 	std::atomic<bool>           m_thread_running;
 	TelemetrySlice              m_default_slice;
-	float                        m_telemetry_offset;
+	EditModel*                   m_model;   // Owns the sync; must outlive this object.
 	float                        m_window_start_elapsed;
 
 	ClimbFilterSettings          m_climb_settings;

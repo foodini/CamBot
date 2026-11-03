@@ -5,7 +5,7 @@
 //
 // A fake file has N video frames at 20 fps on a 1/600 time base (30 ticks per frame), a key frame
 // every `gop` frames, a decoder that holds back `delay` frames (as real decoders do), and
-// optionally audio (a packet of 2400 samples at 48 kHz per two video frames). Each decoded
+// optionally audio (a packet of 4800 samples at 48 kHz per two video frames). Each decoded
 // picture is 64x48 and carries its identity in the pixels: Y[0] and Y[1] hold the frame number
 // within the file (low/high byte), U[0] the file's `tag`.
 #include <string>
@@ -25,4 +25,5 @@ struct FakeFileSpec {
 };
 
 void fake_ffmpeg_reset();
+int  fake_ffmpeg_seek_count();   // How many times a file has been seeked, in all.
 void fake_ffmpeg_add_file(const std::string& path, const FakeFileSpec& spec);

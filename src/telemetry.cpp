@@ -140,10 +140,10 @@ float TelemetrySlice::course_rad() const {
 
 TelemetryMgr* TelemetryMgr::instance = nullptr;
 
-TelemetryMgr::TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* widgets, float initial_offset, float initial_window_start_elapsed, const ClimbFilterSettings& initial_climb_settings, const MapZoomSettings& initial_map_zoom_settings) :
+TelemetryMgr::TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* widgets, EditModel* model, float initial_window_start_elapsed, const ClimbFilterSettings& initial_climb_settings, const MapZoomSettings& initial_map_zoom_settings) :
 	m_committed_size(0),
 	m_parse_done(false),
-	m_telemetry_offset(initial_offset),
+	m_model(model),
 	m_window_start_elapsed(initial_window_start_elapsed),
 	m_climb_settings(initial_climb_settings),
 	m_climb_version(0),
@@ -166,26 +166,26 @@ TelemetryMgr::TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* wi
 
 	// UP/DOWN nudge the video/telemetry sync offset by one telemetry sample at a time -- the
 	// finest adjustment that means anything, same idea as the frame-step keys for video. Bound
-	// here (rather than in main()) because m_telemetry_offset is this class's own state. UP
-	// "advances" telemetry: elapsed_at(media_elapsed) = media_elapsed - offset, so moving
+	// here (rather than in main()) because the keys act on the sync, which this class answers for. UP
+	// "advances" telemetry: elapsed_at(flight_elapsed) = flight_elapsed - offset, so moving
 	// telemetry's sample forward relative to the video means decreasing the offset; DOWN
 	// "rewinds" it by increasing the offset the same amount. See ffsw::held_repeat_due() for the
 	// ~10/s auto-repeat while held.
 	// constexpr (not just const) so the lambdas below can use it without capturing it.
 	static constexpr float SAMPLE_SECONDS = 1.0f / TELEMETRY_FREQUENCY;
 	InteractionMgr::instance()->bind_key(GLFW_KEY_UP,
-		[this]() { m_telemetry_offset -= SAMPLE_SECONDS; },
+		[this]() { m_model->add_to_offset(-SAMPLE_SECONDS); },
 		nullptr,
 		[this](float held_seconds) {
 			if (ffsw::held_repeat_due(held_seconds, 0.25f, 0.1f, m_advance_offset_repeat_bucket))
-				m_telemetry_offset -= SAMPLE_SECONDS;
+				m_model->add_to_offset(-SAMPLE_SECONDS);
 		});
 	InteractionMgr::instance()->bind_key(GLFW_KEY_DOWN,
-		[this]() { m_telemetry_offset += SAMPLE_SECONDS; },
+		[this]() { m_model->add_to_offset(SAMPLE_SECONDS); },
 		nullptr,
 		[this](float held_seconds) {
 			if (ffsw::held_repeat_due(held_seconds, 0.25f, 0.1f, m_rewind_offset_repeat_bucket))
-				m_telemetry_offset += SAMPLE_SECONDS;
+				m_model->add_to_offset(SAMPLE_SECONDS);
 		});
 }
 
@@ -451,16 +451,16 @@ const TelemetrySlice& TelemetryMgr::operator[](int64_t index) const {
 	return m_telemetry[index];
 }
 
-float TelemetryMgr::elapsed_at(float media_elapsed) const {
-	return media_elapsed - m_telemetry_offset;
+float TelemetryMgr::elapsed_at(float flight_elapsed) const {
+	return (float)m_model->telemetry_seconds((double)flight_elapsed);
 }
 
-float TelemetryMgr::parametric_at(float media_elapsed) const {
+float TelemetryMgr::parametric_at(float flight_elapsed) const {
 	float total_duration = duration();
 	if (total_duration <= 0.0f) {
 		return 0.0f;
 	}
-	float parametric = elapsed_at(media_elapsed) / total_duration;
+	float parametric = elapsed_at(flight_elapsed) / total_duration;
 	if (parametric < 0.0f) {
 		parametric = 0.0f;
 	} else if (parametric > 1.0f) {
@@ -469,8 +469,8 @@ float TelemetryMgr::parametric_at(float media_elapsed) const {
 	return parametric;
 }
 
-int32_t TelemetryMgr::index_at(float media_elapsed) const {
-	return (int32_t)(elapsed_at(media_elapsed) * TELEMETRY_FREQUENCY);
+int32_t TelemetryMgr::index_at(float flight_elapsed) const {
+	return (int32_t)(elapsed_at(flight_elapsed) * TELEMETRY_FREQUENCY);
 }
 
 void TelemetryMgr::tick() {

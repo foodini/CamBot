@@ -7,11 +7,11 @@
 
 EnvConfig* EnvConfig::instance = nullptr;
 
-EnvConfig::EnvConfig(MediaContainerMgr* mcm, FontManager* fm, ProjectFileManager* pfm, float screen_width, float screen_height, float ui_height) :
+EnvConfig::EnvConfig(MediaContainerMgr* mcm, FontManager* fm, ProjectFileManager* pfm, EditModel* model, float screen_width, float screen_height, float ui_height) :
 	media_mgr(mcm),
 	font_mgr(fm),
 	project_file_mgr(pfm),
-	m_launch_time(pfm->get_launch_time()),
+	edit_model(model),
 	m_altitude_refs(pfm->get_altitude_references()),
 	m_user_settings(),
 	m_screen_width(screen_width),
@@ -45,8 +45,16 @@ float EnvConfig::media_out_elapsed() const {
 	return media_in_elapsed(); //+ some_offset;
 }
 
+float EnvConfig::flight_elapsed() const {
+	return (float)edit_model->flight_seconds_for_timeline(media_mgr->current_ticks());
+}
+
+float EnvConfig::flight_duration() const {
+	return (float)edit_model->ticks_to_seconds(edit_model->capture().total_ticks());
+}
+
 float EnvConfig::flight_time() const {
-	return media_in_elapsed() - m_launch_time;
+	return flight_elapsed() - (float)edit_model->launch_flight_seconds();
 }
 
 bool EnvConfig::telemetry_offset(float offset) {
@@ -79,11 +87,11 @@ float EnvConfig::telemetry_duration() const {
 }
 
 float EnvConfig::telemetry_elapsed() const {
-	return TelemetryMgr::instance->elapsed_at(media_in_elapsed());
+	return TelemetryMgr::instance->elapsed_at(flight_elapsed());
 }
 
-bool EnvConfig::launch_time(float launch_time) { 
-	m_launch_time = launch_time; 
+bool EnvConfig::launch_time(float launch_time) {
+	edit_model->set_launch_flight_seconds((double)launch_time);
 	// Snapshot telemetry's elapsed time at this launch marker, using whatever offset is in
 	// effect right now -- see TelemetryMgr::window_start_elapsed()'s doc comment for why this
 	// is a one-time snapshot rather than a live formula.
@@ -92,11 +100,11 @@ bool EnvConfig::launch_time(float launch_time) {
 }
 
 int32_t EnvConfig::telemetry_index() const {
-	return TelemetryMgr::instance->index_at(media_in_elapsed());
+	return TelemetryMgr::instance->index_at(flight_elapsed());
 }
 
 const TelemetrySlice& EnvConfig::telemetry_slice() const {
-	return TelemetryMgr::instance->slice_at(media_in_elapsed());
+	return TelemetryMgr::instance->slice_at(flight_elapsed());
 }
 
 // TelemetryMgr::window_start_elapsed() is where the launch marker falls in telemetry. The window
@@ -105,7 +113,7 @@ const TelemetrySlice& EnvConfig::telemetry_slice() const {
 // launch. (It used to start at the launch marker and run one video-duration from there, which
 // overshot the end of the video by however much footage preceded launch.)
 float EnvConfig::telemetry_window_start_elapsed() const {
-	return TelemetryMgr::instance->window_start_elapsed() - m_launch_time;
+	return TelemetryMgr::instance->window_start_elapsed() - (float)edit_model->launch_flight_seconds();
 }
 
 int32_t EnvConfig::telemetry_launch_index() const {
@@ -131,7 +139,7 @@ int32_t EnvConfig::telemetry_window_start_index() const {
 }
 
 int32_t EnvConfig::telemetry_window_end_index() const {
-	int32_t index = TelemetryMgr::instance->index_for_elapsed(telemetry_window_start_elapsed() + media_in_duration());
+	int32_t index = TelemetryMgr::instance->index_for_elapsed(telemetry_window_start_elapsed() + flight_duration());
 	int32_t last_valid = (int32_t)TelemetryMgr::instance->size() - 1;
 	if (index < 0) {
 		return 0;
@@ -150,7 +158,7 @@ int32_t EnvConfig::telemetry_video_start_index() const {
 
 int32_t EnvConfig::telemetry_video_end_index() const {
 	TelemetryMgr* telemetry = TelemetryMgr::instance;
-	int32_t index = telemetry->index_for_elapsed(telemetry->elapsed_at(media_in_duration()));
+	int32_t index = telemetry->index_for_elapsed(telemetry->elapsed_at(flight_duration()));
 	int32_t last_valid = (int32_t)telemetry->size() - 1;
 	return (std::max)(0, (std::min)(index, last_valid));
 }
@@ -170,14 +178,16 @@ float EnvConfig::telemetry_distance_flown() const {
 }
 
 // The project file's idea of the state is only a copy: the live values belong to their owners
-// (telemetry owns the offset, the media manager owns the rotation, and so on), and the keys and
-// scrub bars change them directly. So the copy is refreshed from them whenever it's needed.
+// (the edit model owns the clips, the sync and the launch mark, telemetry owns the window start,
+// the media manager owns the rotation, and so on), and the keys and scrub bars change them
+// directly. So the copy is refreshed from them whenever it's needed.
 void EnvConfig::push_state_to_project() {
-	project_file_mgr->set_launch_time(m_launch_time);
-	project_file_mgr->set_telemetry_offset(TelemetryMgr::instance->offset());
-	project_file_mgr->set_window_start_elapsed(TelemetryMgr::instance->window_start_elapsed());
-	project_file_mgr->set_rotation_angle(media_mgr->rotation_angle());
-	project_file_mgr->set_altitude_references(m_altitude_refs);
+	ProjectData* data = project_file_mgr->mutable_data();
+	AVRational tick = media_mgr->tick_time_base();
+	project_io::fill_from_model(*edit_model, tick.num, tick.den, data);
+	data->window_start_elapsed_s = TelemetryMgr::instance->window_start_elapsed();
+	data->rotation_rad = media_mgr->rotation_angle();
+	data->altitude_refs = m_altitude_refs;
 }
 
 void EnvConfig::poll_project() {

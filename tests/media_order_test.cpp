@@ -1,30 +1,9 @@
 #include <cstdio>
-#include "source_timeline.h"
 #include "media_order.h"
 static int fails = 0;
 #define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
 
 int main() {
-    // --- SourceTimeline ---
-    SourceTimeline t;
-    t.add_file("a.mp4", 1000);
-    t.add_file("b.mp4", 500);
-    t.add_file("c.mp4", 2000);
-    CHECK(t.file_count() == 3 && t.total_ticks() == 3500);
-    CHECK(t.file(0).start_ticks == 0 && t.file(1).start_ticks == 1000 && t.file(2).start_ticks == 1500);
-    CHECK(t.file_index_for(-50) == 0);
-    CHECK(t.file_index_for(0) == 0);
-    CHECK(t.file_index_for(999) == 0);
-    CHECK(t.file_index_for(1000) == 1);   // boundary belongs to the later file
-    CHECK(t.file_index_for(1499) == 1);
-    CHECK(t.file_index_for(1500) == 2);
-    CHECK(t.file_index_for(3499) == 2);
-    CHECK(t.file_index_for(99999) == 2);  // past the end -> last file
-    CHECK(t.to_local(2, 1700) == 200 && t.to_global(2, 200) == 1700);
-    SourceTimeline one; one.add_file("x", 10);
-    CHECK(one.file_index_for(5) == 0 && one.file_index_for(500) == 0);
-    t.clear(); CHECK(t.file_count() == 0 && t.total_ticks() == 0);
-
     // --- GoPro names ---
     int ch, rec;
     CHECK(media_order::parse_gopro_name("D:\\v\\GX020123.MP4", &ch, &rec) && ch == 2 && rec == 123);

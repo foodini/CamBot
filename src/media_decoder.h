@@ -1,12 +1,14 @@
 #pragma once
 
-// Decoding video from a group of files as one continuous source. No OpenGL in here; see
+// Decoding video from a group of files, played as an edit list. No OpenGL in here; see
 // MediaContainerMgr for putting the frames on screen and exporting them.
 //
-// The files are laid end to end on one "global clock" (see source_timeline.h). Every time this
-// class hands out is a count of ticks on that clock, ticks being the first file's video-stream
-// time base. For a single file the clock is simply the file's own video timestamps, with the
-// stream's start_time (normally 0) taken off so the first frame is at 0.
+// The source is a list of clips (see edit_model.h): pieces of the media files played one after
+// the other on the edit timeline. Every time this class hands out is a count of ticks on that
+// timeline, ticks being the first file's video-stream time base. Right after open() the clips
+// are the files, each whole, in the order given; set_clips() changes that. For a single whole
+// file the timeline is simply the file's own video timestamps, with the stream's start_time
+// (normally 0) taken off so the first frame is at 0.
 //
 // The current frame is always available as 8-bit planar YUV 4:2:0 (frame()), whatever the file
 // holds. 10-bit footage is squeezed down to 8 bits for now; a real high-bit-depth path comes
@@ -28,7 +30,7 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
-#include "source_timeline.h"
+#include "edit_model.h"
 
 // One decoded video frame, kept around so a GOP we have already decoded through once can be
 // replayed (forward or backward) without re-seeking/re-decoding. Plane data is copied out of
@@ -47,6 +49,9 @@ public:
 	// returns false and leaves a sentence for the user in *error; nothing is left half-open.
 	bool open(const std::vector<std::string>& paths, std::string* error);
 	bool is_open() const { return m_frame != nullptr; }
+	// Replaces the edit list and shows the frame at `show_ticks` of the new timeline. False,
+	// changing nothing, if a clip names a missing file or lies outside its file.
+	bool set_clips(const std::vector<Clip>& clips, int64_t show_ticks);
 	// The most recent problem met while decoding after open() (a file that vanished mid-flight,
 	// say), for the UI to show. Empty if none.
 	const std::string& last_error() const { return m_last_error; }
@@ -55,13 +60,16 @@ public:
 	int           width() const  { return m_width; }
 	int           height() const { return m_height; }
 	AVRational    time_base() const { return m_global_tb; }      // One tick, in seconds.
-	int64_t       total_ticks() const { return m_timeline.total_ticks(); }
+	int64_t       total_ticks() const { return m_clips.total_ticks(); }
 	double        ticks_to_seconds(int64_t ticks) const { return (double)ticks * m_global_tb.num / m_global_tb.den; }
 	double        duration_seconds() const { return ticks_to_seconds(total_ticks()); }
 	float         frame_rate() const;          // Frames per second.
 	int64_t       frame_ticks() const { return m_frame_ticks; }  // Ticks from one frame to the next.
-	int           file_count() const { return m_timeline.file_count(); }
-	const SourceTimeline& timeline() const { return m_timeline; }
+	// The media files, as given to open(), and how long each is.
+	int                 media_count() const { return (int)m_paths.size(); }
+	const std::string&  media_path(int media) const { return m_paths[media]; }
+	int64_t             media_duration_ticks(int media) const { return m_media_durations[media]; }
+	const EditList&     edit_list() const { return m_clips; }
 	int64_t       video_bit_rate() const { return m_video_bit_rate; }
 	AVRational    video_avg_frame_rate() const { return m_avg_frame_rate; }
 	AVRational    video_real_frame_rate() const { return m_real_frame_rate; }
@@ -74,7 +82,8 @@ public:
 	// ---- The current frame ----
 	const AVFrame* frame() const { return m_frame; }   // 8-bit YUV 4:2:0, width() x height().
 	int64_t        pts() const { return m_pts; }       // Global ticks. 0 before the first frame.
-	int            current_file() const { return m_cur_file; }
+	// The clip the frame on screen belongs to.
+	int            current_clip() const { return m_clips.clip_index_for(m_pts); }
 
 	// ---- Moving around ----
 	// The frame after the one on screen, carrying on into the next file when one ends. False at
@@ -105,12 +114,14 @@ private:
 	bool open_file(int index, std::string* error);
 	void close_file();
 	bool read_file_properties(int index, std::string* error);
-	bool next_file();
+	bool next_clip(bool have_frame, int64_t frame_local_ticks, bool* keep_frame);
+	bool position_media(int media, int64_t local_ticks);
+	int64_t local_ticks_of(const AVFrame* frame) const;
 	bool seek_to(int64_t ticks);
 
 	// Frames.
 	bool decode_next();
-	bool store_decoded_frame();
+	bool store_decoded_frame(int64_t local_ticks);
 	void queue_audio_packet();
 
 	// Cache.
@@ -119,7 +130,9 @@ private:
 	void cache_add_current(int64_t previous_decoder_pts, bool starts_new_run);
 
 	std::vector<std::string> m_paths;
-	SourceTimeline           m_timeline;
+	std::vector<int64_t>     m_media_durations;
+	EditList                 m_clips;
+	int                      m_cur_clip;       // The clip the decoder is working through.
 	std::string              m_last_error;
 
 	// Properties of the source as a whole, from the first file.

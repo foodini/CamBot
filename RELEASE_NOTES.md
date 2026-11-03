@@ -4,6 +4,20 @@
 
 ### Multi-file flights, JSON projects
 
+### Editing model (no visible change yet)
+
+- The program now keeps the footage as a *library* of files, a *capture order* (the order they
+  were recorded, which is the flight clock telemetry is synchronised to) and a list of *clips*
+  (the edit timeline). Today the clips are simply every file whole, in capture order, so the
+  program looks and behaves as before; this is groundwork for cutting and rearranging.
+- Telemetry sync is now stored as sync points tied to a file and a moment in it, instead of one
+  number for the whole flight, so clips will show the right telemetry wherever they are placed,
+  and a camera clock that runs fast or slow can later be spread evenly between two points. One
+  sync point behaves exactly like the old single offset (Up/Down nudge, dragging the telemetry
+  bar). The launch marker is likewise tied to a file and a moment in it.
+- The telemetry windows (map, altitude graph, flight summary) still describe all the footage,
+  not the cut video; that gets revisited when the timeline UI arrives.
+
 - **One flight, many video files.** Cameras split a long recording into pieces; a new
   project now takes all of them (select several files in the dialog) and plays them as one
   continuous video. Scrubbing, frame stepping, the timeline and export all run across the
@@ -12,8 +26,8 @@
   `GX020123`, ...) and numbered names are put in recording order automatically, and the
   order is shown for confirmation. Audio is carried across the joins; where one file's
   sound overlaps the next by a few milliseconds the overlap is trimmed.
-- **Projects are JSON now.** The `.ffsw` file is readable JSON (version 2). Projects from
-  earlier builds are not read; make a new one. Saving writes to a temporary file and swaps
+- **Projects are JSON now.** The `.ffsw` file is readable JSON (version 3). Version 2
+  projects open and are converted when next saved; older ones are not read. Saving writes to a temporary file and swaps
   it in (retrying briefly if a virus scanner or editor has the file), so a crash or a full
   disk can't leave a half-written project.
 - **Saving is explicit.** The project is only written by File > Save Project or Ctrl+S

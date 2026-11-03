@@ -50,7 +50,9 @@ static std::map<AVFormatContext*, FakeDemux*> g_demux;
 static std::map<AVStream*, FakeDemux*> g_stream_demux;
 static std::map<AVCodecContext*, FakeDecoder*> g_decoders;
 
+static int g_seek_count = 0;
 void fake_ffmpeg_reset() { g_files.clear(); }
+int fake_ffmpeg_seek_count() { return g_seek_count; }
 void fake_ffmpeg_add_file(const std::string& path, const FakeFileSpec& spec) { g_files[path] = spec; }
 
 extern "C" {
@@ -158,7 +160,7 @@ int avformat_open_input(AVFormatContext** ps, const char* url, const AVInputForm
 		AVStream* a = fmt->streams[1];
 		a->time_base.num = 1; a->time_base.den = 48000;
 		a->start_time = s.audio_start;
-		a->duration = (int64_t)s.frames * 2400 / 2;
+		a->duration = (int64_t)s.frames * 2400;
 		a->codecpar->codec_type = AVMEDIA_TYPE_AUDIO;
 		a->codecpar->codec_id = AV_CODEC_ID_AAC;
 		a->codecpar->sample_rate = 48000;
@@ -197,8 +199,8 @@ int av_read_frame(AVFormatContext* fmt, AVPacket* pkt) {
 	if (d->audio_pending) {
 		d->audio_pending = false;
 		pkt->stream_index = 1;
-		pkt->pts = pkt->dts = s.audio_start + (int64_t)d->next_audio * 2400;
-		pkt->duration = 2400;
+		pkt->pts = pkt->dts = s.audio_start + (int64_t)d->next_audio * 4800;
+		pkt->duration = 4800;
 		pkt->size = 4; pkt->data = (uint8_t*)calloc(1, 4);
 		pkt->flags = AV_PKT_FLAG_KEY;
 		d->next_audio++;
@@ -219,6 +221,7 @@ int av_read_frame(AVFormatContext* fmt, AVPacket* pkt) {
 	return 0;
 }
 int av_seek_frame(AVFormatContext* fmt, int, int64_t ts, int) {
+	g_seek_count++;
 	FakeDemux* d = g_demux[fmt];
 	int64_t local = ts - d->spec.start_time;
 	int frame = (int)(local / FRAME_TICKS);

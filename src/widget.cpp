@@ -217,8 +217,8 @@ void MediaScrubWidget::render() {
 	const int MAX_BREAKS = 256;   // Matches the shader's array.
 	float breaks[MAX_BREAKS];
 	int break_count = 0;
-	for (int file = 1; file < env_config->media_mgr->source_file_count() && break_count < MAX_BREAKS; file++) {
-		breaks[break_count++] = env_config->media_mgr->source_file_start_parametric(file);
+	for (int file = 1; file < env_config->media_mgr->clip_count() && break_count < MAX_BREAKS; file++) {
+		breaks[break_count++] = env_config->media_mgr->clip_start_parametric(file);
 	}
 	m_shader.setInt("break_count", break_count);
 	if (break_count > 0)
@@ -237,11 +237,11 @@ void MediaScrubWidget::render() {
 
 	// Which file the frame on screen comes from, at the right end of the bar, with its place in
 	// the sequence when there's more than one.
-	std::string file_label = env_config->media_mgr->current_file_name();
-	int file_count = env_config->media_mgr->source_file_count();
-	if (file_count > 1) {
-		file_label += "  (" + std::to_string(env_config->media_mgr->current_file_index() + 1) + " of " +
-			std::to_string(file_count) + ")";
+	std::string file_label = env_config->media_mgr->current_media_name();
+	int clip_count = env_config->media_mgr->clip_count();
+	if (clip_count > 1) {
+		file_label += "  (" + std::to_string(env_config->media_mgr->current_clip_index() + 1) + " of " +
+			std::to_string(clip_count) + ")";
 	}
 	env_config->font_mgr->add_string(
 		StringAndProperties(
@@ -261,7 +261,7 @@ TelemetryScrubWidget::~TelemetryScrubWidget() {
 }
 
 float TelemetryScrubWidget::current_parametric() const {
-	return TelemetryMgr::instance->parametric_at(EnvConfig::instance->media_in_elapsed());
+	return TelemetryMgr::instance->parametric_at(EnvConfig::instance->flight_elapsed());
 }
 
 float TelemetryScrubWidget::native_rate() const {
@@ -277,7 +277,7 @@ float TelemetryScrubWidget::offset_for_parametric_at(float parametric, float ref
 
 void TelemetryScrubWidget::seek_to_parametric(float parametric) {
 	EnvConfig::instance->telemetry_offset(
-		offset_for_parametric_at(parametric, EnvConfig::instance->media_in_elapsed()));
+		offset_for_parametric_at(parametric, EnvConfig::instance->flight_elapsed()));
 }
 
 void TelemetryScrubWidget::step(int64_t delta) {
@@ -297,7 +297,7 @@ void TelemetryScrubWidget::step_fast(int64_t delta) {
 float TelemetryScrubWidget::cutoff_parametric(bool is_left, bool* in_bounds) const {
 	const EnvConfig* env_config = EnvConfig::instance;
 	float window_start = env_config->telemetry_window_start_elapsed();
-	float target_elapsed = is_left ? window_start : window_start + env_config->media_in_duration();
+	float target_elapsed = is_left ? window_start : window_start + env_config->flight_duration();
 	float raw = target_elapsed / TelemetryMgr::instance->duration();
 	*in_bounds = (raw >= 0.0f) && (raw <= 1.0f);
 	if (raw < 0.0f) {

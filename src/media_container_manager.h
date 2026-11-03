@@ -58,11 +58,16 @@ public:
 	float in_parametric() const; // Time in [0.0..1.0] since beginning of video
 	float in_elapsed() const;    // Time, in seconds, since beginning of video.
 	float in_duration() const;   // Length of video, in seconds.
-	// The source files, for showing where the joins are. Positions are [0..1] along the whole flight.
-	int         source_file_count() const;
-	float       source_file_start_parametric(int index) const;   // Where file `index` begins.
-	int         current_file_index() const;                      // The file the frame on screen is from.
-	std::string current_file_name() const;                       // That file's name, without its folder.
+	// The clips the timeline is made of, for showing where the joins are. Positions are [0..1]
+	// along the timeline.
+	int         clip_count() const;
+	float       clip_start_parametric(int index) const;          // Where clip `index` begins.
+	int         current_clip_index() const;                      // The clip the frame on screen is from.
+	std::string current_media_name() const;                      // That clip's file, without its folder.
+	// The tick count at the frame on screen (see MediaDecoder), for mapping it through the edit model.
+	int64_t     current_ticks() const;
+	// What one tick is, in seconds (numerator / denominator).
+	AVRational  tick_time_base() const { return m_decoder->time_base(); }
 	void rotation_angle(float angle) { m_rotation_angle = angle; }
 	float rotation_angle() { return m_rotation_angle;  }
 	// Turns the picture by `radians` more (the same thing the F, comma and period keys do).

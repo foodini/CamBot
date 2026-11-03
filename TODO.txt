@@ -17,3 +17,5 @@
 * As the rotate buttons are used, report back to the user how much rotation they've  
   accumulated.
 * "Export Done" or "Export Cancelled" should probably be a popup requiring confirmation.
+* When moused over the timeline, show a small preview frame of that location. (Where?)
+* Slightly darken "future" flight track vs past.

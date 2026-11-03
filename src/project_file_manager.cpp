@@ -181,6 +181,16 @@ bool ProjectFileManager::save_project() {
 	return true;
 }
 
+void ProjectFileManager::adopt_model_state(const ProjectData& normalized) {
+	const bool was_saved = m_data == m_saved_data;
+	const bool was_autosaved = m_data == m_autosaved_data;
+	m_data = normalized;
+	if (was_saved)
+		m_saved_data = normalized;
+	if (was_autosaved)
+		m_autosaved_data = normalized;
+}
+
 void ProjectFileManager::autosave_if_due(float now_seconds) {
 	if (m_project_file_path.empty())
 		return;

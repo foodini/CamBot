@@ -1,0 +1,111 @@
+#include "project_data.h"
+
+#include <math.h>
+
+// Turning a project into the editing model and back. Kept apart from the reading and writing of
+// the file (project_data.cpp) so that it can be tested without a JSON library.
+
+namespace project_io {
+
+namespace {
+
+void set_error(std::string* error, const std::string& message) {
+	if (error)
+		*error = message;
+}
+
+// Ticks from one time base to another, rounded to the nearest tick.
+int64_t rescale_ticks(int64_t ticks, int from_num, int from_den, int to_num, int to_den) {
+	if (from_num == to_num && from_den == to_den)
+		return ticks;
+	long double seconds = (long double)ticks * (long double)from_num / (long double)from_den;
+	return (int64_t)llroundl(seconds * (long double)to_den / (long double)to_num);
+}
+
+}  // namespace
+
+bool apply_to_model(const ProjectData& project, const std::vector<int64_t>& media_durations, int tb_num, int tb_den,
+	EditModel* model, std::string* error) {
+	if (project.video_files.size() != media_durations.size() || tb_num <= 0 || tb_den <= 0) {
+		set_error(error, "The project's video files do not match the files that were opened.");
+		return false;
+	}
+	model->set_media(project.video_files, media_durations, (double)tb_num / (double)tb_den);
+
+	// Times in the project are in the time base it was saved with, which can differ from this
+	// run's if the first video file is a different one now.
+	const bool same_base = project.time_base_num == 0 || (project.time_base_num == tb_num && project.time_base_den == tb_den);
+	const int from_num = same_base ? tb_num : project.time_base_num;
+	const int from_den = same_base ? tb_den : project.time_base_den;
+
+	if (!project.capture_order.empty()) {
+		if (!model->set_capture_order(project.capture_order)) {
+			set_error(error, "The project's capture order does not match its video files.");
+			return false;
+		}
+	}
+	if (!project.clips.empty()) {
+		std::vector<Clip> clips;
+		for (size_t i = 0; i < project.clips.size(); i++) {
+			const Clip& clip = project.clips[i];
+			clips.push_back(Clip(clip.media, rescale_ticks(clip.in_ticks, from_num, from_den, tb_num, tb_den),
+				rescale_ticks(clip.out_ticks, from_num, from_den, tb_num, tb_den)));
+		}
+		if (!model->set_clips(clips)) {
+			// The usual cause is a file that has been replaced by a shorter one.
+			set_error(error, "The edit in this project uses part of a video file that is no longer there: a file is shorter than it "
+				"was when the project was saved, or the project file has been changed.");
+			return false;
+		}
+	} else {
+		model->set_default_clips();
+	}
+	model->set_edit_started(project.edit_started);
+
+	std::vector<SyncAnchor> anchors;
+	for (size_t i = 0; i < project.sync_anchors.size(); i++) {
+		SyncAnchor anchor = project.sync_anchors[i];
+		anchor.at.local_ticks = rescale_ticks(anchor.at.local_ticks, from_num, from_den, tb_num, tb_den);
+		anchors.push_back(anchor);
+	}
+	model->set_anchors(anchors);
+	if (project.launch_mark.media >= 0 && project.launch_mark.media < model->media_count()) {
+		FileTime launch = project.launch_mark;
+		launch.local_ticks = rescale_ticks(launch.local_ticks, from_num, from_den, tb_num, tb_den);
+		model->set_launch_mark(launch);
+	} else if (!model->capture().order().empty()) {
+		// Not marked: the start of the flight, as it always was.
+		model->set_launch_mark(FileTime(model->capture().order()[0], 0));
+	}
+
+	if (project.has_version2_sync) {
+		model->set_offset((double)project.version2_offset_s);
+		model->set_launch_flight_seconds((double)project.version2_launch_s);
+	}
+	return true;
+}
+
+void fill_from_model(const EditModel& model, int tb_num, int tb_den, ProjectData* project) {
+	project->time_base_num = tb_num;
+	project->time_base_den = tb_den;
+	project->capture_order = model.capture().order();
+	project->clips = model.edit_list().clips();
+	project->edit_started = model.edit_started();
+
+	// One anchor at the very start of the flight that says the clocks agree is the same as
+	// having none, so it isn't kept (nudging the sync back to zero shouldn't count as an edit).
+	project->sync_anchors.clear();
+	const std::vector<SyncAnchor>& anchors = model.anchors();
+	for (size_t i = 0; i < anchors.size(); i++) {
+		bool is_nothing = anchors.size() == 1 && !model.capture().order().empty() &&
+			anchors[i].at == FileTime(model.capture().order()[0], 0) && anchors[i].telemetry_seconds == 0.0f;
+		if (!is_nothing)
+			project->sync_anchors.push_back(anchors[i]);
+	}
+	project->launch_mark = model.launch_mark();
+	project->has_version2_sync = false;
+	project->version2_offset_s = 0.0f;
+	project->version2_launch_s = 0.0f;
+}
+
+}  // namespace project_io

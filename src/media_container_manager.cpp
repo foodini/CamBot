@@ -267,20 +267,27 @@ float MediaContainerMgr::in_duration() const {
     return (float)m_decoder->duration_seconds();
 }
 
-int MediaContainerMgr::source_file_count() const {
-    return m_decoder->file_count();
+int MediaContainerMgr::clip_count() const {
+    return m_decoder->edit_list().count();
 }
 
-float MediaContainerMgr::source_file_start_parametric(int index) const {
-    return (float)((double)m_decoder->timeline().file(index).start_ticks / (double)m_decoder->total_ticks());
+float MediaContainerMgr::clip_start_parametric(int index) const {
+    return (float)((double)m_decoder->edit_list().start(index) / (double)m_decoder->total_ticks());
 }
 
-int MediaContainerMgr::current_file_index() const {
-    return m_decoder->timeline().file_index_for(m_decoder->pts());
+int MediaContainerMgr::current_clip_index() const {
+    return m_decoder->current_clip();
 }
 
-std::string MediaContainerMgr::current_file_name() const {
-    return fileio::base_name(m_decoder->timeline().file(current_file_index()).path);
+std::string MediaContainerMgr::current_media_name() const {
+    int clip = m_decoder->current_clip();
+    if (clip < 0)
+        return std::string();
+    return fileio::base_name(m_decoder->media_path(m_decoder->edit_list().clip(clip).media));
+}
+
+int64_t MediaContainerMgr::current_ticks() const {
+    return m_decoder->pts();
 }
 
 float MediaContainerMgr::frame_rate() const {

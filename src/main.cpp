@@ -26,7 +26,9 @@
 #include "lines.h"
 #include "project_file_manager.h"
 #include "media_container_manager.h"
+#include "edit_model.h"
 #include "media_decoder.h"
+#include "project_data.h"
 #include "telemetry.h"
 #include "util.h"
 #include "widget.h"
@@ -555,13 +557,39 @@ int main()
         return 1;
     }
 
+    // What the user has made of those files: their order, the clips and how they are tied to the
+    // telemetry (see edit_model.h). Built from the project, then handed to the decoder.
+    EditModel edit_model;
+    {
+        std::vector<int64_t> media_durations;
+        for (int media = 0; media < media_decoder.media_count(); media++)
+            media_durations.push_back(media_decoder.media_duration_ticks(media));
+        AVRational tick = media_decoder.time_base();
+        std::string model_error;
+        if (!project_io::apply_to_model(project_file_mgr.get_data(), media_durations, tick.num, tick.den, &edit_model, &model_error)) {
+            ffsw::message_box("CamBot - Cannot Open Project", model_error);
+            shut_down_gui();
+            return 1;
+        }
+        if (!media_decoder.set_clips(edit_model.edit_list().clips(), 0)) {
+            ffsw::message_box("CamBot - Cannot Open Project", "The video could not be set up the way this project describes.");
+            shut_down_gui();
+            return 1;
+        }
+        // Reading a project can fill in what it left out (or convert an older one); that is not a
+        // change the user made, so it must not show up as unsaved.
+        ProjectData normalized = project_file_mgr.get_data();
+        project_io::fill_from_model(edit_model, tick.num, tick.den, &normalized);
+        project_file_mgr.adopt_model_state(normalized);
+    }
+
     MediaContainerMgr media_container_mgr(&media_decoder, "3.3.shader.vert", "3.3.shader.frag", extents);
     // Restore whatever rotation was saved with this project (see EnvConfig::save_project()
     // and the "Save Project" menu item below for where it's written back out).
     media_container_mgr.rotation_angle(project_file_mgr.get_rotation_angle());
     FontManager font_manager("c:\\Windows\\Fonts\\courbd.ttf", 48, SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT);
     //TODO(P1) Hand the telemetry_mgr, instead of its vector, into the env_config.
-    EnvConfig env_config(&media_container_mgr, &font_manager, &project_file_mgr, (float)SCR_WIDTH, (float)SCR_HEIGHT + (float)UI_HEIGHT, (float)UI_HEIGHT);
+    EnvConfig env_config(&media_container_mgr, &font_manager, &project_file_mgr, &edit_model, (float)SCR_WIDTH, (float)SCR_HEIGHT + (float)UI_HEIGHT, (float)UI_HEIGHT);
 
     DateTimeWidget date_time_widget(.29f, .18f, 1.0f-.29f-.015f, 1.0f-.18f-.01f);
     MediaScrubWidget media_scrub_widget(1.96f, 0.04f, -.98f, -.835f);
@@ -591,7 +619,7 @@ int main()
     all_widgets.push_back(&climb_widget);
     all_widgets.push_back(&graph_widget);
 
-    TelemetryMgr telemetry_mgr(project_file_mgr.get_telemetry_file_path(), &polygonalized_widgets, project_file_mgr.get_telemetry_offset(), project_file_mgr.get_window_start_elapsed(), env_config.user_settings().climb_filter, env_config.user_settings().map_zoom);
+    TelemetryMgr telemetry_mgr(project_file_mgr.get_telemetry_file_path(), &polygonalized_widgets, &edit_model, project_file_mgr.get_window_start_elapsed(), env_config.user_settings().climb_filter, env_config.user_settings().map_zoom);
 
     InteractionMgr* interaction_mgr = InteractionMgr::instance();
     // Pause toggle stays owned here for now rather than by a specific subsystem -- see the
@@ -756,7 +784,7 @@ int main()
                 }
                 if (ImGui::BeginMenu("Edit")) {
                     if (ImGui::MenuItem("Mark Launch Point")) {
-                        env_config.launch_time(env_config.media_in_elapsed());
+                        env_config.launch_time(env_config.flight_elapsed());
                     }
                     ImGui::Separator();
                     // The same turns the keys bound in MediaContainerMgr's constructor make; the

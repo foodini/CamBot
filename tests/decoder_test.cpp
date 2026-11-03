@@ -79,7 +79,7 @@ static void test_multi_file_sequential_no_frames_lost() {
 	MediaDecoder decoder;
 	std::string error;
 	CHECK(decoder.open(s.paths, &error));
-	CHECK(decoder.file_count() == 3);
+	CHECK(decoder.media_count() == 3);
 	CHECK(decoder.total_ticks() == 120 * FT);
 	int count = 1;
 	while (decoder.read_frame()) {
@@ -88,7 +88,7 @@ static void test_multi_file_sequential_no_frames_lost() {
 		count++;
 	}
 	CHECK_MSG(count == 120, "frames read: %d", count);
-	CHECK(decoder.current_file() == 2);
+	CHECK(decoder.current_clip() == 2);
 }
 
 static void test_nonzero_start_times() {
@@ -196,7 +196,7 @@ static void test_stepping_across_joins_with_wrong_durations() {
 		std::string error;
 		CHECK(decoder.open(s.paths, &error));
 		// Land on the first frame of the second file by asking for its time, whatever the gap.
-		CHECK(decoder.advance_to(decoder.timeline().file(1).start_ticks));
+		CHECK(decoder.advance_to(decoder.edit_list().start(1)));
 		int file = -1;
 		int frame = shown_frame(decoder, s, &file);
 		CHECK_MSG(file == 1, "extra %lld: expected file 1, got %d", extras[e], file);
@@ -249,6 +249,318 @@ static void test_discard_flagged_last_frames_are_kept() {
 	for (int n = 64; n >= 38; n--) {
 		CHECK(decoder.step_frames(-1));
 		CHECK_MSG(shown_frame(decoder, s) == n, "back: expected %d got %d", n, shown_frame(decoder, s));
+	}
+}
+
+
+// ---- Edit lists: clips cut from the files, in any order ----
+
+// A plan is an edit list plus, for each frame of the timeline, which frame of the files should
+// be on screen (numbered across all the files, as shown_frame() does).
+struct Plan {
+	std::vector<Clip> clips;
+	std::vector<int> expected;
+};
+
+static void plan_add(Plan* plan, const Setup& s, int media, int in_frame, int out_frame) {
+	plan->clips.push_back(Clip(media, (int64_t)in_frame * FT, (int64_t)out_frame * FT));
+	int base = 0;
+	for (int i = 0; i < media; i++) base += s.frames[i];
+	for (int f = in_frame; f < out_frame; f++) plan->expected.push_back(base + f);
+}
+
+// The picture on screen must be the planned one for the clock's time.
+static bool shows_plan(const MediaDecoder& decoder, const Setup& s, const Plan& plan) {
+	if (decoder.pts() % FT != 0) return false;
+	int64_t t = decoder.pts() / FT;
+	if (t < 0 || t >= (int64_t)plan.expected.size()) return false;
+	return shown_frame(decoder, s) == plan.expected[(size_t)t];
+}
+
+#define CHECK_PLAN(decoder, s, plan, what) \
+	CHECK_MSG(shows_plan(decoder, s, plan), "%s: at timeline frame %lld the picture is frame %d, wanted %d", what, \
+		(long long)(decoder.pts() / FT), shown_frame(decoder, s), \
+		(decoder.pts() / FT >= 0 && decoder.pts() / FT < (long long)plan.expected.size()) ? plan.expected[(size_t)(decoder.pts() / FT)] : -1)
+
+static void test_cuts_within_one_file() {
+	int frames[] = { 60 }, gops[] = { 8 }, delays[] = { 2 };
+	Setup s = make_setup(frames, gops, delays, 1);
+	MediaDecoder decoder;
+	std::string error;
+	CHECK(decoder.open(s.paths, &error));
+	Plan plan;
+	plan_add(&plan, s, 0, 10, 30);
+	plan_add(&plan, s, 0, 50, 60);
+	plan_add(&plan, s, 0, 0, 5);
+	const int total = (int)plan.expected.size();
+	CHECK(decoder.set_clips(plan.clips, 0));
+	CHECK(decoder.total_ticks() == (int64_t)total * FT);
+	CHECK(decoder.edit_list().count() == 3);
+	CHECK_PLAN(decoder, s, plan, "start");
+	// Straight through: every planned frame, once, in order.
+	int count = 1;
+	while (decoder.read_frame()) {
+		CHECK_PLAN(decoder, s, plan, "play");
+		count++;
+		if (g_failures > 10) return;
+	}
+	CHECK_MSG(count == total, "played %d of %d frames", count, total);
+	// Every frame by direct access, in a scattered order.
+	for (int i = 0; i < total; i++) {
+		int t = (i * 11) % total;
+		CHECK(decoder.advance_to((int64_t)t * FT));
+		CHECK_MSG(decoder.pts() == (int64_t)t * FT, "advance_to(%d) landed on %lld", t, (long long)(decoder.pts() / FT));
+		CHECK_PLAN(decoder, s, plan, "advance_to");
+	}
+	// Back one frame at a time over both joins, then forward again.
+	CHECK(decoder.advance_to((int64_t)(total - 1) * FT));
+	for (int t = total - 2; t >= 0; t--) {
+		CHECK(decoder.step_frames(-1));
+		CHECK_MSG(decoder.pts() == (int64_t)t * FT, "back: expected %d got %lld", t, (long long)(decoder.pts() / FT));
+		CHECK_PLAN(decoder, s, plan, "back");
+		if (g_failures > 10) return;
+	}
+	for (int t = 1; t < total; t++) {
+		CHECK(decoder.step_frames(1));
+		CHECK_PLAN(decoder, s, plan, "forward");
+		if (g_failures > 10) return;
+	}
+	// A bad list is refused and the old one stays.
+	std::vector<Clip> bad = plan.clips;
+	bad.push_back(Clip(0, 0, 61 * FT));
+	CHECK(!decoder.set_clips(bad, 0));
+	bad.back() = Clip(3, 0, FT);
+	CHECK(!decoder.set_clips(bad, 0));
+	bad.back() = Clip(0, 5 * FT, 5 * FT);
+	CHECK(!decoder.set_clips(bad, 0));
+	CHECK(!decoder.set_clips(std::vector<Clip>(), 0));
+	CHECK(decoder.total_ticks() == (int64_t)total * FT);
+}
+
+static void test_clips_reordered_across_files() {
+	int frames[] = { 30, 20, 25 }, gops[] = { 5, 7, 10 }, delays[] = { 2, 0, 3 };
+	Setup s = make_setup(frames, gops, delays, 3);
+	MediaDecoder decoder;
+	std::string error;
+	CHECK(decoder.open(s.paths, &error));
+	Plan plan;
+	plan_add(&plan, s, 2, 0, 25);    // The last file first,
+	plan_add(&plan, s, 0, 5, 30);    // then most of the first,
+	plan_add(&plan, s, 1, 0, 20);    // then the middle one.
+	const int total = (int)plan.expected.size();
+	CHECK(total == 70);
+	CHECK(decoder.set_clips(plan.clips, 0));
+	CHECK_PLAN(decoder, s, plan, "start");
+	int count = 1;
+	while (decoder.read_frame()) {
+		CHECK_PLAN(decoder, s, plan, "play");
+		count++;
+		if (g_failures > 10) return;
+	}
+	CHECK_MSG(count == total, "played %d of %d frames", count, total);
+	CHECK(decoder.current_clip() == 2);
+	for (int i = 0; i < total; i++) {
+		int t = (i * 29) % total;
+		CHECK(decoder.advance_to((int64_t)t * FT));
+		CHECK_PLAN(decoder, s, plan, "advance_to");
+	}
+	// Over each join, backward and forward.
+	int joins[] = { 25, 50 };
+	for (int j = 0; j < 2; j++) {
+		CHECK(decoder.advance_to((int64_t)(joins[j] + 3) * FT));
+		for (int t = joins[j] + 2; t >= joins[j] - 3; t--) {
+			CHECK(decoder.step_frames(-1));
+			CHECK_MSG(decoder.pts() == (int64_t)t * FT, "back over join: expected %d got %lld", t, (long long)(decoder.pts() / FT));
+			CHECK_PLAN(decoder, s, plan, "back over join");
+		}
+		for (int t = joins[j] - 2; t <= joins[j] + 3; t++) {
+			CHECK(decoder.step_frames(1));
+			CHECK_PLAN(decoder, s, plan, "forward over join");
+		}
+	}
+	// And one list can be replaced by another.
+	Plan second;
+	plan_add(&second, s, 1, 5, 15);
+	plan_add(&second, s, 1, 5, 15);   // The same piece twice.
+	CHECK(decoder.set_clips(second.clips, 4 * FT));
+	CHECK_PLAN(decoder, s, second, "second list");
+	CHECK(decoder.pts() == 4 * FT);
+	count = 0;
+	CHECK(decoder.advance_to(0));
+	count = 1;
+	while (decoder.read_frame()) {
+		CHECK_PLAN(decoder, s, second, "repeat");
+		count++;
+		if (g_failures > 10) return;
+	}
+	CHECK_MSG(count == 20, "repeated clip played %d frames", count);
+}
+
+static void test_contiguous_clips_do_not_reseek() {
+	int frames[] = { 40 }, gops[] = { 10 }, delays[] = { 2 };
+	Setup s = make_setup(frames, gops, delays, 1);
+	MediaDecoder decoder;
+	std::string error;
+	CHECK(decoder.open(s.paths, &error));
+	// A file cut in two where it was one piece: playing across the cut is just playing.
+	Plan plan;
+	plan_add(&plan, s, 0, 0, 20);
+	plan_add(&plan, s, 0, 20, 40);
+	CHECK(decoder.set_clips(plan.clips, 0));
+	int seeks_before = fake_ffmpeg_seek_count();
+	int count = 1;
+	while (decoder.read_frame()) {
+		CHECK_PLAN(decoder, s, plan, "play across the cut");
+		count++;
+	}
+	CHECK(count == 40);
+	CHECK_MSG(fake_ffmpeg_seek_count() == seeks_before, "seeked %d times across a cut that needs none", fake_ffmpeg_seek_count() - seeks_before);
+
+	// A cut that leaves out a short stretch is crossed by decoding through it, not by seeking.
+	Plan skip;
+	plan_add(&skip, s, 0, 0, 10);
+	plan_add(&skip, s, 0, 15, 25);
+	CHECK(decoder.set_clips(skip.clips, 0));
+	seeks_before = fake_ffmpeg_seek_count();
+	count = 1;
+	while (decoder.read_frame()) {
+		CHECK_PLAN(decoder, s, skip, "play over a short skip");
+		count++;
+	}
+	CHECK(count == 20);
+	CHECK(fake_ffmpeg_seek_count() == seeks_before);
+}
+
+static void test_cut_between_frames() {
+	// A cut that falls between two frames goes to the nearer frame, the same way for the end of
+	// one clip and the start of the next, so a file cut in two there loses and repeats nothing.
+	int frames[] = { 40 }, gops[] = { 8 }, delays[] = { 2 };
+	Setup s = make_setup(frames, gops, delays, 1);
+	MediaDecoder decoder;
+	std::string error;
+	CHECK(decoder.open(s.paths, &error));
+	std::vector<Clip> clips;
+	clips.push_back(Clip(0, 320, 470));     // Frames are 30 ticks apart: 320 is nearest frame 11, 470 is nearest 16.
+	clips.push_back(Clip(0, 470, 620));
+	CHECK(decoder.set_clips(clips, 0));
+	CHECK(decoder.total_ticks() == 300);
+	int expected = 11;
+	CHECK(shown_frame(decoder, s) == expected);
+	int64_t last_pts = decoder.pts();
+	while (decoder.read_frame()) {
+		expected++;
+		CHECK_MSG(shown_frame(decoder, s) == expected, "expected %d got %d", expected, shown_frame(decoder, s));
+		CHECK(decoder.pts() > last_pts);
+		last_pts = decoder.pts();
+	}
+	CHECK_MSG(expected == 20, "ended at frame %d", expected);
+}
+
+static void test_audio_follows_clips() {
+	fake_ffmpeg_reset();
+	FakeFileSpec spec;
+	spec.frames = 40; spec.gop = 5; spec.delay = 0; spec.tag = 0;
+	fake_ffmpeg_add_file("cut.mp4", spec);
+	std::vector<std::string> paths;
+	paths.push_back("cut.mp4");
+	MediaDecoder decoder;
+	std::string error;
+	CHECK(decoder.open(paths, &error));
+	std::vector<Clip> clips;
+	clips.push_back(Clip(0, 10 * FT, 20 * FT));
+	clips.push_back(Clip(0, 30 * FT, 40 * FT));
+	CHECK(decoder.set_clips(clips, 0));
+	decoder.begin_audio_capture();
+	CHECK(decoder.seek_keyframe(0));
+	std::vector<long long> pts;
+	while (true) {
+		AVPacket* p;
+		while ((p = decoder.pop_audio_packet()) != nullptr) { pts.push_back(p->pts); av_packet_free(&p); }
+		if (!decoder.read_frame())
+			break;
+	}
+	AVPacket* p;
+	while ((p = decoder.pop_audio_packet()) != nullptr) { pts.push_back(p->pts); av_packet_free(&p); }
+	decoder.end_audio_capture();
+	// Packet n is two frames long and starts at frame 2n. Clip one is frames 10-19 (packets 5-9)
+	// from timeline 0; clip two is frames 30-39 (packets 15-19) from timeline frame 10. Each
+	// packet's time moves by how far its clip was moved: 4800 samples per two frames.
+	std::vector<long long> expected;
+	for (int n = 5; n < 10; n++) expected.push_back((long long)(n - 5) * 4800);
+	for (int n = 15; n < 20; n++) expected.push_back((long long)(n - 15) * 4800 + 5 * 4800);
+	CHECK_MSG(pts.size() == expected.size(), "audio packets %zu expected %zu", pts.size(), expected.size());
+	for (size_t i = 0; i < pts.size() && i < expected.size(); i++)
+		CHECK_MSG(pts[i] == expected[i], "audio packet %zu: %lld expected %lld", i, pts[i], expected[i]);
+}
+
+// Random operations on random edit lists, checked against the plan.
+static void test_random_edit_lists() {
+	srand(7);
+	for (int round = 0; round < 40; round++) {
+		int frames[] = { 30 + rand() % 20, 20 + rand() % 20, 25 + rand() % 15 };
+		int gops[] = { 4 + rand() % 7, 5 + rand() % 7, 3 + rand() % 9 };
+		int delays[] = { rand() % 4, rand() % 4, rand() % 4 };
+		Setup s = make_setup(frames, gops, delays, 3);
+		MediaDecoder decoder;
+		std::string error;
+		CHECK(decoder.open(s.paths, &error));
+		Plan plan;
+		int clip_count = 1 + rand() % 4;
+		for (int c = 0; c < clip_count; c++) {
+			int media = rand() % 3;
+			int in = rand() % (frames[media] - 1);
+			int out = in + 1 + rand() % (frames[media] - in);
+			plan_add(&plan, s, media, in, out);
+		}
+		const int total = (int)plan.expected.size();
+		const int failures_before = g_failures;
+		CHECK(decoder.set_clips(plan.clips, 0));
+		CHECK_PLAN(decoder, s, plan, "round start");
+		for (int op = 0; op < 120; op++) {
+			int current = (int)(decoder.pts() / FT);
+			int kind = rand() % 10;
+			if (kind < 3) {
+				int t = rand() % total;
+				CHECK(decoder.advance_to((int64_t)t * FT));
+				CHECK_MSG(decoder.pts() == (int64_t)t * FT, "round %d op %d advance_to(%d) landed on %lld", round, op, t, (long long)(decoder.pts() / FT));
+			} else if (kind < 6) {
+				int k = (rand() % 21) - 10;
+				if (k == 0) continue;
+				int want = current + k;
+				if (want < 0) want = 0;
+				if (want > total - 1) want = total - 1;
+				decoder.step_frames(k);
+				CHECK_MSG(decoder.pts() == (int64_t)want * FT, "round %d op %d step(%d) from %d landed on %lld wanted %d", round, op, k, current, (long long)(decoder.pts() / FT), want);
+			} else if (kind < 9) {
+				bool more = decoder.read_frame();
+				if (current + 1 < total) {
+					CHECK_MSG(more, "round %d op %d read_frame ended early at %d of %d", round, op, current, total);
+					CHECK_MSG(decoder.pts() == (int64_t)(current + 1) * FT, "round %d op %d read_frame went from %d to %lld", round, op, current, (long long)(decoder.pts() / FT));
+				} else {
+					CHECK(!more);
+				}
+			} else {
+				int t = rand() % total;
+				CHECK(decoder.seek_keyframe((int64_t)t * FT));
+				// The latest key frame at or before the frame, but not before the start of its clip.
+				int clip_index = decoder.edit_list().clip_index_for((int64_t)t * FT);
+				const Clip& clip = decoder.edit_list().clip(clip_index);
+				int local = (int)(clip.in_ticks / FT) + (int)(((int64_t)t * FT - decoder.edit_list().start(clip_index)) / FT);
+				int key = local - (local % gops[clip.media]);
+				if (key < (int)(clip.in_ticks / FT)) key = (int)(clip.in_ticks / FT);
+				int base = 0;
+				for (int i = 0; i < clip.media; i++) base += frames[i];
+				CHECK_MSG(shown_frame(decoder, s) == base + key, "round %d op %d seek_keyframe(%d) showed %d wanted %d", round, op, t, shown_frame(decoder, s), base + key);
+			}
+			CHECK_MSG(shows_plan(decoder, s, plan), "round %d op %d: picture and clock disagree (kind %d)", round, op, kind);
+			if (g_failures > failures_before + 3) break;
+		}
+		if (g_failures > failures_before) {
+			printf("  (round %d: files %d %d %d frames, gops %d %d %d, delays %d %d %d; clips:", round, frames[0], frames[1], frames[2], gops[0], gops[1], gops[2], delays[0], delays[1], delays[2]);
+			for (size_t c = 0; c < plan.clips.size(); c++) printf(" [file %d: %lld-%lld]", plan.clips[c].media, (long long)(plan.clips[c].in_ticks / FT), (long long)(plan.clips[c].out_ticks / FT));
+			printf(")\n");
+		}
+		if (g_failures > 12) return;
 	}
 }
 
@@ -399,13 +711,13 @@ static void test_audio_timestamps() {
 	while ((p = decoder.pop_audio_packet()) != nullptr) { pts.push_back(p->pts); av_packet_free(&p); }
 	decoder.end_audio_capture();
 
-	// Per file: frames/2 packets of 2400 samples, starting at the file's place on the global
-	// clock (its start in ticks of 1/600 s, times 80 samples per tick).
+	// Per file: frames/2 packets of 4800 samples (two frames' worth), starting at the file's place
+	// on the global clock (its start in ticks of 1/600 s, times 80 samples per tick).
 	long long file_start_samples[] = { 0, 20 * FT * 80LL, (20 + 30) * FT * 80LL };
 	std::vector<long long> expected;
 	for (int f = 0; f < 3; f++)
 		for (int k = 0; k < frames[f] / 2; k++)
-			expected.push_back(file_start_samples[f] + (long long)k * 2400);
+			expected.push_back(file_start_samples[f] + (long long)k * 4800);
 	CHECK_MSG(pts.size() == expected.size(), "audio packets %zu expected %zu", pts.size(), expected.size());
 	for (size_t i = 0; i < pts.size() && i < expected.size(); i++)
 		CHECK_MSG(pts[i] == expected[i], "audio packet %zu: %lld expected %lld", i, pts[i], expected[i]);
@@ -482,6 +794,12 @@ int main() {
 	test_stepping_across_joins_and_cache();
 	test_stepping_across_joins_with_wrong_durations();
 	test_discard_flagged_last_frames_are_kept();
+	test_cuts_within_one_file();
+	test_clips_reordered_across_files();
+	test_contiguous_clips_do_not_reseek();
+	test_cut_between_frames();
+	test_audio_follows_clips();
+	test_random_edit_lists();
 	test_read_frame_after_cache_hit_continues_from_screen();
 	test_seek_keyframe();
 	test_fast_seek_by_frames();

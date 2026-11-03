@@ -52,6 +52,7 @@ const uint64_t CACHE_BUDGET_BYTES = (uint64_t)1 * 1024 * 1024 * 1024;  // 1 GiB 
 }  // namespace
 
 MediaDecoder::MediaDecoder() :
+	m_cur_clip(0),
 	m_width(0),
 	m_height(0),
 	m_frame_ticks(1),
@@ -278,7 +279,7 @@ bool MediaDecoder::read_file_properties(int index, std::string* error) {
 		duration = av_rescale_q(m_fmt->duration, AV_TIME_BASE_Q, m_file_video_tb);
 	}
 	int64_t ticks = av_rescale_q(duration, m_file_video_tb, m_global_tb);
-	m_timeline.add_file(m_paths[index], ticks);
+	m_media_durations.push_back(ticks);
 	printf("  %s: %.2f s%s (video starts at %.4f s)\n", name.c_str(), ticks_to_seconds(ticks), m_audio_index >= 0 ? "" : " (no sound)",
 		(double)m_video_start * m_file_video_tb.num / m_file_video_tb.den);
 	return true;
@@ -293,7 +294,9 @@ bool MediaDecoder::open(const std::vector<std::string>& paths, std::string* erro
 	// Starting over, in case this object was used before.
 	close_file();
 	end_audio_capture();
-	m_timeline.clear();
+	m_clips.clear();
+	m_media_durations.clear();
+	m_cur_clip = 0;
 	m_cache.clear();
 	m_cache_bytes = 0;
 	if (m_sws) {
@@ -318,14 +321,23 @@ bool MediaDecoder::open(const std::vector<std::string>& paths, std::string* erro
 	for (int i = 0; i < (int)m_paths.size(); i++) {
 		if (!open_file(i, error) || !read_file_properties(i, error)) {
 			close_file();
-			m_timeline.clear();
+			m_clips.clear();
+			m_media_durations.clear();
 			return false;
 		}
+	}
+	// Until told otherwise the clips are the files, each whole, in the order given.
+	{
+		std::vector<Clip> whole_files;
+		for (int i = 0; i < (int)m_paths.size(); i++)
+			whole_files.push_back(Clip(i, 0, m_media_durations[i]));
+		m_clips.set(whole_files);
 	}
 
 	// Second pass: start at the beginning of the first.
 	if (!open_file(0, error)) {
-		m_timeline.clear();
+		m_clips.clear();
+		m_media_durations.clear();
 		return false;
 	}
 
@@ -335,7 +347,8 @@ bool MediaDecoder::open(const std::vector<std::string>& paths, std::string* erro
 	if (!m_packet || !m_decoded || !m_frame) {
 		*error = "Out of memory while opening the video.";
 		close_file();
-		m_timeline.clear();
+		m_clips.clear();
+		m_media_durations.clear();
 		av_packet_free(&m_packet);
 		av_frame_free(&m_decoded);
 		av_frame_free(&m_frame);
@@ -347,7 +360,8 @@ bool MediaDecoder::open(const std::vector<std::string>& paths, std::string* erro
 	if (av_frame_get_buffer(m_frame, 32) < 0) {
 		*error = "Out of memory while opening the video.";
 		close_file();
-		m_timeline.clear();
+		m_clips.clear();
+		m_media_durations.clear();
 		av_packet_free(&m_packet);
 		av_frame_free(&m_decoded);
 		av_frame_free(&m_frame);
@@ -357,7 +371,8 @@ bool MediaDecoder::open(const std::vector<std::string>& paths, std::string* erro
 	if (!decode_next()) {
 		*error = m_last_error.empty() ? std::string("Could not decode any video from the first file.") : m_last_error;
 		close_file();
-		m_timeline.clear();
+		m_clips.clear();
+		m_media_durations.clear();
 		av_packet_free(&m_packet);
 		av_frame_free(&m_decoded);
 		av_frame_free(&m_frame);
@@ -372,51 +387,131 @@ bool MediaDecoder::open(const std::vector<std::string>& paths, std::string* erro
 
 // Opens the file after the current one. False if the current one is the last (or the next
 // cannot be opened, which is also recorded in m_last_error).
-bool MediaDecoder::next_file() {
-	int next = m_cur_file + 1;
-	if (next >= m_timeline.file_count())
+// Moves on to the clip after the current one, because the current one has ended: either a frame
+// at or past its end turned up (have_frame, at frame_local_ticks into its file), or the file ran
+// out. If the next clip carries on from the same place in the same file, nothing is reopened or
+// re-read; *keep_frame says the frame in hand is already the next clip's first. False at the end
+// of the last clip.
+bool MediaDecoder::next_clip(bool have_frame, int64_t frame_local_ticks, bool* keep_frame) {
+	*keep_frame = false;
+	int next = m_cur_clip + 1;
+	if (next >= m_clips.count())
 		return false;
+	const Clip& target = m_clips.clip(next);
+	const Clip& old_clip = m_clips.clip(m_cur_clip);
+	const int64_t half_frame = m_frame_ticks / 2;
+	bool same_media = target.media == m_cur_file && m_fmt != nullptr;
+	bool file_ran_out = m_draining || !have_frame;
+
 	m_pts_before_switch = m_decoder_pts;
-	m_check_gap = true;
-	std::string error;
-	if (!open_file(next, &error)) {
-		m_last_error = error;
-		return false;
+	// The gap check is about frames lost between files, so it only applies when the footage
+	// carries on from the end of a file into another, or the file ended early.
+	m_check_gap = target.media != old_clip.media || file_ran_out;
+	m_cur_clip = next;
+
+	if (same_media && !file_ran_out) {
+		// The decoder is in the right file already and still has frames. If the frame in hand is
+		// the one the next clip starts on, the next clip simply carries on from here; if the clip
+		// starts further back (an overlap, or a piece used twice), it has to seek back.
+		if (frame_local_ticks >= target.in_ticks - half_frame && frame_local_ticks < target.in_ticks + half_frame) {
+			*keep_frame = true;
+			return true;
+		}
+		if (frame_local_ticks < target.in_ticks - half_frame && target.in_ticks - frame_local_ticks < MAX_COAST_FRAMES * m_frame_ticks) {
+			return true;             // Its start is a little ahead; decode on to it.
+		}
+	}
+	return position_media(target.media, target.in_ticks);
+}
+
+// Gets the decoder ready to read file `media` from the keyframe at or before `local_ticks`
+// (counted from the start of that file), opening the file first if it isn't the one open.
+bool MediaDecoder::position_media(int media, int64_t local_ticks) {
+	bool just_opened = false;
+	if (media != m_cur_file || m_fmt == nullptr) {
+		std::string error;
+		if (!open_file(media, &error)) {
+			m_last_error = error;
+			return false;
+		}
+		just_opened = true;
+	}
+	if (!(just_opened && local_ticks <= 0)) {
+		int64_t file_ticks = av_rescale_q(local_ticks, m_global_tb, m_file_video_tb) + m_video_start;
+		if (av_seek_frame(m_fmt, m_video_index, file_ticks, AVSEEK_FLAG_BACKWARD) < 0) {
+			// Some files have no usable index; the beginning is always a safe place to land.
+			av_seek_frame(m_fmt, m_video_index, m_video_start, AVSEEK_FLAG_BACKWARD);
+		}
+	}
+	avcodec_flush_buffers(m_vctx);
+	m_draining = false;
+	// Packets already queued for an export in progress still belong to it; otherwise they're stale.
+	if (!m_capture_audio) {
+		while (!m_audio_queue.empty()) {
+			av_packet_free(&m_audio_queue.front());
+			m_audio_queue.pop_front();
+		}
 	}
 	return true;
 }
 
+// Where a decoded frame is in its own file, counted from the start of the file in ticks.
+int64_t MediaDecoder::local_ticks_of(const AVFrame* frame) const {
+	int64_t raw_pts = frame->pts;
+	if (raw_pts == AV_NOPTS_VALUE)
+		raw_pts = frame->best_effort_timestamp;
+	if (raw_pts != AV_NOPTS_VALUE)
+		return av_rescale_q(raw_pts - m_video_start, m_file_video_tb, m_global_tb);
+	// No timestamp at all: one frame after the last one.
+	const Clip& clip = m_clips.clip(m_cur_clip);
+	if (m_decoder_pts == AV_NOPTS_VALUE)
+		return clip.in_ticks;
+	return clip.in_ticks + (m_decoder_pts - m_clips.start(m_cur_clip)) + m_frame_ticks;
+}
+
 void MediaDecoder::queue_audio_packet() {
+	// Which clip is this sound for? Packets are read a little ahead of the picture, so it can
+	// belong to a following clip of the same file as well as the current one.
+	int64_t packet_time = (m_packet->pts != AV_NOPTS_VALUE) ? m_packet->pts : m_packet->dts;
+	int clip_index = m_cur_clip;
+	if (packet_time != AV_NOPTS_VALUE) {
+		int64_t local_start = av_rescale_q(packet_time - m_audio_start, m_file_audio_tb, m_global_tb);
+		int64_t local_end = local_start + av_rescale_q(m_packet->duration, m_file_audio_tb, m_global_tb);
+		if (local_end <= local_start)
+			local_end = local_start + 1;
+		clip_index = -1;
+		for (int c = m_cur_clip; c < m_clips.count() && c <= m_cur_clip + 3; c++) {
+			const Clip& clip = m_clips.clip(c);
+			if (clip.media == m_cur_file && local_end > clip.in_ticks && local_start < clip.out_ticks) {
+				clip_index = c;
+				break;
+			}
+		}
+		if (clip_index < 0)
+			return;   // Sound from a part of the file that isn't in the edit.
+	}
+
 	AVPacket* copy = av_packet_clone(m_packet);
 	if (copy == nullptr)
 		return;
-	// Onto the global clock: take off this file's own start, change to the first file's audio
-	// time base, and add where the file begins on the timeline. The file's start is converted
-	// as a whole (rather than adding up per-file roundings), so the error never builds up.
-	int64_t file_offset = av_rescale_q(m_timeline.file(m_cur_file).start_ticks, m_global_tb, m_audio_tb);
+	// Onto the timeline: take off this file's own start, change to the first file's audio time
+	// base, and move by where the clip begins relative to where it was cut from. That is
+	// converted as a whole (rather than adding up roundings), so the error never builds up.
+	int64_t clip_offset = av_rescale_q(m_clips.start(clip_index) - m_clips.clip(clip_index).in_ticks, m_global_tb, m_audio_tb);
 	if (copy->pts != AV_NOPTS_VALUE)
-		copy->pts = av_rescale_q(copy->pts - m_audio_start, m_file_audio_tb, m_audio_tb) + file_offset;
+		copy->pts = av_rescale_q(copy->pts - m_audio_start, m_file_audio_tb, m_audio_tb) + clip_offset;
 	if (copy->dts != AV_NOPTS_VALUE)
-		copy->dts = av_rescale_q(copy->dts - m_audio_start, m_file_audio_tb, m_audio_tb) + file_offset;
+		copy->dts = av_rescale_q(copy->dts - m_audio_start, m_file_audio_tb, m_audio_tb) + clip_offset;
 	copy->duration = av_rescale_q(copy->duration, m_file_audio_tb, m_audio_tb);
 	copy->pos = -1;
 	m_audio_queue.push_back(copy);
 }
 
-// Turns what the decoder just produced (m_decoded) into the current frame, and works out its
-// global time.
-bool MediaDecoder::store_decoded_frame() {
+// Turns what the decoder just produced (m_decoded) into the current frame, at `local_ticks` into
+// its file, and works out its time on the edit timeline.
+bool MediaDecoder::store_decoded_frame(int64_t local_ticks) {
 	AVFrame* src = m_decoded;
-
-	int64_t raw_pts = src->pts;
-	if (raw_pts == AV_NOPTS_VALUE)
-		raw_pts = src->best_effort_timestamp;
-	int64_t pts;
-	if (raw_pts == AV_NOPTS_VALUE) {
-		pts = (m_decoder_pts == AV_NOPTS_VALUE) ? 0 : m_decoder_pts + m_frame_ticks;
-	} else {
-		pts = m_timeline.file(m_cur_file).start_ticks + av_rescale_q(raw_pts - m_video_start, m_file_video_tb, m_global_tb);
-	}
+	int64_t pts = m_clips.timeline_for(m_cur_clip, local_ticks);
 
 	bool is_420 = src->format == AV_PIX_FMT_YUV420P || src->format == AV_PIX_FMT_YUVJ420P;
 	if (is_420 && src->width == m_width && src->height == m_height) {
@@ -463,63 +558,90 @@ bool MediaDecoder::read_frame() {
 	return decode_next();
 }
 
-// Decodes the next frame the decoder has, whatever is on screen.
+// Decodes the next frame the decoder has, whatever is on screen. Frames that aren't in the
+// current clip are passed over: those before it (decoded from the keyframe on the way to its
+// start) are dropped, and the first one past its end moves on to the next clip.
 bool MediaDecoder::decode_next() {
 	if (m_frame == nullptr)
 		return false;
 	int read_errors = 0;
+	bool have_decoded = false;   // m_decoded holds a frame that hasn't been placed yet.
 	while (true) {
-		int result = avcodec_receive_frame(m_vctx, m_decoded);
-		if (result == 0) {
-			bool stored = store_decoded_frame();
-			av_frame_unref(m_decoded);
-			if (stored)
-				return true;
-			return false;
+		if (!have_decoded) {
+			int result = avcodec_receive_frame(m_vctx, m_decoded);
+			if (result == 0) {
+				have_decoded = true;
+			} else if (result == AVERROR_EOF) {
+				// This file's decoder has handed over every frame it had. Carry on with the next
+				// clip. (Draining it first is what keeps each file's last few frames from being lost.)
+				bool keep = false;
+				if (!next_clip(false, 0, &keep))
+					return false;
+				continue;
+			} else if (m_draining) {
+				// AVERROR(EAGAIN) means it wants more data, and any other error is a bad packet,
+				// which we skip by feeding it the next one. But already told it the file is over, yet no
+				// more frames and no EOF: don't spin.
+				bool keep = false;
+				if (!next_clip(false, 0, &keep))
+					return false;
+				continue;
+			} else {
+				result = av_read_frame(m_fmt, m_packet);
+				if (result < 0) {
+					av_packet_unref(m_packet);
+					// End of file, or the file stopped being readable: either way, no more from it.
+					if (result == AVERROR_EOF || ++read_errors > 100) {
+						avcodec_send_packet(m_vctx, nullptr);
+						m_draining = true;
+					}
+					continue;
+				}
+				read_errors = 0;
+				if (m_packet->stream_index == m_video_index) {
+					// Garmin VIRB files mark their last video packet "discard" (the MP4's edit list ends
+					// a frame early), and the decoder then drops that picture, which loses one frame at
+					// every join. The picture is good, so keep it. Packets before the start of the stream
+					// (a decoder warm-up the edit list really does hide) stay discarded.
+					if (m_packet->flags & AV_PKT_FLAG_DISCARD) {
+						int64_t packet_time = (m_packet->pts != AV_NOPTS_VALUE) ? m_packet->pts : m_packet->dts;
+						if (packet_time != AV_NOPTS_VALUE && packet_time >= m_video_start)
+							m_packet->flags &= ~AV_PKT_FLAG_DISCARD;
+					}
+					avcodec_send_packet(m_vctx, m_packet);
+				} else if (m_packet->stream_index == m_audio_index && m_capture_audio) {
+					queue_audio_packet();
+				}
+				av_packet_unref(m_packet);
+				continue;
+			}
 		}
-		if (result == AVERROR_EOF) {
-			// This file's decoder has handed over every frame it had. Carry on with the next
-			// file. (Draining it first is what keeps each file's last few frames from being lost.)
-			if (!next_file())
-				return false;
+
+		// A frame is in hand: is it in the current clip? Frames are matched to clips by the
+		// nearest frame, so a cut that falls between two frames is half a frame either way.
+		const int64_t half_frame = m_frame_ticks / 2;
+		int64_t local = local_ticks_of(m_decoded);
+		const Clip& clip = m_clips.clip(m_cur_clip);
+		if (local < clip.in_ticks - half_frame) {
+			av_frame_unref(m_decoded);       // Before the clip: only decoded to get here.
+			have_decoded = false;
 			continue;
 		}
-		// AVERROR(EAGAIN) means it wants more data; any other error is a bad packet, which we
-		// skip by feeding it the next one.
-
-		if (m_draining) {
-			// Already told it the file is over, yet no more frames and no EOF: don't spin.
-			if (!next_file())
+		if (local >= clip.out_ticks - half_frame) {
+			bool keep = false;
+			if (!next_clip(true, local, &keep)) {
+				av_frame_unref(m_decoded);
 				return false;
-			continue;
-		}
-
-		result = av_read_frame(m_fmt, m_packet);
-		if (result < 0) {
-			av_packet_unref(m_packet);
-			// End of file, or the file stopped being readable: either way, no more from it.
-			if (result == AVERROR_EOF || ++read_errors > 100) {
-				avcodec_send_packet(m_vctx, nullptr);
-				m_draining = true;
+			}
+			if (!keep) {
+				av_frame_unref(m_decoded);
+				have_decoded = false;
 			}
 			continue;
 		}
-		read_errors = 0;
-		if (m_packet->stream_index == m_video_index) {
-			// Garmin VIRB files mark their last video packet "discard" (the MP4's edit list ends
-			// a frame early), and the decoder then drops that picture, which loses one frame at every
-			// join. The picture is good, so keep it. Packets before the start of the stream (a
-			// decoder warm-up the edit list really does hide) stay discarded.
-			if (m_packet->flags & AV_PKT_FLAG_DISCARD) {
-				int64_t packet_time = (m_packet->pts != AV_NOPTS_VALUE) ? m_packet->pts : m_packet->dts;
-				if (packet_time != AV_NOPTS_VALUE && packet_time >= m_video_start)
-					m_packet->flags &= ~AV_PKT_FLAG_DISCARD;
-			}
-			avcodec_send_packet(m_vctx, m_packet);
-		} else if (m_packet->stream_index == m_audio_index && m_capture_audio) {
-			queue_audio_packet();
-		}
-		av_packet_unref(m_packet);
+		bool stored = store_decoded_frame(local);
+		av_frame_unref(m_decoded);
+		return stored;
 	}
 }
 
@@ -527,8 +649,8 @@ bool MediaDecoder::decode_next() {
 // Seeking
 // ---------------------------------------------------------------------------------------------
 
-// Points the demuxer at the keyframe at or before `ticks` (opening that file if it isn't the
-// current one). Doesn't read a frame.
+// Points the demuxer at the keyframe at or before `ticks` of the timeline (opening that clip's
+// file if it isn't the current one). Doesn't read a frame.
 bool MediaDecoder::seek_to(int64_t ticks) {
 	if (ticks < 0)
 		ticks = 0;
@@ -537,31 +659,12 @@ bool MediaDecoder::seek_to(int64_t ticks) {
 	if (ticks < 0)
 		ticks = 0;
 
-	int index = m_timeline.file_index_for(ticks);
-	if (index != m_cur_file || m_fmt == nullptr) {
-		std::string error;
-		if (!open_file(index, &error)) {
-			m_last_error = error;
-			return false;
-		}
-	}
-	int64_t local = m_timeline.to_local(index, ticks);
-	int64_t file_ticks = av_rescale_q(local, m_global_tb, m_file_video_tb) + m_video_start;
-	if (av_seek_frame(m_fmt, m_video_index, file_ticks, AVSEEK_FLAG_BACKWARD) < 0) {
-		// Some files have no usable index; the beginning is always a safe place to land.
-		av_seek_frame(m_fmt, m_video_index, m_video_start, AVSEEK_FLAG_BACKWARD);
-	}
-	avcodec_flush_buffers(m_vctx);
-	m_draining = false;
+	FileTime source = m_clips.source_for(ticks);
+	m_cur_clip = m_clips.clip_index_for(ticks);
+	if (!position_media(source.media, source.local_ticks))
+		return false;
 	m_decoder_pts = AV_NOPTS_VALUE;
 	m_check_gap = false;
-	// Packets already queued for an export in progress still belong to it; otherwise they're stale.
-	if (!m_capture_audio) {
-		while (!m_audio_queue.empty()) {
-			av_packet_free(&m_audio_queue.front());
-			m_audio_queue.pop_front();
-		}
-	}
 	return true;
 }
 
@@ -667,6 +770,26 @@ bool MediaDecoder::advance_to(int64_t ticks) {
 	return got_frame || coast;
 }
 
+bool MediaDecoder::set_clips(const std::vector<Clip>& clips, int64_t show_ticks) {
+	if (!is_open() || clips.empty())
+		return false;
+	for (size_t i = 0; i < clips.size(); i++) {
+		const Clip& clip = clips[i];
+		if (clip.media < 0 || clip.media >= media_count())
+			return false;
+		if (clip.in_ticks < 0 || clip.out_ticks <= clip.in_ticks || clip.out_ticks > m_media_durations[clip.media])
+			return false;
+	}
+	m_clips.set(clips);
+	// Nothing decoded so far means anything in the new arrangement: forget it all, and force the
+	// next move to seek.
+	m_cache.clear();
+	m_cache_bytes = 0;
+	m_decoder_pts = AV_NOPTS_VALUE;
+	m_cur_clip = 0;
+	return advance_to(show_ticks);
+}
+
 bool MediaDecoder::step_frames(int64_t count) {
 	// Half a frame of slack, because the frames' real spacing isn't always a whole number of
 	// ticks: "first frame at or after (wanted - half a frame)" is the wanted frame.
@@ -713,17 +836,20 @@ bool MediaDecoder::seek_by_frames_fast(int64_t count) {
 		// "keyframe at or before" would land behind us, a step backward dressed up as a seek.
 		// Checked via the file's index (read-only); a speculative seek we then had to undo would
 		// cost the very GOP-decode burst this function exists to avoid.
-		int target_file = m_timeline.file_index_for(target);
-		if (target_file == m_cur_file && m_fmt != nullptr) {
+		int target_clip = m_clips.clip_index_for(target);
+		int now_clip = m_clips.clip_index_for(m_pts);
+		if (target_clip == now_clip && m_clips.clip(now_clip).media == m_cur_file && m_fmt != nullptr) {
 			AVStream* stream = m_fmt->streams[m_video_index];
-			int64_t file_target = av_rescale_q(m_timeline.to_local(target_file, target), m_global_tb, m_file_video_tb) + m_video_start;
-			int64_t file_now = av_rescale_q(m_timeline.to_local(m_cur_file, m_pts), m_global_tb, m_file_video_tb) + m_video_start;
+			FileTime target_source = m_clips.source_for(target);
+			FileTime now_source = m_clips.source_for(m_pts);
+			int64_t file_target = av_rescale_q(target_source.local_ticks, m_global_tb, m_file_video_tb) + m_video_start;
+			int64_t file_now = av_rescale_q(now_source.local_ticks, m_global_tb, m_file_video_tb) + m_video_start;
 			const AVIndexEntry* entry = avformat_index_get_entry_from_timestamp(stream, file_target, AVSEEK_FLAG_BACKWARD);
 			if (entry != nullptr && entry->timestamp > file_now)
 				return seek_keyframe(target);
 			return step_frames(count);  // Still inside this GOP: decode forward for real.
 		}
-		return seek_keyframe(target);  // A file boundary is in the way, and the next file starts on a keyframe.
+		return seek_keyframe(target);  // A clip boundary is in the way, and the next clip starts where it is cut.
 	}
 	return seek_keyframe(target);
 }

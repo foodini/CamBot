@@ -1,7 +1,7 @@
 #!/bin/bash
 # Builds and runs CamBot's unit tests. These cover the parts of the program that don't need a
 # window, a GPU or FFmpeg: the climb filters, map zoom, flight statistics, altitude references,
-# user settings, the source timeline and file ordering, the project file handling, and the
+# user settings, the edit model, file ordering, the project file handling, and the
 # multi-file decoder (against a fake FFmpeg).
 #
 # Run it from Windows through WSL (needs g++):    wsl ./tests/run_tests.sh
@@ -18,10 +18,11 @@ for test in *_test.cpp; do
     name="${test%.cpp}"
     extra=""
     # Tests that touch the disk use the file helpers.
-    if [ "$name" = "project_test" ]; then extra="../src/file_io.cpp"; fi
+    if [ "$name" = "project_test" ]; then extra="../src/file_io.cpp ../src/edit_model.cpp ../src/project_model.cpp"; fi
+    if [ "$name" = "edit_model_test" ]; then extra="../src/edit_model.cpp"; fi
     # The decoder test runs the real MediaDecoder against a fake FFmpeg (fake_ffmpeg.cpp) that
     # serves small synthetic files, so no FFmpeg libraries or video files are needed.
-    if [ "$name" = "decoder_test" ]; then extra="fake_ffmpeg.cpp ../src/media_decoder.cpp ../src/file_io.cpp"; fi
+    if [ "$name" = "decoder_test" ]; then extra="fake_ffmpeg.cpp ../src/media_decoder.cpp ../src/file_io.cpp ../src/edit_model.cpp"; fi
     if ! g++ -std=c++14 -Wall -Wextra -I ../src -I ../third_party/ffmpeg/include "$test" $extra -o "$OUT/$name"; then
         echo "BUILD FAILED: $name"
         failed=1

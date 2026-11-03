@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "font_manager.h"
+#include "edit_model.h"
 #include "media_container_manager.h"
 #include "altitude_reference.h"
 #include "project_file_manager.h"
@@ -20,7 +21,7 @@ extern bool paused;
 
 class EnvConfig {
 public:
-	EnvConfig(MediaContainerMgr* mcm, FontManager* fm, ProjectFileManager* pfm, float screen_width, float screen_height, float ui_height);
+	EnvConfig(MediaContainerMgr* mcm, FontManager* fm, ProjectFileManager* pfm, EditModel* model, float screen_width, float screen_height, float ui_height);
 
 	//Setters
 	bool screen_height(float height)                       { m_screen_height = height; return true; }
@@ -120,11 +121,18 @@ public:
 	float                   telemetry_distance_flown() const;
 	float                   media_in_elapsed()       const; // Wall time passed since start of video.
 	float                   media_in_duration()      const; // Wall time length of video.
+	// Where the frame on screen comes from on the flight clock: seconds into the footage laid end to
+	// end in the order it was recorded (see edit_model.h). This, not media_in_elapsed(), is what
+	// telemetry is looked up by; the two agree until the video is cut or rearranged.
+	float                   flight_elapsed()         const;
+	// Length of all the footage on the flight clock, which is the stretch of telemetry the windows
+	// below describe (they don't shrink when clips are cut out of the video).
+	float                   flight_duration()        const;
 	float                   media_out_elapsed()      const;
 
 	// Current time, [0.0..1.0] from beginning to end of telemetry. Used by widgets to interpolate place
 	float                   time_parametric()        const;
-	float                   flight_time()            const; // Wall time since launch. (negative: wall time until launch)
+	float                   flight_time()            const; // Time on the flight clock since launch. (negative: until launch)
 	
 	// Writes the project file now (File > Save, Ctrl+S). Returns false, having told the user
 	// why, if it couldn't.
@@ -141,13 +149,13 @@ public:
 	FontManager*            font_mgr;
 	MediaContainerMgr*      media_mgr;
 	ProjectFileManager*     project_file_mgr;
+	EditModel*              edit_model;
 
 	const glm::mat4& screen_to_pixel_space_projection() const { return m_screen_to_pixel_space_projection; }
 	const glm::mat4& pixel_to_screen_space_projection() const { return m_pixel_to_screen_space_projection; }
 
 private:
 	void                    recompute_projections();
-	float                   m_launch_time;
 	AltitudeReferences      m_altitude_refs;
 	UserSettings            m_user_settings;
 	void                    push_state_to_project();
