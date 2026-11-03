@@ -15,6 +15,15 @@
   and a camera clock that runs fast or slow can later be spread evenly between two points. One
   sync point behaves exactly like the old single offset (Up/Down nudge, dragging the telemetry
   bar). The launch marker is likewise tied to a file and a moment in it.
+- **New window layout.** The window is resizable (minimum 900x600) and opens at the size, and
+  maximized or not, it had when last closed (first run: 1200x900). The video and its overlays
+  are shown as a preview that grows to fill the space beside the left panel while keeping its
+  shape, with a transport bar under it: the position as `h:mm:ss#frame / length (@29.97fps)`
+  and the two screenshot buttons on the top row, and Start, -1, Play/Pause, +1, End below.
+  Reverse, slow and fast play are shown but off until playback supports them. The left panel is a placeholder for the
+  media list and the telemetry sync controls. For now the preview still includes the scrub-bar
+  strip under the video, and the scrub bars, the right-click scan and click-to-pause work on
+  it as before. Everything is drawn through ImGui, so none of it ends up in exports.
 - Each frame is now drawn into an off-screen picture (the video, the telemetry and the scrub-bar
   strip, 1920x1214 as before) and then copied to the window. Exports and both screenshot
   buttons read that picture rather than the window, so the saved frame no longer depends on

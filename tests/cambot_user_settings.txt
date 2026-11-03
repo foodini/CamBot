@@ -10,3 +10,6 @@ zoom_max_km:5.000000
 zoom_transition_s:15.000000
 summary_s:10.000000
 summary_xc:0
+window_w:1200
+window_h:900
+window_maximized:0

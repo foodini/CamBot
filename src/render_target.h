@@ -34,9 +34,12 @@ public:
 	void bind() const;
 	static void bind_window();
 
-	// Copies the whole picture, pixel for pixel, to the lower left corner of the window. What
-	// fits in the window is shown and the rest is cut off.
-	void copy_to_window() const;
+	// Sets every pixel's alpha to 1, leaving the colors alone. Drawing translucent things (the
+	// widgets) into the picture leaves it translucent where they were, which makes no difference
+	// to a window or to the RGB that is exported, but would make the picture fade into whatever
+	// is behind it when it is shown with blending (as the preview is). Call it once the frame is
+	// drawn. Binds the picture, and leaves the window's framebuffer bound.
+	void make_opaque() const;
 
 	// Reads the rectangle at (x, y) of `width` by `height` pixels as 8-bit RGB, rows from the
 	// bottom up (as glReadPixels gives them), no padding between rows. `out` must have room for

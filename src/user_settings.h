@@ -2,7 +2,7 @@
 
 // Settings that belong to the person running CamBot rather than to a particular video, so a
 // look they've dialed in carries over from project to project: the climb-rate filter, the
-// climb color range, the map trace widths, and the map zoom limits. Stored as simple key:value
+// climb color range, the map trace widths, the map zoom limits, and the size of the window. Stored as simple key:value
 // lines in %APPDATA%\CamBot\user_settings.txt (or next to the working directory if APPDATA
 // isn't set). Missing or out-of-range values fall back to their defaults.
 
@@ -41,9 +41,19 @@ struct SummarySettings {
 	bool  show_xc;
 };
 
+// The size the main window had when CamBot was last closed, so it opens the same way next time.
+// `width` and `height` are the window's normal (not maximized) size.
+struct WindowSettings {
+	WindowSettings() : width(1200), height(900), maximized(false) {}
+
+	int  width;
+	int  height;
+	bool maximized;
+};
+
 class UserSettings {
 public:
-	UserSettings() : climb_filter(), climb_color_range(800.0f), map_trace(), map_zoom(), summary() {
+	UserSettings() : climb_filter(), climb_color_range(800.0f), map_trace(), map_zoom(), summary(), window() {
 		load();
 	}
 
@@ -52,6 +62,7 @@ public:
 	MapTraceSettings    map_trace;
 	MapZoomSettings     map_zoom;
 	SummarySettings     summary;
+	WindowSettings      window;
 
 	// Where the settings file lives. create_directory makes the CamBot folder if it's missing.
 	static std::string file_path(bool create_directory) {
@@ -100,6 +111,9 @@ public:
 			else if (strcmp(key, "zoom_transition_s") == 0)  { if (value >= 1.0f && value <= 120.0f)  map_zoom.transition_seconds = value; }
 			else if (strcmp(key, "summary_s") == 0)          { if (value >= 1.0f && value <= 120.0f)  summary.seconds = value; }
 			else if (strcmp(key, "summary_xc") == 0)         { summary.show_xc = (value != 0.0f); }
+			else if (strcmp(key, "window_w") == 0)           { if (value >= 400.0f && value <= 16384.0f) window.width = (int)value; }
+			else if (strcmp(key, "window_h") == 0)           { if (value >= 300.0f && value <= 16384.0f) window.height = (int)value; }
+			else if (strcmp(key, "window_maximized") == 0)   { window.maximized = (value != 0.0f); }
 		}
 		fclose(fd);
 		if (map_zoom.max_width_km < map_zoom.min_width_km)
@@ -122,6 +136,9 @@ public:
 		fprintf(fd, "zoom_transition_s:%f\n", map_zoom.transition_seconds);
 		fprintf(fd, "summary_s:%f\n", summary.seconds);
 		fprintf(fd, "summary_xc:%d\n", summary.show_xc ? 1 : 0);
+		fprintf(fd, "window_w:%d\n", window.width);
+		fprintf(fd, "window_h:%d\n", window.height);
+		fprintf(fd, "window_maximized:%d\n", window.maximized ? 1 : 0);
 		fclose(fd);
 		return true;
 	}

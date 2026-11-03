@@ -68,6 +68,8 @@ public:
 	int64_t     current_ticks() const;
 	// What one tick is, in seconds (numerator / denominator).
 	AVRational  tick_time_base() const { return m_decoder->time_base(); }
+	int64_t     frame_ticks() const { return m_decoder->frame_ticks(); }   // How long one frame lasts, in ticks.
+	int64_t     total_ticks() const { return m_decoder->total_ticks(); }   // How long the whole video is, in ticks.
 	void rotation_angle(float angle) { m_rotation_angle = angle; }
 	float rotation_angle() { return m_rotation_angle;  }
 	// Turns the picture by `radians` more (the same thing the F, comma and period keys do).

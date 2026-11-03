@@ -18,6 +18,12 @@ public:
 	static InteractionMgr* instance() { return c_instance; }
 	void tick(GLFWwindow* window);
 
+	// Where the canvas (the picture the widgets are laid out on) is shown in the window, in window
+	// pixels with (0, 0) at the top left. mouse_x_pos() and mouse_y_pos() are the cursor in the
+	// canvas's own coordinates, -1 to 1 across and up it, whatever size and place it is shown at;
+	// outside the canvas they are outside that range. Set it before tick() each frame.
+	void set_canvas_rect(float x, float y, float width, float height) { m_canvas_x = x; m_canvas_y = y; m_canvas_w = width; m_canvas_h = height; }
+
 	void watch_key(int key)     { m_keys_watched.insert(key); }
 	bool key_down(int key)      { return m_keys_down.find(key) != m_keys_down.end(); }
 	bool key_up(int key)        { return m_keys_up.find(key) != m_keys_up.end(); }
@@ -89,6 +95,10 @@ private:
 	bool                        m_mouse_right_button_down;
 	bool                        m_mouse_right_button_up;
 	float                       m_mouse_right_button_held;
+	float                       m_canvas_x;
+	float                       m_canvas_y;
+	float                       m_canvas_w;
+	float                       m_canvas_h;
 	float                       m_mouse_x_pos;
 	float                       m_mouse_y_pos;
 };

@@ -31,8 +31,10 @@
 #include "media_decoder.h"
 #include "project_data.h"
 #include "telemetry.h"
+#include "timecode.h"
 #include "util.h"
 #include "widget.h"
+#include "window_layout.h"
 
 //TODO(P1): remove the std::thread use. You can't terminate a running thread with std::thread, and I need
 //          to be able to kill the parse thread if it's still running when the program terminates. Also,
@@ -45,12 +47,11 @@ void processInput(GLFWwindow* window);
 const unsigned int SCR_WIDTH = 1920;
 const unsigned int SCR_HEIGHT = 1080;
 const unsigned int UI_HEIGHT = 134;        // Divisible by FOUR, RIGHT?
-const unsigned int MENU_HEIGHT = 19;       // Exact pixel height ImGui renders the main menu bar at with
-                                            // the default font/style: FontSize (13) + FramePadding.y (3) * 2.
-                                            // Kept separate from SCR_HEIGHT/UI_HEIGHT so the menu never
-                                            // ends up inside the region read back for recording. If a
-                                            // custom font or DPI scaling is ever added, this needs to
-                                            // change to match, or a gap/overlap will reappear here.
+const unsigned int MENU_HEIGHT = 19;       // What the ImGui main menu bar measures with the default font and style
+                                            // (FontSize 13 + FramePadding.y 3 * 2). Only the first frame goes by
+                                            // it; after that the layout uses the height ImGui reports.
+const int MIN_WINDOW_WIDTH = 900;           // Smaller than this and the transport bar no longer fits.
+const int MIN_WINDOW_HEIGHT = 600;
 
 bool paused = false;
 
@@ -496,6 +497,107 @@ static void draw_altitude_window(bool* open, bool* resync, bool exporting) {
     ImGui::End();
 }
 
+// The panel down the left of the window. For now just its places: the Media list and the
+// telemetry sync controls arrive in later steps.
+static void draw_left_panel(const LayoutRect& rect) {
+    if (rect.w < 1.0f || rect.h < 1.0f)
+        return;
+    ImGui::SetNextWindowPos(ImVec2(rect.x, rect.y));
+    ImGui::SetNextWindowSize(ImVec2(rect.w, rect.h));
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus;
+    if (ImGui::Begin("Panel", nullptr, flags)) {
+        if (ImGui::CollapsingHeader("Media", ImGuiTreeNodeFlags_DefaultOpen))
+            ImGui::TextDisabled("The video files will be listed here.");
+        if (ImGui::CollapsingHeader("Telemetry", ImGuiTreeNodeFlags_DefaultOpen))
+            ImGui::TextDisabled("Sync controls will go here.");
+    }
+    ImGui::End();
+}
+
+// The bar under the preview: where the video is now and the two screenshot buttons (the same as the
+// File menu's, they set the path the render loop saves to), and below them the buttons to move around
+// and play.
+// Reverse, slow and fast play are shown but off until playback can do them. While an export runs
+// the controls are off, as it needs the video to itself.
+static void draw_transport_bar(const LayoutRect& rect, MediaContainerMgr& media, std::string* raw_screenshot_path,
+    std::string* overlay_screenshot_path) {
+    if (rect.w < 1.0f || rect.h < 1.0f)
+        return;
+    ImGui::SetNextWindowPos(ImVec2(rect.x, rect.y));
+    ImGui::SetNextWindowSize(ImVec2(rect.w, rect.h));
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoBringToFrontOnFocus;
+    if (ImGui::Begin("Transport", nullptr, flags)) {
+        const ImVec2 button_size(60.0f, 0.0f);
+        const bool exporting = media.recording();
+        const ImGuiStyle& style = ImGui::GetStyle();
+
+        // Top row: where the video is, and how long it is (hours:minutes:seconds#frame, from the
+        // frames' own times), with the two screenshot buttons pinned to the right end of the bar.
+        // Their places come from the bar's width and their own sizes, never from the text, so they
+        // stay put as the text changes length.
+        const AVRational tick = media.tick_time_base();
+        const Timecode now_time = timecode::for_ticks(media.current_ticks(), tick.num, tick.den, media.frame_ticks());
+        // A one-digit frame number gets a space after it, so the text after it stays where it is.
+        const std::string now = timecode::format(now_time, 2) + (now_time.frame < 10 ? " " : "");
+        const std::string total = timecode::format(timecode::for_ticks(media.total_ticks(), tick.num, tick.den, media.frame_ticks()), 2);
+        const std::string rate = timecode::format_frame_rate(tick.num, tick.den, media.frame_ticks());
+        ImGui::AlignTextToFramePadding();
+        ImGui::Text("%s / %s (@%sfps)", now.c_str(), total.c_str(), rate.c_str());
+
+        const char* raw_label = "Save Frame...";
+        const char* overlay_label = "Save Frame with Telemetry...";
+        const float raw_width = ImGui::CalcTextSize(raw_label).x + 2.0f * style.FramePadding.x;
+        const float overlay_width = ImGui::CalcTextSize(overlay_label).x + 2.0f * style.FramePadding.x;
+        ImGui::SameLine(ImGui::GetWindowWidth() - style.WindowPadding.x - overlay_width - style.ItemSpacing.x - raw_width);
+        if (ImGui::Button(raw_label)) {
+            *raw_screenshot_path = ffsw::file_dialog(L"png", L"Save Raw Video Frame As (*.png)", false);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(overlay_label)) {
+            *overlay_screenshot_path = ffsw::file_dialog(L"png", L"Save Frame with Telemetry Overlay As (*.png)", false);
+        }
+
+        // Bottom row: moving around and playing.
+        ImGui::BeginDisabled(exporting);
+        if (ImGui::Button("Start", button_size)) {
+            paused = true;
+            media.advance_to_parametric(0.0f);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("-1", button_size)) {
+            paused = true;
+            media.rewind_by(1);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(paused ? "Play" : "Pause", button_size))
+            paused = !paused;
+        ImGui::SameLine();
+        if (ImGui::Button("+1", button_size)) {
+            paused = true;
+            media.advance_by(1);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("End", button_size)) {
+            paused = true;
+            media.advance_to_parametric(1.0f);
+        }
+        ImGui::EndDisabled();
+
+        ImGui::SameLine(0.0f, 24.0f);
+        ImGui::BeginDisabled(true);
+        ImGui::Button("Rev", button_size);
+        ImGui::SameLine();
+        ImGui::Button("Slow", button_size);
+        ImGui::SameLine();
+        ImGui::Button("Fast", button_size);
+        ImGui::EndDisabled();
+    }
+    ImGui::End();
+}
+
 int main()
 {
     // glfw: initialize and configure
@@ -507,13 +609,35 @@ int main()
 
     // glfw window creation
     // --------------------
-    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT + MENU_HEIGHT, "CamBot", NULL, NULL);
+    // It opens the way it was left: the same size, and maximized if it was. (Only the window's
+    // size is wanted from the user settings here; EnvConfig reads the rest of them later.)
+    UserSettings startup_settings;
+    WindowSettings window_state = startup_settings.window;
+    int start_width = window_state.width;
+    int start_height = window_state.height;
+    GLFWmonitor* primary_monitor = glfwGetPrimaryMonitor();
+    if (primary_monitor != nullptr) {
+        // A window saved on a bigger screen than this one is cut down to fit.
+        int work_x = 0, work_y = 0, work_width = 0, work_height = 0;
+        glfwGetMonitorWorkarea(primary_monitor, &work_x, &work_y, &work_width, &work_height);
+        if (work_width > 0 && start_width > work_width)
+            start_width = work_width;
+        if (work_height > 0 && start_height > work_height)
+            start_height = work_height;
+    }
+    if (start_width < MIN_WINDOW_WIDTH)
+        start_width = MIN_WINDOW_WIDTH;
+    if (start_height < MIN_WINDOW_HEIGHT)
+        start_height = MIN_WINDOW_HEIGHT;
+    glfwWindowHint(GLFW_MAXIMIZED, window_state.maximized ? GLFW_TRUE : GLFW_FALSE);
+    GLFWwindow* window = glfwCreateWindow(start_width, start_height, "CamBot", NULL, NULL);
     if (window == NULL)
     {
         std::cout << "Failed to create GLFW window" << std::endl;
         glfwTerminate();
         return -1;
     }
+    glfwSetWindowSizeLimits(window, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT, GLFW_DONT_CARE, GLFW_DONT_CARE);
     glfwMakeContextCurrent(window);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
@@ -694,6 +818,12 @@ int main()
     // all outside of export, where we present every frame as always.
     float last_present_time = ffsw::elapsed();
 
+    // Where the parts of the window go, worked out afresh each frame from the window's size (see
+    // window_layout.h). The preview shows the whole canvas, scaled to fit with its shape kept.
+    const float canvas_aspect = (float)SCR_WIDTH / (float)(SCR_HEIGHT + UI_HEIGHT);
+    float menu_height = (float)MENU_HEIGHT;
+    WindowLayout layout = window_layout::compute((float)start_width, (float)start_height, menu_height, canvas_aspect);
+
     // render loop
     // -----------
     while (!exit_confirmed(window, env_config, project_file_mgr))
@@ -707,6 +837,25 @@ int main()
         if (wanted_title != window_title) {
             window_title = wanted_title;
             glfwSetWindowTitle(window, window_title.c_str());
+        }
+
+        // Lay out the window, and tell the mouse handling where the canvas is shown so the cursor
+        // can be turned into canvas coordinates. A minimized window keeps its last layout.
+        {
+            int window_width = 0, window_height = 0;
+            glfwGetWindowSize(window, &window_width, &window_height);
+            bool minimized = glfwGetWindowAttrib(window, GLFW_ICONIFIED) != 0;
+            bool maximized = glfwGetWindowAttrib(window, GLFW_MAXIMIZED) != 0;
+            if (!minimized && window_width > 0 && window_height > 0) {
+                layout = window_layout::compute((float)window_width, (float)window_height, menu_height, canvas_aspect);
+                // What to remember for next time: the normal size, and whether it was maximized.
+                if (!maximized) {
+                    window_state.width = window_width;
+                    window_state.height = window_height;
+                }
+                window_state.maximized = maximized;
+            }
+            interaction_mgr->set_canvas_rect(layout.preview.x, layout.preview.y, layout.preview.w, layout.preview.h);
         }
 
         interaction_mgr->tick(window);
@@ -748,6 +897,7 @@ int main()
             ImGui_ImplOpenGL3_NewFrame();
             ImGui_ImplGlfw_NewFrame();
             ImGui::NewFrame();
+            menu_height = ImGui::GetFrameHeight();
 
             if (ImGui::BeginMainMenuBar()) {
                 if (ImGui::BeginMenu("File")) {
@@ -843,6 +993,19 @@ int main()
                 ImGui::EndMainMenuBar();
             }
 
+            draw_left_panel(layout.left_panel);
+            draw_transport_bar(layout.transport, media_container_mgr, &pending_raw_screenshot_path, &pending_overlay_screenshot_path);
+            // The preview is the canvas, shown from ImGui's background list rather than in a window of
+            // its own, so ImGui doesn't count the mouse as being over a window of its own when it is
+            // over the picture (the widgets drawn in the canvas take the clicks there). The canvas
+            // texture has row 0 at the bottom, hence the flipped texture coordinates.
+            if (layout.preview.w > 0.0f && layout.preview.h > 0.0f) {
+                ImGui::GetBackgroundDrawList()->AddImage((ImTextureID)(uintptr_t)canvas.texture(),
+                    ImVec2(layout.preview.x, layout.preview.y),
+                    ImVec2(layout.preview.x + layout.preview.w, layout.preview.y + layout.preview.h),
+                    ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
+            }
+
             if (show_about_popup) {
                 ImGui::OpenPopup("About CamBot");
                 show_about_popup = false;
@@ -901,7 +1064,7 @@ int main()
                     status_text = ffsw::format("Export done: %s", export_display_name.c_str());
                 }
 
-                ImGui::SetNextWindowPos(ImVec2(SCR_WIDTH / 2.0f, (float)(SCR_HEIGHT + UI_HEIGHT) - 12.0f),
+                ImGui::SetNextWindowPos(ImVec2(layout.preview.x + layout.preview.w / 2.0f, layout.preview.y + layout.preview.h - 12.0f),
                     ImGuiCond_Always, ImVec2(0.5f, 1.0f));
                 ImGui::SetNextWindowBgAlpha(0.0f);
                 ImGui::Begin("ExportStatus", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
@@ -998,15 +1161,18 @@ int main()
             media_container_mgr.output_video_frame(export_frame_buf);
         }
 
-        // The window is only drawn to on frames that are presented: the canvas goes in at the
-        // bottom with the menu bar's strip above it, and the ImGui chrome is drawn over that.
+        // The window is only drawn to on frames that are presented. All of it is ImGui's: the
+        // canvas is in the preview, the panels and the menu bar are around it.
+        canvas.make_opaque();
         RenderTarget::bind_window();
 
         // Paired with the ImGui::NewFrame()/menu-bar block up top -- see do_present there.
         if (do_present) {
-            glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+            int framebuffer_width = 0, framebuffer_height = 0;
+            glfwGetFramebufferSize(window, &framebuffer_width, &framebuffer_height);
+            glViewport(0, 0, framebuffer_width, framebuffer_height);
+            glClearColor(0.10f, 0.10f, 0.11f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
-            canvas.copy_to_window();
             ImGui::Render();
             ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
             glfwSwapBuffers(window);
@@ -1029,6 +1195,8 @@ int main()
         }
     }
 
+    env_config.window_settings(window_state);
+    env_config.save_user_settings();
     env_config.discard_recovery();   // Leaving normally: saved, or the user chose not to.
     delete[] export_frame_buf;
     canvas.destroy();   // Needs the OpenGL context, which glfwTerminate() ends.

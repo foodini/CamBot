@@ -18,6 +18,7 @@ InteractionMgr::InteractionMgr() :
 	m_mouse_right_button_down(false),
 	m_mouse_right_button_up(false),
 	m_mouse_right_button_held(-1.0),
+	m_canvas_x(0.0f), m_canvas_y(0.0f), m_canvas_w(0.0f), m_canvas_h(0.0f),
 	m_mouse_x_pos(0.0), m_mouse_y_pos(0.0)
 {
 	if (InteractionMgr::c_instance != nullptr) {
@@ -66,17 +67,15 @@ void InteractionMgr::tick(GLFWwindow* window) {
 
 	double x_pos, y_pos;
 	glfwGetCursorPos(window, &x_pos, &y_pos);
-	const EnvConfig* env_config = EnvConfig::instance;
-	// The actual GLFW window is taller than the video/UI canvas by whatever is reserved at the top
-	// for the ImGui menu bar. Strip that off first so mouse coordinates keep lining up with the
-	// NDC space the widgets were positioned in, regardless of the reserved strip's exact size.
-	int win_height;
-	glfwGetWindowSize(window, nullptr, &win_height);
-	y_pos -= (double)win_height - (double)env_config->screen_height();
-	x_pos /= env_config->screen_width();
-	y_pos /= env_config->screen_height();
-	m_mouse_x_pos = -1.0f + 2.0f * (float)x_pos;
-	m_mouse_y_pos = 1.0f - 2.0f * (float)y_pos;
+	// Where the cursor is on the canvas, whatever part of the window that is shown in. Until the
+	// canvas has been placed there is nowhere on it, so the cursor is off to one side.
+	if (m_canvas_w > 0.0f && m_canvas_h > 0.0f) {
+		m_mouse_x_pos = -1.0f + 2.0f * ((float)x_pos - m_canvas_x) / m_canvas_w;
+		m_mouse_y_pos = 1.0f - 2.0f * ((float)y_pos - m_canvas_y) / m_canvas_h;
+	} else {
+		m_mouse_x_pos = 2.0f;
+		m_mouse_y_pos = 2.0f;
+	}
 
 	// Let ImGui have the click when it wants the mouse (e.g. the menu bar is open/hovered), so menu
 	// interaction doesn't also register as a click on whatever widget happens to sit underneath it.

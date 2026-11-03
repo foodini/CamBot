@@ -20,6 +20,8 @@ for test in *_test.cpp; do
     # Tests that touch the disk use the file helpers.
     if [ "$name" = "project_test" ]; then extra="../src/file_io.cpp ../src/edit_model.cpp ../src/project_model.cpp"; fi
     if [ "$name" = "edit_model_test" ]; then extra="../src/edit_model.cpp"; fi
+    if [ "$name" = "timecode_test" ]; then extra="../src/timecode.cpp"; fi
+    if [ "$name" = "window_layout_test" ]; then extra="../src/window_layout.cpp"; fi
     # The decoder test runs the real MediaDecoder against a fake FFmpeg (fake_ffmpeg.cpp) that
     # serves small synthetic files, so no FFmpeg libraries or video files are needed.
     if [ "$name" = "decoder_test" ]; then extra="fake_ffmpeg.cpp ../src/media_decoder.cpp ../src/file_io.cpp ../src/edit_model.cpp"; fi

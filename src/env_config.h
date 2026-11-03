@@ -56,6 +56,8 @@ public:
 	// Flight summary duration and XC toggle. Same deal: set freely, then save_user_settings() on release.
 	void summary_settings(const SummarySettings& settings) { m_user_settings.summary = settings; }
 	void save_user_settings() const                        { m_user_settings.save(); }
+	// The main window's size, kept for the next run. Saved by save_user_settings().
+	void window_settings(const WindowSettings& settings)   { m_user_settings.window = settings; }
 	// The true altitudes (ft) the user gave for the start and end of the video. These belong to
 	// the project (they're about this video's location), so setting them saves the project file.
 	// They take effect through sync_altitude_correction().
