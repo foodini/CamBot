@@ -7,3 +7,4 @@ build_log.txt
 *.ffsw
 *.png
 third_party/
+*.autosave
