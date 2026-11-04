@@ -94,12 +94,32 @@
   puts the order, the sync and the launch mark back as they were when the view was opened. Editing
   keys, Undo and Export are off while it is open; the Up/Down sync nudge keys still work, and the
   strip under the video is for looking only. Setting the sync from the map is the next part.
+- **Timeline buttons.** The Fit, Split, Trim, Delete, Undo and Redo buttons above the timeline did not
+  respond to the mouse (the keys always worked): the thin divider above the timeline was an invisible
+  window ImGui made 32 pixels tall, which reached down over the buttons and took their clicks. The
+  dividers are now exactly their own size.
 - **Smoother map tracks.** The telemetry logger records positions in steps of about 0.4 meters, which
   showed up as a staircase in the track when zoomed in far. Once the whole telemetry file has been
   read, each position used for *drawing* is averaged with its neighbors (a fifth of a second either
   side). The video's map course and its glider, and the sync map, are drawn from the smoothed
   positions (the map is redrawn from them a moment after the file finishes loading); distances,
   speeds and everything else still use the positions as logged.
+- **Sync / Reorder view: setting the sync from the map.** Put the video on a moment you can recognize
+  (the top of a wingover, the launch), then **click the path** where that happened: the frame on screen
+  is now at that point of the telemetry (between samples, if that's where you clicked) and playback
+  pauses. Before you click, a ring on the path shows the point a click would pick, and the cursor
+  becomes a hand over it. Where the path went by under the mouse more than once, the pass nearest in
+  time to the current sync is picked first, and clicking again at the same spot goes on to the next one,
+  round and round; a small "2 of 4" by the mouse says which of how many. A click, or a Ctrl+press, away
+  from the path does nothing. **Ctrl+drag** picks a point the same way and then slides the sync along
+  that pass of the path, following the mouse wherever it is, so a point under a stack of crossing paths
+  can be picked nearby and slid into place (it stays within five seconds of where it is, so it can't
+  jump to another lap). The map stays where it is during all this. **Ctrl+Z** and **Ctrl+Y** (or
+  Ctrl+Shift+Z) undo and redo what has been changed in the view: the sync (by clicking, sliding or the
+  Up/Down keys; a held key, or a whole slide, is one step), **Set Activity Start**, and moving files.
+  They don't move the video, so you can stop on another frame and flip between two syncs to compare
+  them. The history starts empty each time the view is opened, and Cancel still puts everything back as
+  it was on entry.
 - **Sync / Reorder view: the map.** The left half is now a map of the whole flight (everything in the
   telemetry file, not only what your edit uses). The path is a bright line with a dark edge, in the
   same climb colors as the video's map (dark blue in strong sink to red in strong climb, over the same
@@ -120,7 +140,7 @@
   stays put). Dragging the map
   or pressing **Fit** (the whole flight) stops that until the arrow next moves near an edge; **Center**
   puts the arrow in the middle and follows right away (the button is lit while following). There is no map picture under the path
-  yet (that is the next piece, along with clicking the path to set the sync). Between the map and the
+  yet (that is the next piece). Between the map and the
   video is a new strip with the **Set Activity Start** button, which makes the frame on screen the start
   of the activity (the same as Edit > Mark Launch Point), with the time it is set to underneath.
 - **One flight, many video files.** Cameras split a long recording into pieces; a new

@@ -337,6 +337,84 @@ static void test_heading() {
 	CHECK_NEAR(heading, 270.0, 0.5);
 }
 
+// A trace through the screen positions given (pane pixels), a sample for each.
+static MapTrace trace_through(const MapViewport& view, const float xs[], const float ys[], int count) {
+	const float climbs[1] = { 0.0f };
+	(void)climbs;
+	MapTrace trace;
+	for (int i = 0; i < count; i++) {
+		MapPoint q = view.to_world(xs[i], ys[i]);
+		trace.add(atan(sinh(3.14159265358979323846 * (1.0 - 2.0 * q.y))) * 180.0 / 3.14159265358979323846, q.x * 360.0 - 180.0);
+	}
+	return trace;
+}
+
+static void test_passes() {
+	MapViewport view = make_view();
+	// Along the line y = 300 from x = 100 to 500 (samples 0-4, 100 pixels apart), then down and back along
+	// y = 306 (a second pass 6 pixels from the first, samples 5-9 going the other way), then far away.
+	const float xs[12] = { 100, 200, 300, 400, 500, 500, 400, 300, 200, 100, 100, 700 };
+	const float ys[12] = { 300, 300, 300, 300, 300, 306, 306, 306, 306, 306, 500, 500 };
+	MapTrace trace = trace_through(view, xs, ys, 12);
+	std::vector<MapPick> passes;
+	// At (250, 303), 3 pixels from both: two passes, in the order flown, each a bit over 2 samples along its stretch.
+	trace.find_passes(view, 250.0f, 303.0f, 12.0f, &passes);
+	CHECK(passes.size() == 2);
+	if (passes.size() == 2) {
+		CHECK_NEAR(passes[0].sample, 1.5, 0.01);
+		CHECK_NEAR(passes[0].distance, 3.0, 0.01);
+		CHECK(passes[1].sample > 5.0 && passes[1].sample < 9.0);
+		CHECK_NEAR(passes[1].sample, 7.5, 0.1);
+		CHECK_NEAR(passes[1].distance, 3.0, 0.1);
+	}
+	// A radius that only reaches one of them.
+	trace.find_passes(view, 250.0f, 296.0f, 5.0f, &passes);
+	CHECK(passes.size() == 1);
+	CHECK_NEAR(passes[0].sample, 1.5, 0.01);
+	// Nothing near: none. Past an end of a segment it is the end.
+	trace.find_passes(view, 250.0f, 400.0f, 12.0f, &passes);
+	CHECK(passes.empty());
+	trace.find_passes(view, 90.0f, 300.0f, 10.5f, &passes);
+	CHECK(passes.size() == 1);
+	CHECK_NEAR(passes[0].sample, 0.0, 1e-6);
+	// A pass that runs along under the mouse for a long way is one pass, at its nearest point.
+	trace.find_passes(view, 300.0f, 301.0f, 12.0f, &passes);
+	CHECK(passes.size() == 2);
+	CHECK_NEAR(passes[0].sample, 2.0, 0.01);
+	// With no fix in the middle the path isn't joined across the gap.
+	MapTrace gap;
+	for (int i = 0; i < 3; i++) {
+		MapPoint q = view.to_world(100.0f + 100.0f * i, 300.0f);
+		gap.add(atan(sinh(3.14159265358979323846 * (1.0 - 2.0 * q.y))) * 180.0 / 3.14159265358979323846, q.x * 360.0 - 180.0);
+	}
+	gap.add(0.0, 0.0);
+	MapPoint q = view.to_world(500.0f, 300.0f);
+	gap.add(atan(sinh(3.14159265358979323846 * (1.0 - 2.0 * q.y))) * 180.0 / 3.14159265358979323846, q.x * 360.0 - 180.0);
+	gap.find_passes(view, 400.0f, 300.0f, 12.0f, &passes);
+	CHECK(passes.empty());
+}
+
+static void test_nearest_near() {
+	MapViewport view = make_view();
+	const float xs[10] = { 100, 200, 300, 400, 500, 500, 400, 300, 200, 100 };
+	const float ys[10] = { 300, 300, 300, 300, 300, 306, 306, 306, 306, 306 };
+	MapTrace trace = trace_through(view, xs, ys, 10);
+	MapPick pick;
+	// Looking only near sample 7 (the second pass), the mouse over both passes gets the second.
+	CHECK(trace.nearest_near(view, 250.0f, 300.0f, 7.5, 2.0, &pick));
+	CHECK(pick.sample > 5.0);
+	CHECK_NEAR(pick.sample, 7.5, 0.05);
+	// And near sample 1.5, the first.
+	CHECK(trace.nearest_near(view, 250.0f, 306.0f, 1.5, 2.0, &pick));
+	CHECK_NEAR(pick.sample, 1.5, 0.05);
+	// It goes where the mouse is along the path, even if the mouse is nowhere near it.
+	CHECK(trace.nearest_near(view, 395.0f, 900.0f, 1.0, 4.0, &pick));
+	CHECK_NEAR(pick.sample, 2.95, 0.05);
+	// The stretch is held to the path: a window past the ends is fine; one wholly off it finds nothing.
+	CHECK(trace.nearest_near(view, 0.0f, 0.0f, 0.0, 100.0, &pick));
+	CHECK(!trace.nearest_near(view, 0.0f, 0.0f, 50.0, 2.0, &pick));
+}
+
 static void test_climb_colors() {
 	// The same scale as the video map: the ends are far apart in color, and level flight is yellowish.
 	MapColor sink = map_colors::step_color(map_colors::climb_step(-5000.0f, 800.0f), 0.0f);
@@ -380,6 +458,8 @@ int main() {
 	test_curves();
 	test_keep_in_view_with_bias();
 	test_heading();
+	test_passes();
+	test_nearest_near();
 	test_climb_colors();
 	printf(g_failures ? "FAILED\n" : "all ok\n");
 	return g_failures;

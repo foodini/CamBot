@@ -43,6 +43,12 @@ public:
 	// opened. `keep_changes` false also puts the sync, the launch mark and the file order back as they were.
 	void leave(bool keep_changes, EditModel* model, MediaContainerMgr* media);
 
+	// Undo and redo of what has been changed in here: the sync (by clicking or sliding on the map, or by the
+	// nudge keys), the start of the activity, and the order of the files. They don't move the video (so the
+	// user can stay on one frame and flip between two syncs). Each returns whether anything was done.
+	bool undo(EditModel* model, MediaContainerMgr* media);
+	bool redo(EditModel* model, MediaContainerMgr* media);
+
 	enum Outcome { STAY, DONE, CANCEL };
 	// Draws the view's own parts (not the video or the transport bar) and acts on the mouse in them.
 	// Call once a frame, between ImGui::NewFrame() and ImGui::Render(), only while active().
@@ -59,6 +65,32 @@ private:
 	void update_trace();
 	// Puts file `from` at position `to` in the order they were recorded; the picture on screen stays.
 	void reorder_files(int from, int to, EditModel* model, MediaContainerMgr* media);
+
+	// What undo and redo keep: everything that can be changed in here.
+	struct SyncState {
+		std::vector<int>        order;
+		std::vector<SyncAnchor> anchors;
+		FileTime                launch_mark;
+		bool operator==(const SyncState& other) const {
+			return order == other.order && anchors == other.anchors && launch_mark == other.launch_mark;
+		}
+		bool operator!=(const SyncState& other) const { return !(*this == other); }
+	};
+	static SyncState snapshot(const EditModel& model);
+	// Notes that the model may have changed since the last time it was looked at, and if so keeps what it was
+	// before so undo can bring it back. `nudge` says it is the kind of change that comes in a quick run (the
+	// nudge keys, held): those, one close after another, are one step. A slide (m_slide_group) is one step too.
+	void record_change(const EditModel& model, bool nudge);
+	void apply_state(const SyncState& state, EditModel* model, MediaContainerMgr* media);
+
+	// Sets the sync so the frame on screen is at the point `sample` (a number of telemetry samples, between
+	// them too) of the path, and pauses.
+	void apply_pick(double sample, EditModel* model, MediaContainerMgr* media);
+	// Which point of the path a click at (x, y) on the map would pick: the passes of the path under it, in the
+	// order of how close they are in time to where the frame on screen is now (a repeated click at the same
+	// spot goes on to the next in that same order, round and round). `index` is which of `count` it is.
+	// `reference` is what the passes were put in order by (see m_cycle_reference).
+	bool pick_candidate(float x, float y, double current_sample, double* sample, int* index, int* count, double* reference) const;
 
 	bool    m_active;
 
@@ -81,6 +113,26 @@ private:
 	float       m_press_y;
 	float       m_drag_x;         // Where the mouse was on the last frame of a drag.
 	float       m_drag_y;
+	enum Gesture { GESTURE_PAN, GESTURE_SLIDE, GESTURE_NONE };
+	Gesture     m_gesture;        // What the press that is down on the map is doing: moving the map, sliding the sync, or nothing.
+	double      m_slide_sample;   // Where on the path the sync was put by the last frame of a slide.
+
+	// Clicking at the same spot again goes to the next pass of the path under it.
+	bool        m_cycle_valid;
+	float       m_cycle_x;
+	float       m_cycle_y;
+	double      m_cycle_reference;   // Where the frame on screen was in the telemetry when the clicking at this spot began.
+	int         m_cycle_index;       // Which pass the last click picked.
+	int         m_cycle_count;       // Out of how many.
+
+	// Undo and redo.
+	std::vector<SyncState> m_undo;
+	std::vector<SyncState> m_redo;
+	SyncState   m_known;             // How things were as of the last look.
+	double      m_change_time;       // When (ImGui::GetTime()) they last changed.
+	bool        m_change_was_nudge;
+	bool        m_slide_group;       // A slide is going on: its changes are all one step...
+	bool        m_slide_group_started;   // ... and the step has been kept.
 
 	// How things were when the view was opened.
 	int64_t                 m_entry_playhead;      // On the edit timeline.

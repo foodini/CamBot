@@ -124,6 +124,15 @@ float    brightness(const MapColor& color);
 
 }  // namespace map_colors
 
+// A place on the path under the mouse: `sample` is how far along the path it is, in (fractional)
+// telemetry samples, and `distance` is how far from the mouse, in pixels.
+struct MapPick {
+	double sample;
+	float  distance;
+	MapPick() : sample(0.0), distance(0.0f) {}
+	MapPick(double sample_number, float pixels) : sample(sample_number), distance(pixels) {}
+};
+
 // The flight's path: one position for each telemetry sample, in order. Samples where the GPS had no
 // fix hold a place but have no position.
 class MapTrace {
@@ -151,6 +160,16 @@ public:
 	// on the sample and neither leads nor lags it, which a heading the GPS receiver reports, already averaged
 	// over a second or so, does). False if the path doesn't move enough there to say, as when standing still.
 	bool heading_at(double sample, float* degrees) const;
+
+	// Every pass of the path within `radius` pixels of the screen position (x, y) (counted from the top left
+	// of the pane): where the path crosses or runs along under it, however many times it went by. A pass is
+	// a stretch of the path that stays within the radius; the point on it nearest the mouse is given, between
+	// samples. In the order they were flown.
+	void find_passes(const MapViewport& view, float x, float y, float radius, std::vector<MapPick>* passes) const;
+	// The point on the path nearest the screen position (x, y), looking only at the stretch from `window`
+	// samples before sample `around` to `window` after it. False if there is no path there. Used to slide
+	// along one pass of the path without being drawn off it by another that crosses it.
+	bool nearest_near(const MapViewport& view, float x, float y, double around, double window, MapPick* nearest) const;
 
 	// The line for samples `first` to `last`, as it falls on `view`. Points closer than `min_spacing` pixels to
 	// the one before are left out (the last one stays), and so are stretches more than `margin` pixels outside the pane.

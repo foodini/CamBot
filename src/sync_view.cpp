@@ -58,6 +58,11 @@ const double RESUME_INSET = 0.08;   // The map was moved by hand: when the frame
 const double FIT_MARGIN   = 0.08;   // Fitting the whole path leaves this much empty at each edge.
 const float  CLICK_SLOP   = 4.0f;   // A press that moves less than this, in pixels, is a click.
 const double ZOOM_LEVELS_PER_NOTCH = 0.5;
+const float  PICK_RADIUS = 12.0f;           // Pixels: how near the path a click has to be to pick a point on it.
+const float  CYCLE_SLOP = 4.0f;             // A click this near the last one, in pixels, is at the same spot.
+const double SLIDE_WINDOW_SAMPLES = 50.0;   // A slide stays within this many samples (5 seconds) of where it is, so it stays on its pass.
+const double NUDGE_RUN_SECONDS = 0.5;       // Nudges this close together are one undo step.
+const size_t MAX_HISTORY = 200;
 const double MIN_SPEED_FOR_HEADING = 3.0;   // Knots; slower than this the heading isn't to be trusted.
 const float  AHEAD_SECONDS = 2.0f;          // How long a stretch of the heading is averaged for the look-ahead.
 const float  LOOKAHEAD = 0.12f;             // At most this fraction of the pane's width and height is added ahead of the frame on screen.
@@ -160,10 +165,21 @@ void draw_label(ImDrawList* draw, float x, float y, const char* text) {
 	draw->AddText(ImVec2(x + 4.0f, y + 2.0f), COLOR_MAP_TEXT, text);
 }
 
+// The place on the timeline of whole files of a moment in a file (0 if the file isn't there).
+int64_t timeline_ticks_for(const EditModel& model, const FileTime& moment) {
+	for (int i = 0; i < model.edit_list().count(); i++) {
+		if (model.edit_list().clip(i).media == moment.media)
+			return model.edit_list().timeline_for(i, moment.local_ticks);
+	}
+	return 0;
+}
+
 }  // namespace
 
 SyncView::SyncView() : m_active(false), m_timeline("SyncTimeline"), m_follow(false), m_last_sample(0.0), m_ahead_x(0.0f), m_ahead_y(0.0f), m_trace_position_version(0), m_trace_climb_version(0), m_fit_pending(true),
 		m_map_pressed(false), m_map_dragging(false), m_press_x(0.0f), m_press_y(0.0f), m_drag_x(0.0f), m_drag_y(0.0f),
+		m_gesture(GESTURE_PAN), m_slide_sample(0.0), m_cycle_valid(false), m_cycle_x(0.0f), m_cycle_y(0.0f), m_cycle_reference(0.0),
+		m_cycle_index(0), m_cycle_count(0), m_change_time(0.0), m_change_was_nudge(false), m_slide_group(false), m_slide_group_started(false),
 		m_entry_playhead(0) {
 }
 
@@ -181,13 +197,7 @@ bool SyncView::enter(EditModel* model, MediaContainerMgr* media) {
 
 	model->begin_source_view();
 	// The same moment of the same file, on the timeline of whole files.
-	int64_t show_ticks = 0;
-	for (int i = 0; i < model->edit_list().count(); i++) {
-		if (model->edit_list().clip(i).media == on_screen.media) {
-			show_ticks = model->edit_list().timeline_for(i, on_screen.local_ticks);
-			break;
-		}
-	}
+	const int64_t show_ticks = timeline_ticks_for(*model, on_screen);
 	if (!media->set_clips(model->edit_list().clips(), show_ticks)) {
 		model->end_source_view();
 		return false;
@@ -201,6 +211,15 @@ bool SyncView::enter(EditModel* model, MediaContainerMgr* media) {
 	m_fit_pending = true;
 	m_map_pressed = false;
 	m_map_dragging = false;
+	m_gesture = GESTURE_PAN;
+	m_cycle_valid = false;
+	m_undo.clear();
+	m_redo.clear();
+	m_known = snapshot(*model);
+	m_change_time = 0.0;
+	m_change_was_nudge = false;
+	m_slide_group = false;
+	m_slide_group_started = false;
 	m_active = true;
 	return true;
 }
@@ -217,7 +236,85 @@ void SyncView::leave(bool keep_changes, EditModel* model, MediaContainerMgr* med
 	model->end_source_view();
 	// The edit was not touched in here, so where the playhead was is still a place on it.
 	media->set_clips(model->edit_list().clips(), m_entry_playhead);
+	m_undo.clear();
+	m_redo.clear();
 	m_active = false;
+}
+
+SyncView::SyncState SyncView::snapshot(const EditModel& model) {
+	SyncState state;
+	state.order = model.capture().order();
+	state.anchors = model.anchors();
+	state.launch_mark = model.launch_mark();
+	return state;
+}
+
+void SyncView::record_change(const EditModel& model, bool nudge) {
+	const SyncState now = snapshot(model);
+	if (now == m_known)
+		return;
+	const double time = ImGui::GetTime();
+	if (m_slide_group) {
+		// All of a slide is one step; what it started from is kept the first time it changes anything.
+		if (!m_slide_group_started) {
+			m_undo.push_back(m_known);
+			m_slide_group_started = true;
+			m_redo.clear();
+		}
+	} else if (nudge && m_change_was_nudge && !m_undo.empty() && time - m_change_time < NUDGE_RUN_SECONDS) {
+		// Another nudge close behind the last one: the step already kept covers it.
+	} else {
+		m_undo.push_back(m_known);
+		m_redo.clear();
+		m_change_was_nudge = nudge;
+	}
+	if (m_undo.size() > MAX_HISTORY)
+		m_undo.erase(m_undo.begin());
+	m_change_time = time;
+	m_known = now;
+	m_cycle_valid = false;
+}
+
+void SyncView::apply_state(const SyncState& state, EditModel* model, MediaContainerMgr* media) {
+	if (state.order != model->capture().order()) {
+		// The picture on screen stays where it is, as when the files are moved by hand.
+		const FileTime on_screen = model->edit_list().source_for(media->current_ticks());
+		if (model->set_capture_order(state.order)) {
+			model->refresh_source_view();
+			EnvConfig::instance->pause();
+			media->set_clips(model->edit_list().clips(), timeline_ticks_for(*model, on_screen));
+		}
+	}
+	model->set_anchors(state.anchors);
+	model->set_launch_mark(state.launch_mark);
+}
+
+bool SyncView::undo(EditModel* model, MediaContainerMgr* media) {
+	if (!m_active || m_undo.empty() || media->recording())
+		return false;
+	// (Anything changed since the last look, such as a nudge, is kept first, so it can be undone too.)
+	record_change(*model, false);
+	const SyncState target = m_undo.back();
+	m_undo.pop_back();
+	m_redo.push_back(m_known);
+	apply_state(target, model, media);
+	m_known = snapshot(*model);
+	m_change_was_nudge = false;
+	m_cycle_valid = false;
+	return true;
+}
+
+bool SyncView::redo(EditModel* model, MediaContainerMgr* media) {
+	if (!m_active || m_redo.empty() || media->recording())
+		return false;
+	const SyncState target = m_redo.back();
+	m_redo.pop_back();
+	m_undo.push_back(m_known);
+	apply_state(target, model, media);
+	m_known = snapshot(*model);
+	m_change_was_nudge = false;
+	m_cycle_valid = false;
+	return true;
 }
 
 bool SyncView::confirm_done(const EditModel& model) const {
@@ -249,10 +346,13 @@ void SyncView::reorder_files(int from, int to, EditModel* model, MediaContainerM
 	model->refresh_source_view();
 	EnvConfig::instance->pause();
 	media->set_clips(model->edit_list().clips(), moved.playhead_ticks);
+	record_change(*model, false);
 }
 
 SyncView::Outcome SyncView::draw(const SyncLayout& layout, EditModel& model, MediaContainerMgr& media, bool has_telemetry) {
 	Outcome outcome = STAY;
+	// Something outside, the nudge keys, may have changed the sync since the last frame.
+	record_change(model, true);
 	draw_header(layout.header, &outcome);
 	draw_map_pane(layout.map, model, media, has_telemetry);
 	draw_strip(layout.strip, model, media);
@@ -305,6 +405,48 @@ void SyncView::update_trace() {
 		const TelemetrySlice& slice = (*telemetry)[m_trace.count()];
 		m_trace.add(slice.m_draw_lat, slice.m_draw_lon, slice.m_climb_rate[1]);
 	}
+}
+
+bool SyncView::pick_candidate(float x, float y, double current_sample, double* sample, int* index, int* count, double* reference) const {
+	std::vector<MapPick> passes;
+	m_trace.find_passes(m_map, x, y, PICK_RADIUS, &passes);
+	if (passes.empty())
+		return false;
+	const int total = (int)passes.size();
+	const float dx = x - m_cycle_x;
+	const float dy = y - m_cycle_y;
+	const bool continuing = m_cycle_valid && dx * dx + dy * dy <= CYCLE_SLOP * CYCLE_SLOP && total == m_cycle_count;
+	*reference = continuing ? m_cycle_reference : current_sample;
+	// Nearest in time to the reference first (there are only ever a few).
+	for (int i = 0; i < total; i++) {
+		int best = i;
+		for (int j = i + 1; j < total; j++) {
+			if (fabs(passes[j].sample - *reference) < fabs(passes[best].sample - *reference))
+				best = j;
+		}
+		const MapPick kept = passes[i];
+		passes[i] = passes[best];
+		passes[best] = kept;
+	}
+	*index = continuing ? (m_cycle_index + 1) % total : 0;
+	*sample = passes[*index].sample;
+	*count = total;
+	return true;
+}
+
+void SyncView::apply_pick(double sample, EditModel* model, MediaContainerMgr* media) {
+	// The frame on screen is this moment of the footage, and the telemetry says it is the point picked.
+	const FileTime frame = model->edit_list().source_for(media->current_ticks());
+	std::vector<SyncAnchor> anchors;
+	anchors.push_back(SyncAnchor(frame, (float)(sample / (double)TELEMETRY_FREQUENCY)));
+	model->set_anchors(anchors);
+	EnvConfig::instance->pause();
+	// The user is working on the map: it stays where they have it until the frame on screen next nears an edge.
+	m_follow = false;
+	m_fit_pending = false;
+	// (It is the user who moved the frame on screen, so that is not a reason to start following it.)
+	m_last_sample = sample;
+	record_change(*model, false);
 }
 
 void SyncView::draw_map_pane(const LayoutRect& rect, EditModel& model, MediaContainerMgr& media, bool has_telemetry) {
@@ -379,7 +521,7 @@ void SyncView::draw_map_contents(const LayoutRect& rect, EditModel& model, Media
 	}
 	// Not following (the whole flight was fitted, or the map was moved by hand): the frame on screen is left
 	// alone until it moves, in the video, up to an edge of the map that is in view. Then following starts.
-	const bool frame_moved = have_marker && fabs(sample - m_last_sample) > 1e-9;
+	const bool frame_moved = have_marker && fabs(sample - m_last_sample) > 0.01;
 	m_last_sample = sample;
 	if (!m_follow && frame_moved && !m_map_dragging && !m_fit_pending && have_marker && !m_map.in_inset(marker, RESUME_INSET) && m_map.in_view(marker, 0.0f))
 		m_follow = true;
@@ -387,40 +529,97 @@ void SyncView::draw_map_contents(const LayoutRect& rect, EditModel& model, Media
 		m_map.keep_in_view(marker, FOLLOW_INSET, -m_ahead_x * LOOKAHEAD * rect.w, -m_ahead_y * LOOKAHEAD * rect.h);
 
 	// The mouse. The buttons drawn later in the corner are over this and get the clicks that are on them.
+	// A drag moves the map; a click on the path puts the frame on screen at that point of it (see
+	// pick_candidate); Ctrl+drag does that and goes on sliding it along the path under the mouse.
+	const float mouse_x = io.MousePos.x - rect.x;
+	const float mouse_y = io.MousePos.y - rect.y;
 	ImGui::SetCursorScreenPos(ImVec2(rect.x, rect.y));
 	ImGui::SetNextItemAllowOverlap();
 	ImGui::InvisibleButton("##map", ImVec2(rect.w, rect.h), ImGuiButtonFlags_MouseButtonLeft);
+	const bool hovered = ImGui::IsItemHovered();
 	if (ImGui::IsItemActivated()) {
 		m_map_pressed = true;
 		m_map_dragging = false;
+		m_gesture = GESTURE_PAN;
 		m_press_x = io.MousePos.x;
 		m_press_y = io.MousePos.y;
 		m_drag_x = m_press_x;
 		m_drag_y = m_press_y;
+		if (io.KeyCtrl) {
+			// Pick a point on the path now, then slide it. Away from the path, Ctrl+drag does nothing.
+			double picked;
+			int index;
+			int count;
+			double reference;
+			if (have_trace && pick_candidate(mouse_x, mouse_y, sample, &picked, &index, &count, &reference)) {
+				m_gesture = GESTURE_SLIDE;
+				m_slide_sample = picked;
+				m_slide_group = true;
+				m_slide_group_started = false;
+				apply_pick(picked, &model, &media);
+				m_cycle_valid = true;
+				m_cycle_x = mouse_x;
+				m_cycle_y = mouse_y;
+				m_cycle_reference = reference;
+				m_cycle_index = index;
+				m_cycle_count = count;
+			} else {
+				m_gesture = GESTURE_NONE;
+			}
+		}
 	}
 	if (m_map_pressed && ImGui::IsItemActive()) {
-		if (!m_map_dragging) {
-			const float dx = io.MousePos.x - m_press_x;
-			const float dy = io.MousePos.y - m_press_y;
-			m_map_dragging = dx * dx + dy * dy > CLICK_SLOP * CLICK_SLOP;
-		}
-		if (m_map_dragging) {
-			m_map.pan_pixels(io.MousePos.x - m_drag_x, io.MousePos.y - m_drag_y);
-			m_drag_x = io.MousePos.x;
-			m_drag_y = io.MousePos.y;
-			// Moving the map by hand means the user wants to look somewhere else.
-			m_follow = false;
-			m_fit_pending = false;
+		if (m_gesture == GESTURE_SLIDE) {
+			// Along the same pass: the nearest point of it to the mouse, near where it was.
+			MapPick nearest;
+			if (m_trace.nearest_near(m_map, mouse_x, mouse_y, m_slide_sample, SLIDE_WINDOW_SAMPLES, &nearest)) {
+				m_slide_sample = nearest.sample;
+				apply_pick(nearest.sample, &model, &media);
+			}
+		} else if (m_gesture == GESTURE_PAN) {
+			if (!m_map_dragging) {
+				const float dx = io.MousePos.x - m_press_x;
+				const float dy = io.MousePos.y - m_press_y;
+				m_map_dragging = dx * dx + dy * dy > CLICK_SLOP * CLICK_SLOP;
+			}
+			if (m_map_dragging) {
+				m_map.pan_pixels(io.MousePos.x - m_drag_x, io.MousePos.y - m_drag_y);
+				m_drag_x = io.MousePos.x;
+				m_drag_y = io.MousePos.y;
+				// Moving the map by hand means the user wants to look somewhere else.
+				m_follow = false;
+				m_fit_pending = false;
+				m_cycle_valid = false;
+			}
 		}
 	}
 	if (ImGui::IsItemDeactivated()) {
-		// (A press that never moved far is a click on the map; it doesn't do anything yet.)
+		if (m_gesture == GESTURE_SLIDE) {
+			m_slide_group = false;
+		} else if (m_gesture == GESTURE_PAN && !m_map_dragging && have_trace) {
+			// A click that didn't move the map.
+			double picked;
+			int index;
+			int count;
+			double reference;
+			if (pick_candidate(mouse_x, mouse_y, sample, &picked, &index, &count, &reference)) {
+				apply_pick(picked, &model, &media);
+				m_cycle_valid = true;
+				m_cycle_x = mouse_x;
+				m_cycle_y = mouse_y;
+				m_cycle_reference = reference;
+				m_cycle_index = index;
+				m_cycle_count = count;
+			}
+		}
 		m_map_pressed = false;
 		m_map_dragging = false;
+		m_gesture = GESTURE_PAN;
 	}
-	if (ImGui::IsItemHovered() && io.MouseWheel != 0.0f) {
-		m_map.zoom_about(io.MousePos.x - rect.x, io.MousePos.y - rect.y, ZOOM_LEVELS_PER_NOTCH * timeline_zoom::notches((double)io.MouseWheel));
+	if (hovered && io.MouseWheel != 0.0f) {
+		m_map.zoom_about(mouse_x, mouse_y, ZOOM_LEVELS_PER_NOTCH * timeline_zoom::notches((double)io.MouseWheel));
 		m_fit_pending = false;
+		m_cycle_valid = false;
 	}
 
 	// The path, with a dark edge under the colors.
@@ -452,6 +651,28 @@ void SyncView::draw_map_contents(const LayoutRect& rect, EditModel& model, Media
 		if (have_marker) {
 			const ScreenPoint s = m_map.to_screen(marker);
 			draw_heading_arrow(draw, ImVec2(rect.x + s.x, rect.y + s.y), heading, in_recording ? 255 : 110);
+		}
+
+		// Where a click would put the frame on screen: a ring on that point of the path. (Where several
+		// passes of the path are under the mouse, which of them, of how many.)
+		if (hovered && !m_map_pressed) {
+			double pick_sample;
+			int pick_index;
+			int pick_count;
+			double reference;
+			MapPoint at;
+			if (pick_candidate(mouse_x, mouse_y, sample, &pick_sample, &pick_index, &pick_count, &reference) && m_trace.position_at(pick_sample, &at)) {
+				const ScreenPoint s = m_map.to_screen(at);
+				const ImVec2 center(rect.x + s.x, rect.y + s.y);
+				draw->AddCircle(center, 11.0f, COLOR_MARKER_EDGE, 24, 5.0f);
+				draw->AddCircle(center, 11.0f, COLOR_MARK_LIGHT, 24, 2.5f);
+				ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+				if (pick_count > 1) {
+					char which[32];
+					snprintf(which, sizeof(which), "%d of %d", pick_index + 1, pick_count);
+					draw_label(draw, io.MousePos.x + 16.0f, io.MousePos.y + 16.0f, which);
+				}
+			}
 		}
 	}
 
@@ -525,8 +746,10 @@ void SyncView::draw_strip(const LayoutRect& rect, EditModel& model, const MediaC
 	ImGui::SetNextWindowSize(ImVec2(rect.w, rect.h));
 	if (ImGui::Begin("SyncStrip", nullptr, bar_flags())) {
 		const float width = ImGui::GetContentRegionAvail().x;
-		if (ImGui::Button("Set Activity\nStart", ImVec2(width, 56.0f)))
+		if (ImGui::Button("Set Activity\nStart", ImVec2(width, 56.0f))) {
 			model.set_launch_mark(model.edit_list().source_for(media.current_ticks()));
+			record_change(model, false);
+		}
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Make the frame on screen the start of the activity: 0:00 on the clock in the video");
 		ImGui::Spacing();

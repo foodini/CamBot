@@ -151,7 +151,7 @@ static void draw_shortcuts_window(bool* open) {
             { "[", "Trim Left: delete the clip from its start up to the playhead's frame" },
             { "]", "Trim Right: delete the clip from after the playhead's frame to its end" },
             { "Delete", "Delete the clip under the playhead" },
-            { "Ctrl+Z", "Undo the last edit" },
+            { "Ctrl+Z", "Undo the last edit (in Sync / Reorder: the last change to the sync, the activity start or the file order)" },
             { "Ctrl+Y or Ctrl+Shift+Z", "Redo" },
             { "Esc", "Cancel an export in progress" },
         };
@@ -688,6 +688,10 @@ static void draw_splitter(const LayoutRect& rect, float* timeline_height) {
     if (rect.w < 1.0f || rect.h < 1.0f)
         return;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    // ImGui won't make a window smaller than this (32 pixels by default), and this one is a few pixels
+    // tall: left alone, it would reach down over the row of buttons at the top of the timeline and take
+    // their clicks.
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2(1.0f, 1.0f));
     ImGui::SetNextWindowPos(ImVec2(rect.x, rect.y));
     ImGui::SetNextWindowSize(ImVec2(rect.w, rect.h));
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse |
@@ -706,7 +710,7 @@ static void draw_splitter(const LayoutRect& rect, float* timeline_height) {
         ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(rect.x, rect.y), ImVec2(rect.x + rect.w, rect.y + rect.h), color);
     }
     ImGui::End();
-    ImGui::PopStyleVar();
+    ImGui::PopStyleVar(2);
 }
 
 // The divider between the left panel and the preview: drag it to make the panel wider (and the
@@ -716,6 +720,7 @@ static void draw_panel_splitter(const LayoutRect& rect, float widest_panel, floa
     if (rect.w < 1.0f || rect.h < 1.0f)
         return;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2(1.0f, 1.0f));   // (See draw_splitter.)
     ImGui::SetNextWindowPos(ImVec2(rect.x, rect.y));
     ImGui::SetNextWindowSize(ImVec2(rect.w, rect.h));
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse |
@@ -735,7 +740,7 @@ static void draw_panel_splitter(const LayoutRect& rect, float widest_panel, floa
         ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(rect.x, rect.y), ImVec2(rect.x + rect.w, rect.y + rect.h), color);
     }
     ImGui::End();
-    ImGui::PopStyleVar();
+    ImGui::PopStyleVar(2);
 }
 
 int main()
@@ -941,21 +946,33 @@ int main()
         },
         nullptr,
         nullptr);
-    // Ctrl+Z undoes (with Shift, redoes); Ctrl+Y redoes.
+    // Ctrl+Z undoes (with Shift, redoes); Ctrl+Y redoes. In the Sync / Reorder view they undo and redo
+    // what is changed in there (the sync, the start of the activity and the order of the files); the edit
+    // is kept aside while it is open and has its own history.
     interaction_mgr->bind_char('z', GLFW_KEY_Z,
         [window, &timeline_editor, &edit_model, &media_container_mgr, &sync_view]() {
-            if (ImGui::GetIO().WantTextInput || !ctrl_is_down(window) || sync_view.active())
+            if (ImGui::GetIO().WantTextInput || !ctrl_is_down(window))
                 return;
-            if (shift_is_down(window))
+            if (sync_view.active()) {
+                if (shift_is_down(window))
+                    sync_view.redo(&edit_model, &media_container_mgr);
+                else
+                    sync_view.undo(&edit_model, &media_container_mgr);
+            } else if (shift_is_down(window)) {
                 timeline_editor.redo(&edit_model, &media_container_mgr);
-            else
+            } else {
                 timeline_editor.undo(&edit_model, &media_container_mgr);
+            }
         },
         nullptr,
         nullptr);
     interaction_mgr->bind_char('y', GLFW_KEY_Y,
         [window, &timeline_editor, &edit_model, &media_container_mgr, &sync_view]() {
-            if (!ImGui::GetIO().WantTextInput && ctrl_is_down(window) && !sync_view.active())
+            if (ImGui::GetIO().WantTextInput || !ctrl_is_down(window))
+                return;
+            if (sync_view.active())
+                sync_view.redo(&edit_model, &media_container_mgr);
+            else
                 timeline_editor.redo(&edit_model, &media_container_mgr);
         },
         nullptr,

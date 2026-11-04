@@ -221,6 +221,88 @@ bool MapTrace::position_at(double sample, MapPoint* position) const {
 	return false;
 }
 
+namespace {
+
+// How far, from 0 to 1, along the line from `a` to `b` the point nearest `p` is, and the distance to it.
+double nearest_on_segment(const ScreenPoint& a, const ScreenPoint& b, float px, float py, float* distance) {
+	const double dx = (double)b.x - (double)a.x;
+	const double dy = (double)b.y - (double)a.y;
+	const double length_squared = dx * dx + dy * dy;
+	double t = 0.0;
+	if (length_squared > 0.0)
+		t = clamp_double(((px - a.x) * dx + (py - a.y) * dy) / length_squared, 0.0, 1.0);
+	const double nx = a.x + dx * t - px;
+	const double ny = a.y + dy * t - py;
+	*distance = (float)sqrt(nx * nx + ny * ny);
+	return t;
+}
+
+}  // namespace
+
+void MapTrace::find_passes(const MapViewport& view, float x, float y, float radius, std::vector<MapPick>* passes) const {
+	passes->clear();
+	const int count = (int)m_points.size();
+	bool in_pass = false;
+	int last_segment = -2;
+	ScreenPoint a;
+	bool have_a = false;
+	for (int i = 0; i < count; i++) {
+		if (!m_valid[i]) {
+			have_a = false;
+			continue;
+		}
+		const ScreenPoint b = view.to_screen(m_points[i]);
+		if (have_a) {
+			// The segment from sample i - 1 to sample i.
+			float distance;
+			const double t = nearest_on_segment(a, b, x, y, &distance);
+			if (distance <= radius) {
+				const double sample = (double)(i - 1) + t;
+				if (in_pass && last_segment == i - 1) {
+					if (distance < passes->back().distance)
+						passes->back() = MapPick(sample, distance);
+				} else {
+					passes->push_back(MapPick(sample, distance));
+				}
+				in_pass = true;
+				last_segment = i;
+			}
+		}
+		a = b;
+		have_a = true;
+	}
+}
+
+bool MapTrace::nearest_near(const MapViewport& view, float x, float y, double around, double window, MapPick* nearest) const {
+	int first = (int)floor(around - window);
+	int last = (int)ceil(around + window);
+	if (first < 0)
+		first = 0;
+	if (last > (int)m_points.size() - 1)
+		last = (int)m_points.size() - 1;
+	bool found = false;
+	ScreenPoint a;
+	bool have_a = false;
+	for (int i = first; i <= last; i++) {
+		if (!m_valid[i]) {
+			have_a = false;
+			continue;
+		}
+		const ScreenPoint b = view.to_screen(m_points[i]);
+		if (have_a) {
+			float distance;
+			const double t = nearest_on_segment(a, b, x, y, &distance);
+			if (!found || distance < nearest->distance) {
+				*nearest = MapPick((double)(i - 1) + t, distance);
+				found = true;
+			}
+		}
+		a = b;
+		have_a = true;
+	}
+	return found;
+}
+
 bool MapTrace::heading_at(double sample, float* degrees) const {
 	MapPoint before;
 	MapPoint after;
