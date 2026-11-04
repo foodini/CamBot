@@ -64,6 +64,9 @@ public:
 	float       clip_start_parametric(int index) const;          // Where clip `index` begins.
 	int         current_clip_index() const;                      // The clip the frame on screen is from.
 	std::string current_media_name() const;                      // That clip's file, without its folder.
+	// Replaces the clips being played (see MediaDecoder::set_clips) and shows the frame at
+	// `show_ticks` of the new timeline. False, changing nothing, if the clips are not valid.
+	bool        set_clips(const std::vector<Clip>& clips, int64_t show_ticks) { return m_decoder->set_clips(clips, show_ticks); }
 	// The tick count at the frame on screen (see MediaDecoder), for mapping it through the edit model.
 	int64_t     current_ticks() const;
 	// What one tick is, in seconds (numerator / denominator).
@@ -77,7 +80,7 @@ public:
 
 	float frame_rate() const; // Native playback frame rate (frames/sec) of the video stream.
 	void render();
-	bool recording() { return m_recording; }
+	bool recording() const { return m_recording; }
 
 	// Major thanks to "shi-yan" who helped make this possible:
 	// https://github.com/shi-yan/videosamples/blob/master/libavmp4encoding/main.cpp

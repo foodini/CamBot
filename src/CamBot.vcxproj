@@ -177,7 +177,10 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="project_data.cpp" />
     <ClCompile Include="render_target.cpp" />
+    <ClCompile Include="edit_history.cpp" />
     <ClCompile Include="scan_gesture.cpp" />
+    <ClCompile Include="timeline_edit.cpp" />
+    <ClCompile Include="timeline_editor.cpp" />
     <ClCompile Include="timeline_scale.cpp" />
     <ClCompile Include="timeline_view.cpp" />
     <ClCompile Include="timecode.cpp" />
@@ -243,7 +246,11 @@
     <ClInclude Include="media_order.h" />
     <ClInclude Include="project_data.h" />
     <ClInclude Include="render_target.h" />
+    <ClInclude Include="edit_history.h" />
+    <ClInclude Include="recent_projects.h" />
     <ClInclude Include="scan_gesture.h" />
+    <ClInclude Include="timeline_edit.h" />
+    <ClInclude Include="timeline_editor.h" />
     <ClInclude Include="timeline_scale.h" />
     <ClInclude Include="timeline_view.h" />
     <ClInclude Include="timecode.h" />

@@ -5,7 +5,7 @@
 // moves around it: left-drag (or click) scrubs, the right button drags to scan forward and back,
 // the wheel zooms about the cursor, and the middle button, Shift and the wheel, or a left-drag on
 // the ruler pans. It only
-// shows and moves around for now; changing the clips comes later.
+// moves around, and the buttons along its top cut the clips at the playhead (see timeline_editor.h).
 //
 // Drawn with ImGui, so it is the window's own, never part of the exported picture. The arithmetic
 // of what's showing is in timeline_scale.h.
@@ -17,6 +17,7 @@
 #include "window_layout.h"
 
 class MediaContainerMgr;
+class TimelineEditor;
 
 class TimelineView {
 public:
@@ -24,8 +25,9 @@ public:
 
 	// Draws the timeline filling `rect` (window pixels) and acts on the mouse in it. Call once a
 	// frame between ImGui::NewFrame() and ImGui::Render(). `model` supplies the clips; `media` is
-	// where the playhead is, and what is moved when the user moves it.
-	void draw(const LayoutRect& rect, const EditModel& model, MediaContainerMgr& media);
+	// where the playhead is, and what is moved when the user moves it. The buttons above the
+	// timeline (Split, Trim Left and so on) are carried out by `editor`, on `model` and `media`.
+	void draw(const LayoutRect& rect, EditModel& model, MediaContainerMgr& media, TimelineEditor& editor);
 
 private:
 	TimelineScale m_scale;

@@ -31,6 +31,14 @@ namespace ffsw {
 	Answer yes_no_cancel_box(const std::string& title, const std::string& text);
 	std::string format(const char* fmt, ...);
 
+	// The project file named on the command line (`CamBot.exe flight.ffsw`, which is also what
+	// dropping a project file on the program does), as UTF-8. Empty if there isn't one.
+	std::string command_line_project();
+	// Starts another copy of CamBot that opens the project at `project_path` (the usual way of
+	// starting if it is empty). False if it could not be started. Used to switch projects: the
+	// current copy saves, shuts down and then starts the next.
+	bool launch_self(const std::string& project_path);
+
 	// For a key that auto-repeats while held (e.g. a frame-by-frame scrub key): true once every
 	// `interval` seconds, but only once `held_seconds` has passed `initial_delay` -- so a tap
 	// doesn't also trigger a repeat, and holding doesn't repeat at render frame rate. `bucket` is

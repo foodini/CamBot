@@ -20,6 +20,16 @@ public:
 	// second case they have already been told what.
 	bool open_interactive();
 
+	// Opens the existing project file at `path` without asking which. False if there is no such
+	// file or it could not be opened (in which case the user has been told what was wrong, unless
+	// there was no such file); the manager is then not to be used until another open succeeds.
+	bool open_path(const std::string& path);
+
+	// Makes a new project: asks for the project's name, then its video files and telemetry file,
+	// and writes the project file. False if the user cancelled or something was wrong (they have
+	// been told what). A name that is already a project is refused, not overwritten.
+	bool create_new_interactive();
+
 	// Writes the project file, and clears the unsaved-changes state (and the recovery file, see
 	// below). On failure the user is told, and false comes back.
 	bool save_project();

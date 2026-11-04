@@ -56,6 +56,11 @@ public:
 	// Flight summary duration and XC toggle. Same deal: set freely, then save_user_settings() on release.
 	void summary_settings(const SummarySettings& settings) { m_user_settings.summary = settings; }
 	void save_user_settings() const                        { m_user_settings.save(); }
+	// Which project is open: it is the one to open at the next start, and goes to the top of the recent
+	// list. And the other way: the user closed it on purpose, so the next start should not open it.
+	// Both save the user settings.
+	void note_project_opened(const std::string& path)      { m_user_settings.note_project_opened(path); m_user_settings.save(); }
+	void forget_last_project()                             { m_user_settings.forget_last_project(); m_user_settings.save(); }
 	// The main window's size, kept for the next run. Saved by save_user_settings().
 	void window_settings(const WindowSettings& settings)   { m_user_settings.window = settings; }
 	// The true altitudes (ft) the user gave for the start and end of the video. These belong to

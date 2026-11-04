@@ -32,6 +32,7 @@
 #include "project_data.h"
 #include "telemetry.h"
 #include "timecode.h"
+#include "timeline_editor.h"
 #include "timeline_view.h"
 #include "util.h"
 #include "widget.h"
@@ -67,9 +68,10 @@ static void shut_down_gui() {
 
 // Turns a request to close the window into a question when the project has unsaved changes.
 // True when it's time to leave for real.
-static bool exit_confirmed(GLFWwindow* window, EnvConfig& env_config, ProjectFileManager& project_file_mgr) {
-    if (!glfwWindowShouldClose(window))
-        return false;
+// Used before leaving the open project, whether for good (exit) or for another one: if it has
+// unsaved changes, asks whether to save them. True if it is all right to go on: nothing to save, or
+// saved, or the user chose to let the changes go. False if they cancelled (or the save failed).
+static bool confirm_leaving_project(EnvConfig& env_config, ProjectFileManager& project_file_mgr) {
     env_config.poll_project();   // So changes from the last frame count.
     if (!env_config.project_unsaved())
         return true;
@@ -77,10 +79,42 @@ static bool exit_confirmed(GLFWwindow* window, EnvConfig& env_config, ProjectFil
         "Save changes to \"" + fileio::base_name(project_file_mgr.get_project_file_path()) + "\" before closing?");
     if (answer == ffsw::ANSWER_NO)
         return true;
-    if (answer == ffsw::ANSWER_YES && env_config.save_project())
+    return answer == ffsw::ANSWER_YES && env_config.save_project();
+}
+
+static bool exit_confirmed(GLFWwindow* window, EnvConfig& env_config, ProjectFileManager& project_file_mgr) {
+    if (!glfwWindowShouldClose(window))
+        return false;
+    if (confirm_leaving_project(env_config, project_file_mgr))
         return true;
     glfwSetWindowShouldClose(window, GLFW_FALSE);   // Cancelled, or the save failed.
     return false;
+}
+
+// Opens the project CamBot starts with: the one named on the command line, or else the one that
+// was open when it was last used. If there is neither, or it has gone, or it would not open (the
+// user has been told why), the user is asked which project to use.
+static bool open_startup_project(ProjectFileManager* project, const std::string& command_line_path, const std::string& last_project) {
+    const std::string& wanted = !command_line_path.empty() ? command_line_path : last_project;
+    // Said on the console so that it can be seen why the chooser came up when it did.
+    printf("Startup project: command line \"%s\", last used \"%s\"\n", command_line_path.c_str(), last_project.c_str());
+    if (!wanted.empty()) {
+        if (project->open_path(wanted)) {
+            printf("Opened \"%s\" without asking.\n", wanted.c_str());
+            return true;
+        }
+        printf("Could not open \"%s\" (it is missing, or would not load); asking instead.\n", wanted.c_str());
+        *project = ProjectFileManager();   // Whatever the attempt left behind.
+    }
+    return project->open_interactive();
+}
+
+static bool ctrl_is_down(GLFWwindow* window) {
+    return glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+}
+
+static bool shift_is_down(GLFWwindow* window) {
+    return glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
 }
 
 // The Help > Keyboard Shortcuts window: every key and mouse binding, until the interface
@@ -112,6 +146,12 @@ static void draw_shortcuts_window(bool* open) {
             { rotate_flip_key, "Rotate the video 180 degrees" },
             { rotate_left_key + " / " + rotate_right_key, "Rotate the video a little left / right (hold to repeat)" },
             { "Ctrl+S", "Save the project" },
+            { "S", "Split the clip at the playhead (the playhead's frame starts the second piece)" },
+            { "[", "Trim Left: delete the clip from its start up to the playhead's frame" },
+            { "]", "Trim Right: delete the clip from after the playhead's frame to its end" },
+            { "Delete", "Delete the clip under the playhead" },
+            { "Ctrl+Z", "Undo the last edit" },
+            { "Ctrl+Y or Ctrl+Shift+Z", "Redo" },
             { "Esc", "Cancel an export in progress" },
         };
         for (const Row& row : rows) {
@@ -723,7 +763,7 @@ int main()
     extents[3] = glm::vec3(1.0, 1.0, 0.0);
 
     ProjectFileManager project_file_mgr;
-    if (!project_file_mgr.open_interactive()) {
+    if (!open_startup_project(&project_file_mgr, ffsw::command_line_project(), startup_settings.last_project)) {
         // Cancelled, or the project had a problem (which the user has already been told about).
         shut_down_gui();
         return 0;
@@ -783,9 +823,11 @@ int main()
     FontManager font_manager("c:\\Windows\\Fonts\\courbd.ttf", 48, SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT);
     //TODO(P1) Hand the telemetry_mgr, instead of its vector, into the env_config.
     EnvConfig env_config(&media_container_mgr, &font_manager, &project_file_mgr, &edit_model, (float)SCR_WIDTH, (float)SCR_HEIGHT + (float)UI_HEIGHT, (float)UI_HEIGHT);
+    env_config.note_project_opened(project_file_mgr.get_project_file_path());
 
     DateTimeWidget date_time_widget(.29f, .18f, 1.0f-.29f-.015f, 1.0f-.18f-.01f);
     TimelineView timeline_view;
+    TimelineEditor timeline_editor;
     TelemetryScrubWidget telemetry_scrub_widget(1.96f, 0.04f, -.98f, -.885f);
 
     MapWidget map_widget(.35f, .35f*SCR_WIDTH/(SCR_HEIGHT+UI_HEIGHT), 0.6f, -0.765f);
@@ -820,14 +862,57 @@ int main()
         []() { paused = !paused; },
         nullptr,
         nullptr);
-    // Ctrl+S saves the project. "S" is whichever key makes an S in the user's keyboard layout
-    // (under the right little finger on Dvorak, the left ring finger on QWERTY).
+    // The edit keys. They are named by the character they make, so they follow the user's keyboard
+    // layout (see the note on S below), and they stand aside while a text box has the keyboard.
+    // Ctrl+S saves the project, and S by itself splits the clip at the playhead.
     interaction_mgr->bind_char('s', GLFW_KEY_S,
-        [window, &env_config]() {
-            bool ctrl_down = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
-                             glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
-            if (ctrl_down)
+        [window, &env_config, &timeline_editor, &edit_model, &media_container_mgr]() {
+            if (ImGui::GetIO().WantTextInput)
+                return;
+            if (ctrl_is_down(window))
                 env_config.save_project();
+            else
+                timeline_editor.split(&edit_model, &media_container_mgr);
+        },
+        nullptr,
+        nullptr);
+    interaction_mgr->bind_char('[', GLFW_KEY_LEFT_BRACKET,
+        [&timeline_editor, &edit_model, &media_container_mgr]() {
+            if (!ImGui::GetIO().WantTextInput)
+                timeline_editor.trim_left(&edit_model, &media_container_mgr);
+        },
+        nullptr,
+        nullptr);
+    interaction_mgr->bind_char(']', GLFW_KEY_RIGHT_BRACKET,
+        [&timeline_editor, &edit_model, &media_container_mgr]() {
+            if (!ImGui::GetIO().WantTextInput)
+                timeline_editor.trim_right(&edit_model, &media_container_mgr);
+        },
+        nullptr,
+        nullptr);
+    interaction_mgr->bind_key(GLFW_KEY_DELETE,
+        [&timeline_editor, &edit_model, &media_container_mgr]() {
+            if (!ImGui::GetIO().WantTextInput)
+                timeline_editor.remove_clip(&edit_model, &media_container_mgr);
+        },
+        nullptr,
+        nullptr);
+    // Ctrl+Z undoes (with Shift, redoes); Ctrl+Y redoes.
+    interaction_mgr->bind_char('z', GLFW_KEY_Z,
+        [window, &timeline_editor, &edit_model, &media_container_mgr]() {
+            if (ImGui::GetIO().WantTextInput || !ctrl_is_down(window))
+                return;
+            if (shift_is_down(window))
+                timeline_editor.redo(&edit_model, &media_container_mgr);
+            else
+                timeline_editor.undo(&edit_model, &media_container_mgr);
+        },
+        nullptr,
+        nullptr);
+    interaction_mgr->bind_char('y', GLFW_KEY_Y,
+        [window, &timeline_editor, &edit_model, &media_container_mgr]() {
+            if (!ImGui::GetIO().WantTextInput && ctrl_is_down(window))
+                timeline_editor.redo(&edit_model, &media_container_mgr);
         },
         nullptr,
         nullptr);
@@ -836,6 +921,11 @@ int main()
     float prev_frame_time = frame_time;
     float duration_avg = -1.0;
     bool show_about_popup = false;
+    // Switching projects (File > New, Open, Recent, Close) works by shutting this copy of CamBot down
+    // and starting another that opens the chosen project, as so much of the program is built around the
+    // one project it was started with. These say that is what's happening, and which project is next.
+    bool switching_project = false;
+    std::string next_project_path;   // Empty: start the usual way (which, after Close, asks).
     bool show_shortcuts_window = false;
     std::string window_title;          // What the title bar currently says (see the render loop).
     // The Climb Rate Settings window (View menu): open flag, plus a request for the window to
@@ -884,7 +974,7 @@ int main()
 
     // render loop
     // -----------
-    while (!exit_confirmed(window, env_config, project_file_mgr))
+    while (!switching_project && !exit_confirmed(window, env_config, project_file_mgr))
     {
         telemetry_mgr.tick();
         env_config.poll_project();
@@ -959,6 +1049,54 @@ int main()
 
             if (ImGui::BeginMainMenuBar()) {
                 if (ImGui::BeginMenu("File")) {
+                    // Switching to another project: first see to this one's unsaved changes, then
+                    // this copy of CamBot closes and the next one opens the project. None of it while
+                    // an export is running, as that needs the video to itself.
+                    const bool can_switch = !media_container_mgr.recording();
+                    if (ImGui::MenuItem("New Project...", nullptr, false, can_switch)) {
+                        if (confirm_leaving_project(env_config, project_file_mgr)) {
+                            ProjectFileManager new_project;
+                            if (new_project.create_new_interactive()) {
+                                next_project_path = new_project.get_project_file_path();
+                                switching_project = true;
+                            }
+                        }
+                    }
+                    if (ImGui::MenuItem("Open Project...", nullptr, false, can_switch)) {
+                        std::string chosen = ffsw::file_dialog(L"ffsw", L"Open CamBot Project (*.ffsw)", true);
+                        if (!chosen.empty() && confirm_leaving_project(env_config, project_file_mgr)) {
+                            next_project_path = chosen;
+                            switching_project = true;
+                        }
+                    }
+                    if (ImGui::BeginMenu("Recent Projects", can_switch)) {
+                        const RecentProjects& recent = env_config.user_settings().recent_projects;
+                        if (recent.count() == 0)
+                            ImGui::MenuItem("(none yet)", nullptr, false, false);
+                        for (int i = 0; i < recent.count(); i++) {
+                            const std::string& recent_path = recent.path(i);
+                            const bool is_open = RecentProjects::same_path(recent_path, project_file_mgr.get_project_file_path());
+                            const bool exists = fileio::file_exists(recent_path);
+                            // Numbered so that two projects with the same file name in different folders can be told apart.
+                            const std::string label = std::to_string(i + 1) + "  " + fileio::base_name(recent_path) + (exists ? "" : "  (missing)");
+                            if (ImGui::MenuItem(label.c_str(), nullptr, is_open, exists && !is_open) &&
+                                confirm_leaving_project(env_config, project_file_mgr)) {
+                                next_project_path = recent_path;
+                                switching_project = true;
+                            }
+                            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                                ImGui::SetTooltip("%s", recent_path.c_str());
+                        }
+                        ImGui::EndMenu();
+                    }
+                    if (ImGui::MenuItem("Close Project", nullptr, false, can_switch)) {
+                        if (confirm_leaving_project(env_config, project_file_mgr)) {
+                            env_config.forget_last_project();   // So the next start asks instead of reopening it.
+                            next_project_path.clear();
+                            switching_project = true;
+                        }
+                    }
+                    ImGui::Separator();
                     if (ImGui::MenuItem("Save Project", "Ctrl+S")) {
                         // Goes through EnvConfig, not project_file_mgr directly -- that's
                         // what actually pulls the *current* rotation (and telemetry offset,
@@ -1054,7 +1192,7 @@ int main()
             draw_left_panel(layout.left_panel);
             draw_panel_splitter(layout.panel_splitter, layout.widest_panel, &panel_width);
             draw_splitter(layout.splitter, &timeline_height);
-            timeline_view.draw(layout.timeline, edit_model, media_container_mgr);
+            timeline_view.draw(layout.timeline, edit_model, media_container_mgr, timeline_editor);
             draw_transport_bar(layout.transport, media_container_mgr, &pending_raw_screenshot_path, &pending_overlay_screenshot_path);
             // The preview is the canvas, shown from ImGui's background list rather than in a window of
             // its own, so ImGui doesn't count the mouse as being over a window of its own when it is
@@ -1272,5 +1410,9 @@ int main()
     // glfw: terminate, clearing all previously allocated GLFW resources.
     // ------------------------------------------------------------------
     glfwTerminate();
+
+    // Last of all, so that nothing of this copy is still using the files: the copy that opens the next project.
+    if (switching_project && !ffsw::launch_self(next_project_path))
+        ffsw::message_box("CamBot", "CamBot could not start itself to open the other project. Start it again by hand.");
     return 0;
 }

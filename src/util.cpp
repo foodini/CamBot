@@ -4,6 +4,7 @@
 #include <thread>
 
 #include <stdio.h>
+#include <string.h>
 
 #include "util.h"
 
@@ -52,6 +53,7 @@ void ffsw::sleep(uint32_t milliseconds) {
 #undef APIENTRY
 #include <windows.h>
 #include <shobjidl.h>
+#include <shellapi.h>
 
 void _ffsw_util_check_result(HRESULT hr, const char* error) {
 	if (!SUCCEEDED(hr)) {
@@ -314,4 +316,50 @@ std::string ffsw::format(const char* fmt, ...) {
 	}
 
 	return std::string(buf);
+}
+
+static std::string _ffsw_util_narrow(const wchar_t* wide) {
+    if (wide == nullptr || wide[0] == L'\0') return std::string();
+    int count = WideCharToMultiByte(CP_UTF8, 0, wide, -1, NULL, 0, NULL, NULL);
+    if (count <= 1) return std::string();
+    std::string utf8(count - 1, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wide, -1, &utf8[0], count, NULL, NULL);
+    return utf8;
+}
+
+// Read from the wide command line, not main()'s argv, which is in the system's code page and would
+// mangle a project path with accents or other scripts in it.
+std::string ffsw::command_line_project() {
+    int count = 0;
+    LPWSTR* args = CommandLineToArgvW(GetCommandLineW(), &count);
+    if (args == NULL)
+        return std::string();
+    std::string result;
+    if (count >= 2)
+        result = _ffsw_util_narrow(args[1]);
+    LocalFree(args);
+    return result;
+}
+
+bool ffsw::launch_self(const std::string& project_path) {
+    wchar_t exe[32768];
+    DWORD length = GetModuleFileNameW(NULL, exe, (DWORD)(sizeof(exe) / sizeof(exe[0])));
+    if (length == 0 || length >= sizeof(exe) / sizeof(exe[0]))
+        return false;
+    std::wstring command = std::wstring(L"\"") + exe + L"\"";
+    if (!project_path.empty())
+        command += L" \"" + _ffsw_util_widen(project_path) + L"\"";
+    STARTUPINFOW startup;
+    memset(&startup, 0, sizeof(startup));
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process;
+    memset(&process, 0, sizeof(process));
+    // CreateProcessW may change the command line buffer, so it gets a writable copy.
+    std::vector<wchar_t> writable(command.begin(), command.end());
+    writable.push_back(L'\0');
+    if (!CreateProcessW(exe, writable.data(), NULL, NULL, FALSE, 0, NULL, NULL, &startup, &process))
+        return false;
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return true;
 }

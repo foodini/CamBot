@@ -38,6 +38,27 @@ bool ProjectFileManager::open_interactive() {
 	return create_new();
 }
 
+bool ProjectFileManager::open_path(const std::string& path) {
+	if (path.empty() || !fileio::file_exists(path))
+		return false;
+	m_project_file_path = path;
+	return open_existing(path);
+}
+
+bool ProjectFileManager::create_new_interactive() {
+	// Same dialog as the one that opens a project, but here only a name is wanted: one that is
+	// already a project is not what was asked for, and is not replaced.
+	std::string path = ffsw::file_dialog(L"ffsw", L"Name the New CamBot Project (*.ffsw)", false);
+	if (path.empty())
+		return false;  // Cancelled.
+	if (fileio::file_exists(path)) {
+		ffsw::message_box("CamBot - New Project", "\"" + fileio::base_name(path) + "\" is already a project.\n\nUse File > Open Project to open it, or give the new project another name.");
+		return false;
+	}
+	m_project_file_path = path;
+	return create_new();
+}
+
 bool ProjectFileManager::create_new() {
 	// A new project: its inputs are the video file(s) and the telemetry log.
 	std::vector<std::string> videos = ffsw::file_dialog_multi(VIDEO_EXTENSIONS,

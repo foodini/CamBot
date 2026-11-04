@@ -2,7 +2,8 @@
 
 // Settings that belong to the person running CamBot rather than to a particular video, so a
 // look they've dialed in carries over from project to project: the climb-rate filter, the
-// climb color range, the map trace widths, the map zoom limits, and the size of the window. Stored as simple key:value
+// climb color range, the map trace widths, the map zoom limits, and the size of the window, and
+// which projects were open lately. Stored as simple key:value
 // lines in %APPDATA%\CamBot\user_settings.txt (or next to the working directory if APPDATA
 // isn't set). Missing or out-of-range values fall back to their defaults.
 
@@ -18,6 +19,7 @@
 #endif
 
 #include "climb_filter.h"
+#include "recent_projects.h"
 #include "map_zoom.h"
 
 // How the map's course trace is drawn (see map_widget_1_course.vert): the most recent
@@ -67,6 +69,18 @@ public:
 	MapZoomSettings     map_zoom;
 	SummarySettings     summary;
 	WindowSettings      window;
+	// The project to open when CamBot starts (empty after the user closes it deliberately), and the
+	// ones opened lately, most recent first. Paths are UTF-8.
+	std::string         last_project;
+	RecentProjects      recent_projects;
+
+	// A project was opened: it is the one to open next time, and goes to the top of the recent list.
+	void note_project_opened(const std::string& path) {
+		last_project = path;
+		recent_projects.note_opened(path);
+	}
+	// The user closed the project on purpose: don't open it again at the next start (it stays in the recent list).
+	void forget_last_project() { last_project.clear(); }
 
 	// Where the settings file lives. create_directory makes the CamBot folder if it's missing.
 	static std::string file_path(bool create_directory) {
@@ -90,7 +104,7 @@ public:
 		FILE* fd = fopen(file_path(false).c_str(), "r");
 		if (fd == nullptr)
 			return;  // First run: keep the defaults.
-		char line[256];
+		char line[2048];   // Long enough for a path.
 		while (fgets(line, sizeof(line), fd) != nullptr) {
 			char* colon = strchr(line, ':');
 			if (colon == nullptr)
@@ -98,6 +112,10 @@ public:
 			*colon = '\0';
 			const char* key = line;
 			const float value = (float)atof(colon + 1);
+			// Some values are text (a path), up to the end of the line.
+			std::string text = colon + 1;
+			while (!text.empty() && (text[text.size() - 1] == '\n' || text[text.size() - 1] == '\r'))
+				text.erase(text.size() - 1);
 
 			if (strcmp(key, "climb_filter") == 0) {
 				const int type = (int)value;
@@ -119,6 +137,8 @@ public:
 			else if (strcmp(key, "window_h") == 0)           { if (value >= 300.0f && value <= 16384.0f) window.height = (int)value; }
 			else if (strcmp(key, "window_maximized") == 0)   { window.maximized = (value != 0.0f); }
 			else if (strcmp(key, "window_panel_w") == 0)     { if (value >= 60.0f && value <= 8000.0f)   window.panel_width = (int)value; }
+			else if (strcmp(key, "last_project") == 0)       { last_project = text; }
+			else if (strcmp(key, "recent_project") == 0)     { recent_projects.append(text); }
 			else if (strcmp(key, "window_timeline_h") == 0)  { if (value >= 60.0f && value <= 8000.0f)   window.timeline_height = (int)value; }
 		}
 		fclose(fd);
@@ -147,6 +167,9 @@ public:
 		fprintf(fd, "window_maximized:%d\n", window.maximized ? 1 : 0);
 		fprintf(fd, "window_panel_w:%d\n", window.panel_width);
 		fprintf(fd, "window_timeline_h:%d\n", window.timeline_height);
+		fprintf(fd, "last_project:%s\n", last_project.c_str());
+		for (int i = 0; i < recent_projects.count(); i++)
+			fprintf(fd, "recent_project:%s\n", recent_projects.path(i).c_str());
 		fclose(fd);
 		return true;
 	}

@@ -9,6 +9,8 @@
 #include "file_io.h"
 #include "media_container_manager.h"
 #include "scan_gesture.h"
+#include "timeline_edit.h"
+#include "timeline_editor.h"
 
 namespace {
 
@@ -30,6 +32,7 @@ const ImU32 COLOR_CLIP_BORDER = IM_COL32(12, 12, 15, 255);
 const ImU32 COLOR_CLIP_TEXT = IM_COL32(240, 240, 245, 255);
 const ImU32 COLOR_JOIN = IM_COL32(235, 200, 70, 255);
 const ImU32 COLOR_PLAYHEAD = IM_COL32(240, 70, 70, 255);
+const ImU32 COLOR_CURRENT_CLIP = IM_COL32(245, 245, 250, 255);   // Outlines the clip the playhead is in.
 
 // Each file gets its own muted color, so footage from the same file looks the same wherever it is.
 ImU32 color_for_media(int media) {
@@ -37,6 +40,16 @@ ImU32 color_for_media(int media) {
 	float red = 0.0f, green = 0.0f, blue = 0.0f;
 	ImGui::ColorConvertHSVtoRGB(hue, 0.35f, 0.50f, red, green, blue);
 	return IM_COL32((int)(red * 255.0f), (int)(green * 255.0f), (int)(blue * 255.0f), 255);
+}
+
+// A button that is greyed out, and does nothing, unless `enabled`; hovering it says what it does.
+bool edit_button(const char* label, bool enabled, const char* tooltip) {
+	ImGui::BeginDisabled(!enabled);
+	bool pressed = ImGui::Button(label);
+	ImGui::EndDisabled();
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("%s", tooltip);
+	return pressed && enabled;
 }
 
 float larger(float a, float b) { return a > b ? a : b; }
@@ -49,7 +62,7 @@ TimelineView::TimelineView() :
 {
 }
 
-void TimelineView::draw(const LayoutRect& rect, const EditModel& model, MediaContainerMgr& media) {
+void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainerMgr& media, TimelineEditor& editor) {
 	if (rect.w < 1.0f || rect.h < 1.0f)
 		return;
 	ImGui::SetNextWindowPos(ImVec2(rect.x, rect.y));
@@ -71,8 +84,32 @@ void TimelineView::draw(const LayoutRect& rect, const EditModel& model, MediaCon
 	ImGui::SameLine(0.0f, 16.0f);
 	if (ImGui::Button("Fit"))
 		m_scale.fit();
+
+	// The edits, which act on the clip under the playhead. They are off while an export runs.
 	ImGui::SameLine(0.0f, 16.0f);
-	ImGui::TextDisabled("Scroll to zoom.  Drag the ruler, middle-drag or Shift+scroll to pan.  Right-drag to scan.");
+	if (edit_button("Split", !exporting && editor.can_split(model, media), "Cut the clip in two at the playhead (S)"))
+		editor.split(&model, &media);
+	ImGui::SameLine();
+	if (edit_button("Trim Left", !exporting && editor.can_trim_left(model, media), "Delete the clip from its start up to the playhead frame ([)"))
+		editor.trim_left(&model, &media);
+	ImGui::SameLine();
+	if (edit_button("Trim Right", !exporting && editor.can_trim_right(model, media), "Delete the clip from after the playhead frame to its end (])"))
+		editor.trim_right(&model, &media);
+	ImGui::SameLine();
+	if (edit_button("Delete", !exporting && editor.can_remove(model, media), "Delete the clip under the playhead (Delete)"))
+		editor.remove_clip(&model, &media);
+	ImGui::SameLine(0.0f, 16.0f);
+	if (edit_button("Undo", editor.can_undo(media), "Undo the last edit (Ctrl+Z)"))
+		editor.undo(&model, &media);
+	ImGui::SameLine();
+	if (edit_button("Redo", editor.can_redo(media), "Redo the edit that was undone (Ctrl+Y)"))
+		editor.redo(&model, &media);
+
+	// A reminder of the mouse, if there's room for it.
+	const char* hint = "Scroll to zoom.  Drag the ruler, middle-drag or Shift+scroll to pan.  Right-drag to scan.";
+	ImGui::SameLine(0.0f, 16.0f);
+	if (ImGui::CalcTextSize(hint).x < ImGui::GetContentRegionAvail().x)
+		ImGui::TextDisabled("%s", hint);
 
 	const ImVec2 origin = ImGui::GetCursorScreenPos();
 	const ImVec2 available = ImGui::GetContentRegionAvail();
@@ -240,6 +277,16 @@ void TimelineView::draw(const LayoutRect& rect, const EditModel& model, MediaCon
 		}
 		if (join_in_view)
 			draw->AddLine(ImVec2(left, origin.y + 2.0f), ImVec2(left, track_bottom), COLOR_JOIN, 2.0f);
+	}
+
+	// The clip the playhead is in, which the edit buttons and keys act on.
+	const int current = timeline_edit::current_clip(clips, playhead);
+	if (current >= 0) {
+		const double start = (double)clips.start(current);
+		const double end = start + (double)clips.clip(current).duration_ticks();
+		const float left = larger(origin.x + m_scale.tick_to_x(start), strip_min.x - 4.0f);
+		const float right = smaller(origin.x + m_scale.tick_to_x(end), strip_max.x + 4.0f);
+		draw->AddRect(ImVec2(left, track_top - 1.0f), ImVec2(right, track_bottom + 1.0f), COLOR_CURRENT_CLIP, 0.0f, 0, 2.0f);
 	}
 
 	// The playhead on top of it all.

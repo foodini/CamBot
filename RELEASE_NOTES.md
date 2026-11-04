@@ -30,7 +30,7 @@
   strip, 1920x1214 as before) and then copied to the window. Exports and both screenshot
   buttons read that picture rather than the window, so the saved frame no longer depends on
   the window. Nothing should look different.
-- **Timeline (view only).** A timeline now runs the full width of the window along the bottom,
+- **Timeline.** A timeline now runs the full width of the window along the bottom,
   with a draggable divider above it; drag the divider to make it taller or shorter (the height
   is remembered, minimum 110 pixels). Each source file is a coloured block with its name,
   yellow lines mark the joins, a ruler shows time, and a red line shows the playhead. Left-click
@@ -39,7 +39,28 @@
   the old scrub bar), mouse wheel to zoom around the cursor, Shift+wheel, middle-drag or a left-drag on the ruler to pan,
   and the Fit button to show everything. The timeline follows the playhead during playback.
   This replaces the video scrub bar that used to sit under the video; the telemetry scrub bar
-  is unchanged for now. Nothing can be edited on the timeline yet.
+  is unchanged for now.
+- **Opening and switching projects.** CamBot now starts with the project that was open last time
+  (if its file is still there), or the one named on the command line (so a project file can be
+  dropped on CamBot.exe); if neither can be opened it asks, as before. The File menu has **New
+  Project...**, **Open Project...**, **Recent Projects** (the last ten, with the full path shown when
+  you hover, and any that have gone greyed out) and **Close Project**, which asks you to pick a
+  project the next time CamBot starts instead of reopening this one. Each asks first whether to
+  save unsaved changes. Switching works by closing CamBot and starting it again on the other
+  project (the window comes back at the same size), so a debugger attached to the old copy will
+  not follow it. None of them are available while exporting.
+- **Cutting the video.** The clip the playhead is in is outlined on the timeline, and the buttons
+  above the timeline (and keys) act on it: **Split** (`S`) cuts it in two at the playhead, the
+  playhead's frame starting the second piece; **Trim Left** (`[`) and **Trim Right** (`]`) delete
+  the part of the clip before / after the playhead's frame, keeping that frame; **Delete**
+  (`Delete`) removes the whole clip. What follows always moves up to close the gap, and the
+  playhead goes to where the deleted footage began. **Undo** (`Ctrl+Z`) and **Redo** (`Ctrl+Y`, or
+  `Ctrl+Shift+Z`) step back and forward through the edits, restoring the playhead too. Edits
+  pause playback, are not possible during an export, and are saved with the project (the title bar
+  shows the `*`). The telemetry stays matched to the footage wherever it ends up, since it is
+  tied to when each piece was recorded. Cuts in the middle of a file can make a small click in
+  the exported sound for now. Dragging clip edges to trim and dragging clips to reorder them are
+  still to come.
 - The telemetry windows (map, altitude graph, flight summary) still describe all the footage,
   not the cut video; that gets revisited when the timeline UI arrives.
 

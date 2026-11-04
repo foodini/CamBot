@@ -22,6 +22,7 @@ for test in *_test.cpp; do
     if [ "$name" = "edit_model_test" ]; then extra="../src/edit_model.cpp"; fi
     if [ "$name" = "timecode_test" ]; then extra="../src/timecode.cpp"; fi
     if [ "$name" = "window_layout_test" ]; then extra="../src/window_layout.cpp"; fi
+    if [ "$name" = "timeline_edit_test" ]; then extra="../src/timeline_edit.cpp ../src/edit_history.cpp ../src/edit_model.cpp"; fi
     if [ "$name" = "timeline_scale_test" ]; then extra="../src/timeline_scale.cpp ../src/scan_gesture.cpp"; fi
     # The decoder test runs the real MediaDecoder against a fake FFmpeg (fake_ffmpeg.cpp) that
     # serves small synthetic files, so no FFmpeg libraries or video files are needed.

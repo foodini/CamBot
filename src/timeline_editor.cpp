@@ -1,0 +1,118 @@
+#include "timeline_editor.h"
+
+#include "env_config.h"
+#include "media_container_manager.h"
+#include "timeline_edit.h"
+
+namespace {
+
+EditState current_state(const EditModel& model, const MediaContainerMgr& media) {
+	EditState state;
+	state.clips = model.edit_list().clips();
+	state.edit_started = model.edit_started();
+	state.playhead_ticks = media.current_ticks();
+	return state;
+}
+
+}  // namespace
+
+bool TimelineEditor::can_split(const EditModel& model, const MediaContainerMgr& media) const {
+	return timeline_edit::can_split(model.edit_list(), media.current_ticks(), media.frame_ticks());
+}
+
+bool TimelineEditor::can_trim_left(const EditModel& model, const MediaContainerMgr& media) const {
+	return timeline_edit::can_trim_left(model.edit_list(), media.current_ticks(), media.frame_ticks());
+}
+
+bool TimelineEditor::can_trim_right(const EditModel& model, const MediaContainerMgr& media) const {
+	return timeline_edit::can_trim_right(model.edit_list(), media.current_ticks(), media.frame_ticks());
+}
+
+bool TimelineEditor::can_remove(const EditModel& model, const MediaContainerMgr& media) const {
+	return timeline_edit::can_remove(model.edit_list(), media.current_ticks(), media.frame_ticks());
+}
+
+bool TimelineEditor::can_undo(const MediaContainerMgr& media) const {
+	return m_history.can_undo() && !media.recording();
+}
+
+bool TimelineEditor::can_redo(const MediaContainerMgr& media) const {
+	return m_history.can_redo() && !media.recording();
+}
+
+bool TimelineEditor::apply_state(const EditState& state, EditModel* model, MediaContainerMgr* media) {
+	const std::vector<Clip> old_clips = model->edit_list().clips();
+	const bool old_started = model->edit_started();
+	if (!model->set_clips(state.clips))
+		return false;
+	model->set_edit_started(state.edit_started);
+	if (!media->set_clips(state.clips, state.playhead_ticks)) {
+		model->set_clips(old_clips);    // The decoder said no (the model's check should have caught it); put things back.
+		model->set_edit_started(old_started);
+		return false;
+	}
+	return true;
+}
+
+bool TimelineEditor::edit(Operation operation, EditModel* model, MediaContainerMgr* media) {
+	if (media->recording())
+		return false;
+	const EditList& list = model->edit_list();
+	const int64_t playhead = media->current_ticks();
+	const int64_t frame = media->frame_ticks();
+	timeline_edit::Result result;
+	switch (operation) {
+	case SPLIT:      result = timeline_edit::split(list, playhead, frame); break;
+	case TRIM_LEFT:  result = timeline_edit::trim_left(list, playhead, frame); break;
+	case TRIM_RIGHT: result = timeline_edit::trim_right(list, playhead, frame); break;
+	case REMOVE:     result = timeline_edit::remove_clip(list, playhead, frame); break;
+	}
+	if (!result.ok)
+		return false;
+
+	EditState before = current_state(*model, *media);
+	EditState after;
+	after.clips = result.clips;
+	after.edit_started = true;          // The first edit by hand; from here on sync changes are warned about.
+	after.playhead_ticks = result.playhead_ticks;
+	EnvConfig::instance->pause();
+	if (!apply_state(after, model, media))
+		return false;
+	m_history.record(before);
+	return true;
+}
+
+bool TimelineEditor::split(EditModel* model, MediaContainerMgr* media)       { return edit(SPLIT, model, media); }
+bool TimelineEditor::trim_left(EditModel* model, MediaContainerMgr* media)   { return edit(TRIM_LEFT, model, media); }
+bool TimelineEditor::trim_right(EditModel* model, MediaContainerMgr* media)  { return edit(TRIM_RIGHT, model, media); }
+bool TimelineEditor::remove_clip(EditModel* model, MediaContainerMgr* media) { return edit(REMOVE, model, media); }
+
+bool TimelineEditor::undo(EditModel* model, MediaContainerMgr* media) {
+	if (media->recording())
+		return false;
+	EditState restored;
+	if (!m_history.undo(current_state(*model, *media), &restored))
+		return false;
+	EnvConfig::instance->pause();
+	if (!apply_state(restored, model, media)) {
+		// Can't happen (the clips were valid when they were recorded), but if it does the history no
+		// longer matches what is on screen, so start it over rather than trust it.
+		m_history.clear();
+		return false;
+	}
+	return true;
+}
+
+bool TimelineEditor::redo(EditModel* model, MediaContainerMgr* media) {
+	if (media->recording())
+		return false;
+	EditState restored;
+	if (!m_history.redo(current_state(*model, *media), &restored))
+		return false;
+	EnvConfig::instance->pause();
+	if (!apply_state(restored, model, media)) {
+		m_history.clear();
+		return false;
+	}
+	return true;
+}
