@@ -170,6 +170,8 @@
     <ClCompile Include="interaction_manager.cpp" />
     <ClCompile Include="lines.cpp" />
     <ClCompile Include="file_io.cpp" />
+    <ClCompile Include="map_view.cpp" />
+    <ClCompile Include="position_smoothing.cpp" />
     <ClCompile Include="media_container_manager.cpp" />
     <ClCompile Include="media_decoder.cpp" />
     <ClCompile Include="font_manager.cpp" />
@@ -242,6 +244,8 @@
     <ClInclude Include="interaction_manager.h" />
     <ClInclude Include="lines.h" />
     <ClInclude Include="file_io.h" />
+    <ClInclude Include="map_view.h" />
+    <ClInclude Include="position_smoothing.h" />
     <ClInclude Include="media_container_manager.h" />
     <ClInclude Include="media_decoder.h" />
     <ClInclude Include="media_order.h" />

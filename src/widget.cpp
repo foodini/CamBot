@@ -253,10 +253,10 @@ MapWidget::MapWidget(float width, float height, float x_pos, float y_pos) :
 MapWidget::~MapWidget() {
 }
 
-glm::vec2 MapWidget::latlon_to_coords(float lat, float lon) {
-	double dist_x = ((double)lon - m_center_lon) / 90.0 * 10000000.0;
+glm::vec2 MapWidget::latlon_to_coords(double lat, double lon) {
+	double dist_x = (lon - m_center_lon) / 90.0 * 10000000.0;
 	dist_x *= cos(M_PI / 2.0 * lat / 90.0);
-	double dist_y = ((double)lat - m_center_lat) / 90.0 * 10000000.0;
+	double dist_y = (lat - m_center_lat) / 90.0 * 10000000.0;
 
 	return glm::vec2(dist_x, dist_y);
 }
@@ -265,11 +265,11 @@ void MapWidget::polygonalize(TelemetrySlice& slice, uint32_t index, uint32_t num
 	TelemetryMgr& telemetry_mgr = *TelemetryMgr::instance;
 
 	if (index == 0) {
-		m_center_lat = slice.m_gps_lat;
-		m_center_lon = slice.m_gps_lon;
+		m_center_lat = slice.m_draw_lat;
+		m_center_lon = slice.m_draw_lon;
 	}
 
-	glm::vec2 xy = latlon_to_coords(telemetry_mgr[index].m_gps_lat, telemetry_mgr[index].m_gps_lon);
+	glm::vec2 xy = latlon_to_coords(telemetry_mgr[index].m_draw_lat, telemetry_mgr[index].m_draw_lon);
 
 	std::vector<float> supp;
 	supp.push_back(slice.m_climb_rate[1]);
@@ -339,7 +339,7 @@ void MapWidget::render_course() {
 
 	// Set current pilot position at the center of the space
 	const TelemetrySlice& ts = env_config->telemetry_slice();
-	glm::vec2 position = latlon_to_coords(ts.m_gps_lat, ts.m_gps_lon);
+	glm::vec2 position = latlon_to_coords(ts.m_draw_lat, ts.m_draw_lon);
 	projection = glm::translate(identity, glm::vec3(-position, 0.0)) * projection;
 
 	// Scale the data to have the displayed data in the [-1.0..1.0, -1.0..1.0] ranges. How many meters
@@ -392,13 +392,13 @@ void MapWidget::rebuild_course_for_window(int32_t start_index, int32_t end_index
 	TelemetryMgr& telemetry_mgr = *TelemetryMgr::instance;
 
 	const TelemetrySlice& window_start_slice = telemetry_mgr[start_index];
-	m_center_lat = window_start_slice.m_gps_lat;
-	m_center_lon = window_start_slice.m_gps_lon;
+	m_center_lat = window_start_slice.m_draw_lat;
+	m_center_lon = window_start_slice.m_draw_lon;
 
 	m_course_lines.clear();
 	for (int32_t i = start_index; i <= end_index; i++) {
 		const TelemetrySlice& slice = telemetry_mgr[i];
-		glm::vec2 xy = latlon_to_coords(slice.m_gps_lat, slice.m_gps_lon);
+		glm::vec2 xy = latlon_to_coords(slice.m_draw_lat, slice.m_draw_lon);
 
 		std::vector<float> supp;
 		supp.push_back(slice.m_climb_rate[1]);
@@ -414,11 +414,14 @@ void MapWidget::render() {
 		int32_t start_index = env_config->telemetry_window_start_index();
 		int32_t end_index = env_config->telemetry_window_end_index();
 		uint32_t climb_version = TelemetryMgr::instance->climb_version();
-		if (start_index != m_window_start_index || end_index != m_window_end_index || climb_version != m_climb_version) {
+		uint32_t position_version = TelemetryMgr::instance->position_version();
+		if (start_index != m_window_start_index || end_index != m_window_end_index || climb_version != m_climb_version ||
+				position_version != m_position_version) {
 			rebuild_course_for_window(start_index, end_index);
 			m_window_start_index = start_index;
 			m_window_end_index = end_index;
 			m_climb_version = climb_version;
+			m_position_version = position_version;
 		}
 	}
 

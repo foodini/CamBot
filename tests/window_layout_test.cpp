@@ -130,20 +130,24 @@ static void test_sync_layout() {
 		float h = sizes[i][1];
 		SyncLayout layout = window_layout::compute_sync(w, h, MENU, ASPECT, timelines[j]);
 		LayoutRect whole(0, 0, w, h);
-		const LayoutRect* parts[] = { &layout.header, &layout.map, &layout.preview_area, &layout.transport, &layout.splitter, &layout.timeline };
-		for (int a = 0; a < 6; a++) {
+		const LayoutRect* parts[] = { &layout.header, &layout.map, &layout.strip, &layout.preview_area, &layout.transport, &layout.splitter, &layout.timeline };
+		for (int a = 0; a < 7; a++) {
 			CHECK(parts[a]->w >= 0.0f && parts[a]->h >= 0.0f);
 			if (h >= MENU)
 				CHECK(inside(*parts[a], whole));
-			for (int b = a + 1; b < 6; b++)
+			for (int b = a + 1; b < 7; b++)
 				CHECK(!overlap(*parts[a], *parts[b]));
 		}
 		CHECK(inside(layout.preview, layout.preview_area));
 		if (w < 100 || h < 100)
 			continue;
-		// The panes are the two halves of the width, and the bars run the whole width.
-		CHECK(layout.map.x == 0.0f && layout.map.w + layout.preview_area.w == w);
-		CHECK(layout.preview_area.x == layout.map.w);
+		// The panes share the width: the strip is its own width, the map and the video split the rest
+		// (the video takes an odd pixel), and the bars run the whole width.
+		CHECK(layout.map.x == 0.0f && layout.map.w + layout.strip.w + layout.preview_area.w == w);
+		CHECK(layout.strip.x == layout.map.w && layout.strip.w == window_layout::SYNC_STRIP_WIDTH);
+		CHECK(layout.preview_area.x == layout.strip.x + layout.strip.w);
+		CHECK(layout.preview_area.w - layout.map.w <= 1.0f && layout.preview_area.w >= layout.map.w);
+		CHECK(layout.strip.y == layout.map.y && layout.strip.h == layout.map.h);
 		CHECK(layout.header.w == w && layout.transport.w == w && layout.splitter.w == w && layout.timeline.w == w);
 		// Stacked top to bottom with nothing missing, ending at the bottom of the window.
 		CHECK(layout.header.y == MENU);

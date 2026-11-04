@@ -31,14 +31,16 @@ struct WindowLayout {
 };
 
 // The sync view, which takes over the whole window while the telemetry is being lined up with the
-// video and the files put in order. From the top: a bar with the Done and Cancel buttons; two panes
-// side by side, the map in the left half and the video (with its telemetry) in the right; the
-// transport bar, across both; and the timeline of the files, with a divider above it to make it
-// taller or shorter, where they can be scrubbed through and put in order.
+// video and the files put in order. From the top: a bar with the Done and Cancel buttons; the panes
+// side by side, the map on the left, a narrow strip of buttons in the middle (they apply to both the
+// map and the video) and the video (with its telemetry) on the right; the transport bar, across all
+// of them; and the timeline of the files, with a divider above it to make it taller or shorter,
+// where they can be scrubbed through and put in order.
 struct SyncLayout {
 	LayoutRect header;
-	LayoutRect map;            // The left half of the panes.
-	LayoutRect preview_area;   // The right half of the panes.
+	LayoutRect map;            // The left of the panes.
+	LayoutRect strip;          // Between the map and the video.
+	LayoutRect preview_area;   // The right of the panes.
 	LayoutRect preview;        // The picture itself, as large as fits, centered in preview_area.
 	LayoutRect transport;
 	LayoutRect splitter;       // The divider between the panes and the timeline.
@@ -69,6 +71,7 @@ const float DEFAULT_TIMELINE_HEIGHT = 180.0f;
 WindowLayout compute(float window_width, float window_height, float menu_height, float canvas_aspect, float panel_width, float timeline_height);
 
 const float SYNC_HEADER_HEIGHT = 36.0f;
+const float SYNC_STRIP_WIDTH = 110.0f;        // The strip of buttons between the map and the video.
 const float SYNC_MIN_PANES_HEIGHT = 200.0f;   // The most the timeline may take is all but this much (and the bars).
 
 // Where the parts of the sync view go in a window of this size, under the menu bar. The timeline is

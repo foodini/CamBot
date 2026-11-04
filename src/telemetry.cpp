@@ -14,12 +14,15 @@
 
 #include "env_config.h"
 #include "interaction_manager.h"
+#include "position_smoothing.h"
 #include "widget_base.h"
 
 TelemetrySlice::TelemetrySlice() :
 	m_timestruct(),
 	m_gps_lat(0.0),
 	m_gps_lon(0.0),
+	m_draw_lat(0.0),
+	m_draw_lon(0.0),
 	m_gps_alt(0.0),
 	m_accel(),
 	m_gyro(),
@@ -82,6 +85,8 @@ TelemetrySlice::TelemetrySlice(const Json::Value& root, float gps_altitude_offse
 	lon_dir = root.get("gps_lon_dir", "E").asString()[0];
 	if (lon_dir == 'W')
 		m_gps_lon = -m_gps_lon;
+	m_draw_lat = (double)m_gps_lat;
+	m_draw_lon = (double)m_gps_lon;
 
 	m_gps_alt = root.get("gps_alt", "-1000000.0").asFloat();
 	m_speed_kts = root.get("gps_kts", "0.0").asFloat();
@@ -153,6 +158,7 @@ TelemetryMgr::TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* wi
 	m_alt_applied_start_index(-1),
 	m_alt_applied_end_index(-1),
 	m_alt_version(0),
+	m_position_version(0),
 	m_advance_offset_repeat_bucket(-1),
 	m_rewind_offset_repeat_bucket(-1)
 {
@@ -490,9 +496,33 @@ int32_t TelemetryMgr::index_at(float flight_elapsed) const {
 	return (int32_t)(elapsed_at(flight_elapsed) * TELEMETRY_FREQUENCY);
 }
 
+// Averages the positions for drawing once the whole file is in (the parse thread is done, so nothing
+// else is touching the slices). The values the maps are built from change here, hence the version.
+void TelemetryMgr::smooth_positions() {
+	const size_t count = m_telemetry.size();
+	std::vector<double> latitude(count);
+	std::vector<double> longitude(count);
+	for (size_t i = 0; i < count; i++) {
+		latitude[i] = (double)m_telemetry[i].m_gps_lat;
+		longitude[i] = (double)m_telemetry[i].m_gps_lon;
+	}
+	std::vector<double> smooth_latitude;
+	std::vector<double> smooth_longitude;
+	position_smoothing::smooth(latitude, longitude, position_smoothing::HALF_WINDOW, &smooth_latitude, &smooth_longitude);
+	for (size_t i = 0; i < count; i++) {
+		m_telemetry[i].m_draw_lat = smooth_latitude[i];
+		m_telemetry[i].m_draw_lon = smooth_longitude[i];
+	}
+	if (count > 0)
+		m_default_slice = m_telemetry[0];
+	m_position_version++;
+}
+
 void TelemetryMgr::tick() {
 	if (m_thread_running and m_parse_done) {
 		m_parse_thread.join();
+		// (Before the flag below: parsing_done() is what lets the maps rebuild from the smoothed positions.)
+		smooth_positions();
 		m_thread_running = false;
 	}
 }

@@ -113,9 +113,13 @@ SyncLayout compute_sync(float window_width, float window_height, float menu_heig
 	float y = menu_height;
 	layout.header = LayoutRect(0.0f, y, width, header_height);
 	y += header_height;
-	const float half = floorf(width / 2.0f);
-	layout.map = LayoutRect(0.0f, y, half, panes_height);
-	layout.preview_area = LayoutRect(half, y, width - half, panes_height);
+	// The strip keeps its width and the map and the video share what is left, the video taking the odd pixel.
+	const float strip_width = smaller(SYNC_STRIP_WIDTH, width);
+	const float map_width = floorf((width - strip_width) / 2.0f);
+	layout.map = LayoutRect(0.0f, y, map_width, panes_height);
+	layout.strip = LayoutRect(map_width, y, strip_width, panes_height);
+	const float preview_left = map_width + strip_width;
+	layout.preview_area = LayoutRect(preview_left, y, width - preview_left, panes_height);
 	y += panes_height;
 	layout.transport = LayoutRect(0.0f, y, width, transport_height);
 	y += transport_height;

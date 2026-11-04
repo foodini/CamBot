@@ -8,10 +8,11 @@
 // as they were when the view was opened.
 //
 // This class owns the mode's bookkeeping and draws its own parts with ImGui: the bar with the Done
-// and Cancel buttons, the left pane (the map will be here; for now, where in the footage and the
-// telemetry the frame on screen is), and the timeline of the files. That is the same timeline the
-// editor uses, showing whole files: click or drag in it to move through the footage, and Ctrl+drag a
-// file to put it in another place in the order the footage was recorded. The video itself, the
+// and Cancel buttons, the map on the left (the whole flight's path, with the place and heading of the
+// frame on screen; wheel to zoom, drag to move it, and it follows the frame on screen unless the user
+// has moved it), the strip of buttons between the map and the video, and the timeline of the files.
+// That is the same timeline the editor uses, showing whole files: click or drag in it to move through
+// the footage, and Ctrl+drag a file to put it in another place in the order the footage was recorded. The video itself, the
 // transport bar and the divider above the timeline are the main window's, drawn into the rectangles
 // the layout gives them.
 
@@ -19,6 +20,7 @@
 #include <vector>
 
 #include "edit_model.h"
+#include "map_view.h"
 #include "timeline_view.h"
 #include "window_layout.h"
 
@@ -49,13 +51,36 @@ public:
 
 private:
 	void draw_header(const LayoutRect& rect, Outcome* outcome);
-	void draw_map_pane(const LayoutRect& rect, const EditModel& model, const MediaContainerMgr& media, bool has_telemetry);
+	void draw_map_pane(const LayoutRect& rect, EditModel& model, MediaContainerMgr& media, bool has_telemetry);
+	void draw_map_contents(const LayoutRect& rect, EditModel& model, MediaContainerMgr& media, bool has_telemetry);
+	// The strip between the map and the video: the buttons that apply to both.
+	void draw_strip(const LayoutRect& rect, EditModel& model, const MediaContainerMgr& media);
+	// Adds the samples the telemetry has read since the last time to the trace the map draws.
+	void update_trace();
 	// Puts file `from` at position `to` in the order they were recorded; the picture on screen stays.
 	void reorder_files(int from, int to, EditModel* model, MediaContainerMgr* media);
 
 	bool    m_active;
 
 	TimelineView m_timeline;
+
+	// The map: the path of the whole flight (every sample of the telemetry file, not only what the edit
+	// uses), and what part of the world the pane shows.
+	MapTrace    m_trace;
+	MapViewport m_map;
+	bool        m_follow;         // The view keeps the frame on screen in sight; dragging the map or fitting it turns it off, Center on.
+	double      m_last_sample;    // Where the frame on screen was in the telemetry on the last frame, to tell when it moves.
+	float       m_ahead_x;        // Which way the flight has been heading lately, as a unit vector shrunk by turning
+	float       m_ahead_y;        // (a steady course is length 1, a turn back on itself cancels out to 0); the map gives that side room.
+	uint32_t    m_trace_position_version;   // TelemetryMgr's versions the trace was built from; it is built again when they change.
+	uint32_t    m_trace_climb_version;
+	bool        m_fit_pending;    // Show the whole path, until the user moves the map or the telemetry is all read.
+	bool        m_map_pressed;    // The left button went down on the map and is still down.
+	bool        m_map_dragging;   // ... and has moved far enough that it is moving the map, not clicking on it.
+	float       m_press_x;
+	float       m_press_y;
+	float       m_drag_x;         // Where the mouse was on the last frame of a drag.
+	float       m_drag_y;
 
 	// How things were when the view was opened.
 	int64_t                 m_entry_playhead;      // On the edit timeline.

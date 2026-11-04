@@ -114,9 +114,9 @@ private:
 	void                  set_uniforms();
 	void                  _set_uniforms(Shader& shader);
 
-	glm::vec2             latlon_to_coords(float lat, float lon);
-	float                 m_center_lat;
-	float                 m_center_lon;
+	glm::vec2             latlon_to_coords(double lat, double lon);
+	double                m_center_lat;
+	double                m_center_lon;
 
 	// The telemetry index range last used to build m_course_lines (see EnvConfig::
 	// telemetry_window_start_index()/_end_index()) -- -1 forces an initial build. Rebuilt
@@ -127,6 +127,8 @@ private:
 	// TelemetryMgr::climb_version() the course colors were last built from -- the course bakes
 	// each point's climb rate into its vertices, so it rebuilds when the smoothing changes.
 	uint32_t              m_climb_version = 0;
+	// Likewise TelemetryMgr::position_version(), for the smoothed positions the course is drawn through.
+	uint32_t              m_position_version = 0;
 	void                  rebuild_course_for_window(int32_t start_index, int32_t end_index);
 
 	Shader                m_shader_course;

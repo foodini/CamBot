@@ -70,6 +70,12 @@ public:
 	int                  m_msec;
 	float                m_gps_lat;
 	float                m_gps_lon;
+	// Where to draw the position on a map: the GPS position averaged with its neighbors (see
+	// position_smoothing.h), in degrees, to take out the logger's rounding. Equal to m_gps_lat and m_gps_lon
+	// until TelemetryMgr has read the whole file and smoothed them (see position_version()). Only for
+	// drawing; anything that measures should use m_gps_lat and m_gps_lon.
+	double               m_draw_lat;
+	double               m_draw_lon;
 	float                m_gps_alt;
 	float                m_temperature[3]; // Left, Center, Right
 	// Altitude shown to the user: m_alt_raw plus the altitude-reference offset (see
@@ -140,6 +146,10 @@ public:
 	// Incremented every time the stored climb rates are recomputed, so anything that baked them
 	// into geometry (the map's course colors) knows to rebuild.
 	uint32_t climb_version() const        { return m_climb_version; }
+	// Incremented when the drawing positions (TelemetrySlice::m_draw_lat and m_draw_lon) are smoothed, which
+	// happens once, when the whole file has been read, so anything that baked them into geometry (the
+	// maps' courses) knows to rebuild.
+	uint32_t position_version() const     { return m_position_version; }
 	// Barometer noise (meters rms) measured from this recording's center channel, valid once
 	// parsing_done(). Used to tell the user what a given filter setting will cost in noise.
 	float alt_noise_sigma_m() const       { return m_alt_noise_sigma_m; }
@@ -211,8 +221,10 @@ private:
 	AltitudeOffsetModel          m_alt_model;
 	AltitudeCorrectionInfo       m_alt_info;
 	uint32_t                     m_alt_version;
+	uint32_t                     m_position_version;
 	bool                         mean_raw_center_alt(int32_t index, float* mean) const;
 	void                         recompute_map_zoom();
+	void                         smooth_positions();
 	void                         recompute_climb_rates();
 	void                         estimate_alt_noise();
 

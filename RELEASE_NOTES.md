@@ -91,11 +91,38 @@
   wheel to zoom, a ruler of times), with a divider above it to make it taller, sharing the editor's
   height. **Ctrl+drag a file** to change the order they were recorded in; the picture stays put. Done
   asks first if the new order would change the telemetry under clips you have already cut; Cancel
-  puts the order, the sync and the launch mark back as they were when the view was opened. The left
-  half will hold the map; for now it says where the frame on screen is in its file, in the flight,
-  and on the telemetry's clock. Editing keys, Undo and Export are off while it is open; the Up/Down
-  sync nudge keys still work, and the strip under the video is for looking only. Setting the sync from
-  the map is the next part.
+  puts the order, the sync and the launch mark back as they were when the view was opened. Editing
+  keys, Undo and Export are off while it is open; the Up/Down sync nudge keys still work, and the
+  strip under the video is for looking only. Setting the sync from the map is the next part.
+- **Smoother map tracks.** The telemetry logger records positions in steps of about 0.4 meters, which
+  showed up as a staircase in the track when zoomed in far. Once the whole telemetry file has been
+  read, each position used for *drawing* is averaged with its neighbors (a fifth of a second either
+  side). The video's map course and its glider, and the sync map, are drawn from the smoothed
+  positions (the map is redrawn from them a moment after the file finishes loading); distances,
+  speeds and everything else still use the positions as logged.
+- **Sync / Reorder view: the map.** The left half is now a map of the whole flight (everything in the
+  telemetry file, not only what your edit uses). The path is a bright line with a dark edge, in the
+  same climb colors as the video's map (dark blue in strong sink to red in strong climb, over the same
+  climb color range; the darkest blues are lightened a little so they show on the dark map), and all of
+  it alike, so what is ahead of the frame on screen reads as easily as what is behind it. Where points
+  are far enough apart on screen to show as corners (zoomed in), the line is drawn as a curve through
+  them. A dot marks where the recording starts, a square where it ends, and a diamond where the
+  activity starts. A yellow arrow shows where the frame on screen is and which way it was heading
+  (dimmed if the frame is outside the telemetry's recording). The heading is the direction the path is
+  going at that moment, taken from the sample before to the sample after, rather than the course the
+  GPS reports, which the receiver has already averaged over a second or so and so trails a quick turn
+  by a few tenths of a second (in the sample flight, 0.4 to 0.8 seconds, up to 70 degrees off in a
+  wingover); it uses the logged course only where the path can't say, as when standing still. Turn the wheel to zoom (around the mouse), drag to move the map. The map
+  starts out showing the whole flight. When the arrow moves up near an edge of the map (as the video
+  plays or you scrub) the map follows it, keeping it in the middle half of the pane, and a little
+  toward the back, so there is more room ahead of it (the way it has been heading over the last couple
+  of seconds decides which side; a quick turn back on itself, such as a wingover, cancels out so the map
+  stays put). Dragging the map
+  or pressing **Fit** (the whole flight) stops that until the arrow next moves near an edge; **Center**
+  puts the arrow in the middle and follows right away (the button is lit while following). There is no map picture under the path
+  yet (that is the next piece, along with clicking the path to set the sync). Between the map and the
+  video is a new strip with the **Set Activity Start** button, which makes the frame on screen the start
+  of the activity (the same as Edit > Mark Launch Point), with the time it is set to underneath.
 - **One flight, many video files.** Cameras split a long recording into pieces; a new
   project now takes all of them (select several files in the dialog) and plays them as one
   continuous video. Scrubbing, frame stepping, the timeline and export all run across the
