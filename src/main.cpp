@@ -538,22 +538,63 @@ static void draw_altitude_window(bool* open, bool* resync, bool exporting) {
     ImGui::End();
 }
 
-// The panel down the left of the window. For now just its places: the Media list and the
-// telemetry sync controls arrive in later steps.
-static void draw_left_panel(const LayoutRect& rect) {
+// The panel down the left of the window: the Source Material section, which says what the project
+// is made from (the video files in the order they were recorded, and the telemetry file) and has
+// the buttons to change that. Returns true when the "Load Telemetry..." button was clicked; the
+// caller does the loading, as it means restarting. "Sync / Reorder..." is not wired up yet.
+// `can_change` is false while an export runs, as that needs everything left as it is.
+static bool draw_left_panel(const LayoutRect& rect, const EditModel& edit_model,
+    const ProjectFileManager& project_file_mgr, bool can_change) {
+    bool load_telemetry = false;
     if (rect.w < 1.0f || rect.h < 1.0f)
-        return;
+        return false;
     ImGui::SetNextWindowPos(ImVec2(rect.x, rect.y));
     ImGui::SetNextWindowSize(ImVec2(rect.w, rect.h));
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus;
     if (ImGui::Begin("Panel", nullptr, flags)) {
-        if (ImGui::CollapsingHeader("Media", ImGuiTreeNodeFlags_DefaultOpen))
-            ImGui::TextDisabled("The video files will be listed here.");
-        if (ImGui::CollapsingHeader("Telemetry", ImGuiTreeNodeFlags_DefaultOpen))
-            ImGui::TextDisabled("Sync controls will go here.");
+        if (ImGui::CollapsingHeader("Source Material", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::TextUnformatted("Video (in the order recorded)");
+            const std::vector<int>& order = edit_model.capture().order();
+            for (int i = 0; i < (int)order.size(); i++) {
+                const int media = order[i];
+                char length[32];
+                ffsw::make_time(length, (float)edit_model.ticks_to_seconds(edit_model.media_duration(media)), false);
+                const std::string name = fileio::base_name(edit_model.media_path(media));
+                ImGui::Text("%d.  %s   %s", i + 1, name.c_str(), length);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", edit_model.media_path(media).c_str());
+            }
+
+            ImGui::Spacing();
+            ImGui::TextUnformatted("Telemetry");
+            const std::string& telemetry_path = project_file_mgr.get_telemetry_file_path();
+            if (telemetry_path.empty()) {
+                ImGui::TextDisabled("(none)");
+            } else {
+                ImGui::TextUnformatted(fileio::base_name(telemetry_path).c_str());
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", telemetry_path.c_str());
+            }
+
+            ImGui::Spacing();
+            const ImVec2 full_width(-FLT_MIN, 0.0f);
+            ImGui::BeginDisabled(!can_change);
+            if (ImGui::Button(telemetry_path.empty() ? "Load Telemetry..." : "Change Telemetry...", full_width))
+                load_telemetry = true;
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("Pick a telemetry file for this project.\nCamBot saves the project and restarts to load it.");
+
+            ImGui::BeginDisabled();
+            ImGui::Button("Sync / Reorder...", full_width);
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("Coming soon: line the telemetry up with the video, and put the video files in order.");
+        }
     }
     ImGui::End();
+    return load_telemetry;
 }
 
 // The bar under the preview: where the video is now and the two screenshot buttons (the same as the
@@ -853,7 +894,7 @@ int main()
     all_widgets.push_back(&climb_widget);
     all_widgets.push_back(&graph_widget);
 
-    TelemetryMgr telemetry_mgr(project_file_mgr.get_telemetry_file_path(), &polygonalized_widgets, &edit_model, project_file_mgr.get_window_start_elapsed(), env_config.user_settings().climb_filter, env_config.user_settings().map_zoom);
+    TelemetryMgr telemetry_mgr(project_file_mgr.get_telemetry_file_path(), &polygonalized_widgets, &edit_model, env_config.user_settings().climb_filter, env_config.user_settings().map_zoom);
 
     InteractionMgr* interaction_mgr = InteractionMgr::instance();
     // Pause toggle stays owned here for now rather than by a specific subsystem -- see the
@@ -925,6 +966,7 @@ int main()
     // and starting another that opens the chosen project, as so much of the program is built around the
     // one project it was started with. These say that is what's happening, and which project is next.
     bool switching_project = false;
+    bool load_telemetry_requested = false;   // The Source Material panel's button; handled after the frame is drawn.
     std::string next_project_path;   // Empty: start the usual way (which, after Close, asks).
     bool show_shortcuts_window = false;
     std::string window_title;          // What the title bar currently says (see the render loop).
@@ -977,6 +1019,9 @@ int main()
     while (!switching_project && !exit_confirmed(window, env_config, project_file_mgr))
     {
         telemetry_mgr.tick();
+        // A flight without a telemetry file shows just the video: none of the telemetry widgets are
+        // drawn or listened to, and the menu items about telemetry are greyed out.
+        const bool has_telemetry = telemetry_mgr.has_telemetry();
         env_config.poll_project();
 
         // The title bar shows the project and a * while it has unsaved changes.
@@ -1010,7 +1055,8 @@ int main()
         interaction_mgr->tick(window);
         //TODO(P1) Find a way for these things to get their updates automatically, so I don't have to remember
         //         to do it for each widget that receives input.
-        telemetry_scrub_widget.handle_input();
+        if (has_telemetry)
+            telemetry_scrub_widget.handle_input();
 
         // Notice the instant an export stops -- normal completion at end-of-video and an
         // Escape-cancel (handled above, inside interaction_mgr->tick()) both just drop
@@ -1141,7 +1187,7 @@ int main()
                     ImGui::EndMenu();
                 }
                 if (ImGui::BeginMenu("Edit")) {
-                    if (ImGui::MenuItem("Mark Launch Point")) {
+                    if (ImGui::MenuItem("Mark Launch Point", nullptr, false, has_telemetry)) {
                         env_config.launch_time(env_config.flight_elapsed());
                     }
                     ImGui::Separator();
@@ -1159,19 +1205,19 @@ int main()
                     ImGui::EndMenu();
                 }
                 if (ImGui::BeginMenu("View")) {
-                    if (ImGui::MenuItem("Climb Rate Settings...")) {
+                    if (ImGui::MenuItem("Climb Rate Settings...", nullptr, false, has_telemetry)) {
                         show_climb_settings = true;
                         climb_settings_resync = true;
                     }
-                    if (ImGui::MenuItem("Map Settings...")) {
+                    if (ImGui::MenuItem("Map Settings...", nullptr, false, has_telemetry)) {
                         show_map_settings = true;
                         map_settings_resync = true;
                     }
-                    if (ImGui::MenuItem("Altitude Reference...")) {
+                    if (ImGui::MenuItem("Altitude Reference...", nullptr, false, has_telemetry)) {
                         show_altitude_settings = true;
                         altitude_settings_resync = true;
                     }
-                    if (ImGui::MenuItem("Flight Summary...")) {
+                    if (ImGui::MenuItem("Flight Summary...", nullptr, false, has_telemetry)) {
                         show_summary_settings = true;
                         summary_settings_resync = true;
                     }
@@ -1189,7 +1235,8 @@ int main()
                 ImGui::EndMainMenuBar();
             }
 
-            draw_left_panel(layout.left_panel);
+            if (draw_left_panel(layout.left_panel, edit_model, project_file_mgr, !media_container_mgr.recording()))
+                load_telemetry_requested = true;
             draw_panel_splitter(layout.panel_splitter, layout.widest_panel, &panel_width);
             draw_splitter(layout.splitter, &timeline_height);
             timeline_view.draw(layout.timeline, edit_model, media_container_mgr, timeline_editor);
@@ -1284,7 +1331,7 @@ int main()
             if (in_video_rect) {
                 bool on_a_widget = false;
                 for (WidgetBase* widget : all_widgets) {
-                    if (widget->contains(mouse_x, mouse_y)) {
+                    if (has_telemetry && widget->contains(mouse_x, mouse_y)) {
                         on_a_widget = true;
                         break;
                     }
@@ -1307,11 +1354,13 @@ int main()
                 0, glm::vec2(x, y), glm::vec3(1.0, 1.0, 1.0), 1.0, 2.0,
                 StringAndProperties::V_ALIGN::V_CENTER, StringAndProperties::H_ALIGN::H_CENTER));
         */
-        font_manager.add_string(
-            StringAndProperties(
-                ffsw::format("%6.2fkm", env_config.telemetry_distance_flown()),
-                0, glm::vec2(-.99, .99), glm::vec3(1.0, 1.0, 1.0), 1.0, 2.0,
-                StringAndProperties::V_ALIGN::V_TOP, StringAndProperties::H_ALIGN::H_LEFT));
+        if (has_telemetry) {
+            font_manager.add_string(
+                StringAndProperties(
+                    ffsw::format("%6.2fkm", env_config.telemetry_distance_flown()),
+                    0, glm::vec2(-.99, .99), glm::vec3(1.0, 1.0, 1.0), 1.0, 2.0,
+                    StringAndProperties::V_ALIGN::V_TOP, StringAndProperties::H_ALIGN::H_LEFT));
+        }
 
         frame_time = ffsw::elapsed();
         float duration = frame_time - prev_frame_time;
@@ -1339,12 +1388,14 @@ int main()
         media_container_mgr.render();
         save_frame_as_png(canvas, pending_raw_screenshot_path);
         pending_raw_screenshot_path.clear();
-        date_time_widget.render();
-        telemetry_scrub_widget.render();
-        map_widget.render();
-        climb_widget.render();
-        graph_widget.render();
-        flight_summary_overlay.render();
+        if (has_telemetry) {
+            date_time_widget.render();
+            telemetry_scrub_widget.render();
+            map_widget.render();
+            climb_widget.render();
+            graph_widget.render();
+            flight_summary_overlay.render();
+        }
         font_manager.render();
         save_frame_as_png(canvas, pending_overlay_screenshot_path);
         pending_overlay_screenshot_path.clear();
@@ -1380,6 +1431,28 @@ int main()
         // throttled-away frame, so Escape-to-cancel-export stays instant.
         // -------------------------------------------------------------------------------
         glfwPollEvents();
+
+        // The Source Material panel's telemetry button. The telemetry is read when the program starts,
+        // so adding it means saving the project (with whatever else has changed) and starting over
+        // with it, the way switching projects does.
+        if (load_telemetry_requested) {
+            load_telemetry_requested = false;
+            if (!media_container_mgr.recording()) {
+                const std::string picked = ProjectFileManager::ask_for_telemetry_file();
+                if (!picked.empty() && ffsw::confirm_box("CamBot - Telemetry",
+                        "CamBot will save the project, including any changes not yet saved, and restart to load \"" +
+                        fileio::base_name(picked) + "\". Go ahead?")) {
+                    const std::string old_telemetry = project_file_mgr.get_telemetry_file_path();
+                    project_file_mgr.mutable_data()->telemetry_file = picked;
+                    if (env_config.save_project()) {
+                        next_project_path = project_file_mgr.get_project_file_path();
+                        switching_project = true;
+                    } else {
+                        project_file_mgr.mutable_data()->telemetry_file = old_telemetry;   // Not saved: carry on as before.
+                    }
+                }
+            }
+        }
 
         // Exporting runs flat-out regardless of whatever `paused` happened to be set to when
         // it started -- it isn't "playback", so pause doesn't apply to it. Either way, running

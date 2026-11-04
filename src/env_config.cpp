@@ -92,10 +92,6 @@ float EnvConfig::telemetry_elapsed() const {
 
 bool EnvConfig::launch_time(float launch_time) {
 	edit_model->set_launch_flight_seconds((double)launch_time);
-	// Snapshot telemetry's elapsed time at this launch marker, using whatever offset is in
-	// effect right now -- see TelemetryMgr::window_start_elapsed()'s doc comment for why this
-	// is a one-time snapshot rather than a live formula.
-	TelemetryMgr::instance->set_window_start_elapsed(TelemetryMgr::instance->elapsed_at(launch_time));
 	return true;
 }
 
@@ -107,17 +103,28 @@ const TelemetrySlice& EnvConfig::telemetry_slice() const {
 	return TelemetryMgr::instance->slice_at(flight_elapsed());
 }
 
-// TelemetryMgr::window_start_elapsed() is where the launch marker falls in telemetry. The window
-// itself starts as far before that as the marker is into the video -- i.e. at the video's own
-// first frame -- so it spans exactly what is rendered, whether or not there's footage before
-// launch. (It used to start at the launch marker and run one video-duration from there, which
-// overshot the end of the video by however much footage preceded launch.)
+// The window of telemetry that is shown: what was recorded between the first frame of footage used
+// and the last (see EditModel::used_telemetry_span). It follows the clips and the sync as they change,
+// so trimming the footage trims the map and the graph with it; telemetry from before the first
+// clip, say while the pilot was getting ready, or after the last, is left out. With no clips (which
+// doesn't happen) it is empty at the start of the recording.
 float EnvConfig::telemetry_window_start_elapsed() const {
-	return TelemetryMgr::instance->window_start_elapsed() - (float)edit_model->launch_flight_seconds();
+	double start = 0.0, end = 0.0;
+	if (!edit_model->used_telemetry_span(&start, &end))
+		return 0.0f;
+	return (float)start;
 }
 
-int32_t EnvConfig::telemetry_launch_index() const {
-	int32_t index = TelemetryMgr::instance->index_for_elapsed(TelemetryMgr::instance->window_start_elapsed());
+float EnvConfig::telemetry_window_end_elapsed() const {
+	double start = 0.0, end = 0.0;
+	if (!edit_model->used_telemetry_span(&start, &end))
+		return 0.0f;
+	return (float)end;
+}
+
+// A telemetry sample index for a time in telemetry seconds, held inside the recording.
+static int32_t clamped_telemetry_index(float telemetry_elapsed) {
+	int32_t index = TelemetryMgr::instance->index_for_elapsed(telemetry_elapsed);
 	int32_t last_valid = (int32_t)TelemetryMgr::instance->size() - 1;
 	if (index < 0) {
 		return 0;
@@ -125,42 +132,28 @@ int32_t EnvConfig::telemetry_launch_index() const {
 		return last_valid;
 	}
 	return index;
+}
+
+// Where the launch marker falls in telemetry (it moves with the sync, as it is a moment in the footage).
+int32_t EnvConfig::telemetry_launch_index() const {
+	return clamped_telemetry_index((float)edit_model->telemetry_seconds(edit_model->launch_flight_seconds()));
 }
 
 int32_t EnvConfig::telemetry_window_start_index() const {
-	int32_t index = TelemetryMgr::instance->index_for_elapsed(telemetry_window_start_elapsed());
-	int32_t last_valid = (int32_t)TelemetryMgr::instance->size() - 1;
-	if (index < 0) {
-		return 0;
-	} else if (index > last_valid) {
-		return last_valid;
-	}
-	return index;
+	return clamped_telemetry_index(telemetry_window_start_elapsed());
 }
 
 int32_t EnvConfig::telemetry_window_end_index() const {
-	int32_t index = TelemetryMgr::instance->index_for_elapsed(telemetry_window_start_elapsed() + flight_duration());
-	int32_t last_valid = (int32_t)TelemetryMgr::instance->size() - 1;
-	if (index < 0) {
-		return 0;
-	} else if (index > last_valid) {
-		return last_valid;
-	}
-	return index;
+	return clamped_telemetry_index(telemetry_window_end_elapsed());
 }
 
+// The altitude references are for the start and end of the video, which is the stretch of telemetry shown.
 int32_t EnvConfig::telemetry_video_start_index() const {
-	TelemetryMgr* telemetry = TelemetryMgr::instance;
-	int32_t index = telemetry->index_for_elapsed(telemetry->elapsed_at(0.0f));
-	int32_t last_valid = (int32_t)telemetry->size() - 1;
-	return (std::max)(0, (std::min)(index, last_valid));
+	return telemetry_window_start_index();
 }
 
 int32_t EnvConfig::telemetry_video_end_index() const {
-	TelemetryMgr* telemetry = TelemetryMgr::instance;
-	int32_t index = telemetry->index_for_elapsed(telemetry->elapsed_at(flight_duration()));
-	int32_t last_valid = (int32_t)telemetry->size() - 1;
-	return (std::max)(0, (std::min)(index, last_valid));
+	return telemetry_window_end_index();
 }
 
 void EnvConfig::sync_altitude_correction() {
@@ -185,7 +178,6 @@ void EnvConfig::push_state_to_project() {
 	ProjectData* data = project_file_mgr->mutable_data();
 	AVRational tick = media_mgr->tick_time_base();
 	project_io::fill_from_model(*edit_model, tick.num, tick.den, data);
-	data->window_start_elapsed_s = TelemetryMgr::instance->window_start_elapsed();
 	data->rotation_rad = media_mgr->rotation_angle();
 	data->altitude_refs = m_altitude_refs;
 }

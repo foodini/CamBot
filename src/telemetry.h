@@ -93,7 +93,8 @@ public:
 //TODO(P1): TelemetryMgr[x] should return the x-th TelemetrySlice - or a default one.
 class TelemetryMgr {
 public:
-	TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* widgets, EditModel* model, float initial_window_start_elapsed, const ClimbFilterSettings& initial_climb_settings, const MapZoomSettings& initial_map_zoom_settings);
+	// An empty `path` means the flight has no telemetry: nothing is read, and has_telemetry() is false.
+	TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* widgets, EditModel* model, const ClimbFilterSettings& initial_climb_settings, const MapZoomSettings& initial_map_zoom_settings);
 	~TelemetryMgr();
 
 	//Using a * to widgets instead of & since threads don't seem to like refs.
@@ -119,12 +120,10 @@ public:
 	float offset() const                  { return (float)m_model->offset(); }
 	bool  set_offset(float offset)        { m_model->set_offset((double)offset); return true; }
 
-	// Telemetry's own elapsed seconds at the launch marker -- set once, whenever the marker is
-	// (re)placed (see EnvConfig::launch_time()), and otherwise held fixed, so it never drifts just
-	// because the TSW's sync offset gets tweaked afterward. EnvConfig derives the window of
-	// telemetry that's rendered (starting at the video's first frame) from it.
-	float window_start_elapsed() const           { return m_window_start_elapsed; }
-	bool  set_window_start_elapsed(float elapsed) { m_window_start_elapsed = elapsed; return true; }
+	// Whether there is telemetry to show: a telemetry file was given, and it has not turned out
+	// to be empty. (While it is still being read this is true, and the samples arrive as they are parsed.)
+	// Without it the overlay's telemetry widgets, and everything that needs a sample, are left out.
+	bool has_telemetry() const            { return m_has_file && (!parsing_done() || size() > 0); }
 
 	// How each slice's m_climb_rate is smoothed -- see climb_filter.h. The filters are strictly
 	// causal (a slice's rate depends only on that slice and earlier ones), so what the overlay
@@ -177,7 +176,7 @@ public:
 	const TelemetrySlice& slice_at(float flight_elapsed) const { return (*this)[index_at(flight_elapsed)]; }
 
 	void tick();
-	bool parsing_done() { return m_parse_done && !m_thread_running; }
+	bool parsing_done() const { return m_parse_done && !m_thread_running; }
 	static TelemetryMgr* instance;
 
 private:
@@ -196,10 +195,11 @@ private:
 	std::atomic<uint32_t>       m_committed_size;
 	std::thread                 m_parse_thread;
 	std::atomic<bool>           m_parse_done;
+	std::atomic<bool>           m_stop_requested;   // Set by the destructor to end the parse early.
 	std::atomic<bool>           m_thread_running;
 	TelemetrySlice              m_default_slice;
 	EditModel*                   m_model;   // Owns the sync; must outlive this object.
-	float                        m_window_start_elapsed;
+	bool                         m_has_file;   // A telemetry file was named (it might still turn out to be empty).
 
 	ClimbFilterSettings          m_climb_settings;
 	uint32_t                     m_climb_version;

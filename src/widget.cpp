@@ -192,8 +192,7 @@ void TelemetryScrubWidget::step_fast(int64_t delta) {
 // telemetry on that side.
 float TelemetryScrubWidget::cutoff_parametric(bool is_left, bool* in_bounds) const {
 	const EnvConfig* env_config = EnvConfig::instance;
-	float window_start = env_config->telemetry_window_start_elapsed();
-	float target_elapsed = is_left ? window_start : window_start + env_config->flight_duration();
+	float target_elapsed = is_left ? env_config->telemetry_window_start_elapsed() : env_config->telemetry_window_end_elapsed();
 	float raw = target_elapsed / TelemetryMgr::instance->duration();
 	*in_bounds = (raw >= 0.0f) && (raw <= 1.0f);
 	if (raw < 0.0f) {

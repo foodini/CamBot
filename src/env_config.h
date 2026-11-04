@@ -106,15 +106,13 @@ public:
 	// TelemetryMgr::duration()/elapsed_at(). Used by TelemetryScrubWidget.
 	float                   telemetry_duration()      const;
 	float                   telemetry_elapsed()       const;
-	// Where the video's first frame falls in telemetry, as of the last time the launch marker
-	// was (re)placed by launch_time() above: telemetry's elapsed time at the marker (snapshotted
-	// then -- not a live function of the current sync offset, so an ordinary TSW drag afterward
-	// can't move it), less how far into the video the marker is. This is the start of the window
-	// the map, the altitude graph and the flight summary restrict themselves to, and what
-	// TelemetryScrubWidget's left cutoff marker displays.
+	// The window of telemetry that is shown, in telemetry seconds: from where the first frame of
+	// footage used falls in telemetry to where the last one does. It follows the clips and the sync
+	// as they change (see EditModel::used_telemetry_span), so trimming footage trims the telemetry shown
+	// too. The start is what TelemetryScrubWidget's left cutoff marker displays, the end its right one.
 	float                   telemetry_window_start_elapsed() const;
-	// The telemetry index range backing that window -- one video-duration wide, so it covers
-	// exactly the telemetry that's rendered -- clamped to the telemetry file's actual recorded
+	float                   telemetry_window_end_elapsed() const;
+	// The telemetry index range backing that window, clamped to the telemetry file's actual recorded
 	// bounds. Used by the map, the altitude graph and the flight summary so none of them pull in
 	// telemetry recorded outside that window (TelemetryMgr itself stays video/launch-agnostic, so
 	// this combination lives here rather than there).

@@ -30,6 +30,9 @@ public:
 	// been told what). A name that is already a project is refused, not overwritten.
 	bool create_new_interactive();
 
+	// Asks the user for a telemetry file. Empty if they cancel.
+	static std::string ask_for_telemetry_file();
+
 	// Writes the project file, and clears the unsaved-changes state (and the recovery file, see
 	// below). On failure the user is told, and false comes back.
 	bool save_project();
@@ -51,7 +54,6 @@ public:
 	const std::vector<std::string>& get_video_files() const { return m_data.video_files; }
 	const std::string& get_telemetry_file_path() const { return m_data.telemetry_file; }
 	const std::string& get_project_file_path() const { return m_project_file_path; }
-	float get_window_start_elapsed() const { return m_data.window_start_elapsed_s; }
 	float get_rotation_angle() const { return m_data.rotation_rad; }
 	const AltitudeReferences& get_altitude_references() const { return m_data.altitude_refs; }
 
@@ -67,7 +69,6 @@ public:
 	void adopt_model_state(const ProjectData& normalized);
 
 	// Setters;
-	void set_window_start_elapsed(float t) { m_data.window_start_elapsed_s = t; }
 	void set_rotation_angle(float r) { m_data.rotation_rad = r; }
 	void set_altitude_references(const AltitudeReferences& refs) { m_data.altitude_refs = refs; }
 

@@ -252,6 +252,46 @@ static void test_timeline_to_flight() {
 	CHECK_NEAR(empty.flight_seconds_for_timeline(5), 0.0);
 }
 
+static void test_used_spans() {
+	EditModel model;
+	model.set_media(names4(), durations(100, 40, 70, 100), SPT);    // A B C D start at 0, 100, 140, 210 seconds.
+	double start = -1.0, end = -1.0;
+	// Whole files: the whole flight.
+	CHECK(model.used_flight_span(&start, &end));
+	CHECK_NEAR(start, 0.0);
+	CHECK_NEAR(end, 310.0);
+
+	// A piece of D first, then a piece of A: the span covers both, whichever is first on the timeline.
+	std::vector<Clip> clips;
+	clips.push_back(Clip(3, S(0), S(10)));
+	clips.push_back(Clip(0, S(20), S(30)));
+	CHECK(model.set_clips(clips));
+	CHECK(model.used_flight_span(&start, &end));
+	CHECK_NEAR(start, 20.0);
+	CHECK_NEAR(end, 220.0);
+
+	// Telemetry time is that, less the sync offset (here the telemetry started 5 seconds after the camera).
+	model.set_offset(5.0);
+	CHECK(model.used_telemetry_span(&start, &end));
+	CHECK_NEAR(start, 15.0);
+	CHECK_NEAR(end, 215.0);
+
+	// Trimming the front of the first clip moves the start (the telemetry before it is no longer in the span).
+	std::vector<Clip> trimmed;
+	trimmed.push_back(Clip(0, S(50), S(100)));
+	trimmed.push_back(Clip(1, S(0), S(40)));
+	CHECK(model.set_clips(trimmed));
+	CHECK(model.used_telemetry_span(&start, &end));
+	CHECK_NEAR(start, 45.0);
+	CHECK_NEAR(end, 135.0);
+
+	// Nothing to span with no clips.
+	EditModel empty;
+	CHECK(!empty.used_flight_span(&start, &end));
+	CHECK(!empty.used_telemetry_span(&start, &end));
+	CHECK_NEAR(start, 45.0);    // Left alone.
+}
+
 int main() {
 	test_edit_list();
 	test_capture_sequence();
@@ -261,6 +301,7 @@ int main() {
 	test_reorder_with_drift();
 	test_launch_mark_follows_its_file();
 	test_timeline_to_flight();
+	test_used_spans();
 	printf(fails ? "FAILED\n" : "all ok\n");
 	return fails;
 }

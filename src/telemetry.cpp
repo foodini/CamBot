@@ -140,11 +140,12 @@ float TelemetrySlice::course_rad() const {
 
 TelemetryMgr* TelemetryMgr::instance = nullptr;
 
-TelemetryMgr::TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* widgets, EditModel* model, float initial_window_start_elapsed, const ClimbFilterSettings& initial_climb_settings, const MapZoomSettings& initial_map_zoom_settings) :
+TelemetryMgr::TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* widgets, EditModel* model, const ClimbFilterSettings& initial_climb_settings, const MapZoomSettings& initial_map_zoom_settings) :
 	m_committed_size(0),
 	m_parse_done(false),
+	m_stop_requested(false),
 	m_model(model),
-	m_window_start_elapsed(initial_window_start_elapsed),
+	m_has_file(!path.empty()),
 	m_climb_settings(initial_climb_settings),
 	m_climb_version(0),
 	m_alt_noise_sigma_m(0.12f),
@@ -174,33 +175,44 @@ TelemetryMgr::TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* wi
 	// constexpr (not just const) so the lambdas below can use it without capturing it.
 	static constexpr float SAMPLE_SECONDS = 1.0f / TELEMETRY_FREQUENCY;
 	InteractionMgr::instance()->bind_key(GLFW_KEY_UP,
-		[this]() { m_model->add_to_offset(-SAMPLE_SECONDS); },
+		[this]() { if (has_telemetry()) m_model->add_to_offset(-SAMPLE_SECONDS); },
 		nullptr,
 		[this](float held_seconds) {
-			if (ffsw::held_repeat_due(held_seconds, 0.25f, 0.1f, m_advance_offset_repeat_bucket))
+			if (has_telemetry() && ffsw::held_repeat_due(held_seconds, 0.25f, 0.1f, m_advance_offset_repeat_bucket))
 				m_model->add_to_offset(-SAMPLE_SECONDS);
 		});
 	InteractionMgr::instance()->bind_key(GLFW_KEY_DOWN,
-		[this]() { m_model->add_to_offset(SAMPLE_SECONDS); },
+		[this]() { if (has_telemetry()) m_model->add_to_offset(SAMPLE_SECONDS); },
 		nullptr,
 		[this](float held_seconds) {
-			if (ffsw::held_repeat_due(held_seconds, 0.25f, 0.1f, m_rewind_offset_repeat_bucket))
+			if (has_telemetry() && ffsw::held_repeat_due(held_seconds, 0.25f, 0.1f, m_rewind_offset_repeat_bucket))
 				m_model->add_to_offset(SAMPLE_SECONDS);
 		});
 }
 
 TelemetryMgr::~TelemetryMgr() {
+	// The parse thread uses this object and the widgets, so it has to be over before they go. (A
+	// std::thread that is still joinable when it is destroyed ends the program with abort(), which
+	// is what leaving CamBot in the first seconds after it started used to do.)
+	m_stop_requested = true;
+	if (m_parse_thread.joinable())
+		m_parse_thread.join();
 	TelemetryMgr::instance = nullptr;
 }
 
 void TelemetryMgr::parse_telemetry_file(const std::string& path, std::vector<WidgetBase*>* widgets) {
+	// No telemetry for this flight: nothing to read.
+	if (path.empty()) {
+		m_parse_done = true;
+		return;
+	}
 	// So we can actually measure the effect of parsing changes instead of going by feel.
 	auto parse_start_time = std::chrono::steady_clock::now();
 
 	//TODO(P2): User needs to know if there were issues with the file.
 	//TODO(P2): Check that the file exists (and feedback to the user.)
 	//TODO(P0): This accempts a non-existent file as being empty. Complain if file 1) DNE or 2) empty.
-	std::fstream infile(path);
+	std::ifstream infile(path);
 	std::string line;
 	std::vector<std::string> lines;
 
@@ -236,6 +248,10 @@ void TelemetryMgr::parse_telemetry_file(const std::string& path, std::vector<Wid
 	// Likewise m_map_zoom_settings, which set_map_zoom_settings() won't touch until we're done.
 	MapZoomTracker map_zoom_tracker(m_map_zoom_settings, (float)TELEMETRY_FREQUENCY);
 	for (auto i = lines.begin(); i != lines.end(); index++, i++) {
+		if (m_stop_requested) {
+			m_parse_done = true;   // Being shut down: the rest is not wanted.
+			return;
+		}
 		Json::Value root;
 		std::string errs;
 		reader->parse(i->data(), i->data() + i->size(), &root, &errs);
@@ -270,7 +286,8 @@ void TelemetryMgr::parse_telemetry_file(const std::string& path, std::vector<Wid
 			(*widget)->polygonalize(slice, index, (uint32_t)lines.size());
 		}
 	}
-	m_default_slice = m_telemetry[0];
+	if (!m_telemetry.empty())
+		m_default_slice = m_telemetry[0];
 	estimate_alt_noise();
 
 	double parse_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - parse_start_time).count();

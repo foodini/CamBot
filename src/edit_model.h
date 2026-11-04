@@ -174,6 +174,13 @@ public:
 	// The flight time of a timeline time, which is what looks up telemetry.
 	double                  flight_seconds_for_timeline(int64_t timeline_ticks) const;
 	double                  telemetry_seconds_for_timeline(int64_t timeline_ticks) const;
+	// The stretch of the flight clock the clips use, whatever order they are in: from the earliest
+	// moment any clip starts at to the latest moment any clip ends at (so it spans any footage cut out
+	// of the middle too). False, setting nothing, if there are no clips.
+	bool                    used_flight_span(double* start_seconds, double* end_seconds) const;
+	// The same stretch in telemetry time, through the sync. This is the telemetry worth showing: what
+	// was recorded before the first frame used, or after the last, is not.
+	bool                    used_telemetry_span(double* start_seconds, double* end_seconds) const;
 
 	// How many of the clips in `before` would show different telemetry under `after` (the same
 	// media and clips, after a change to the capture order or the anchors). Used to warn the

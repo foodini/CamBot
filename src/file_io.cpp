@@ -13,6 +13,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <share.h>
 #else
 #include <sys/stat.h>
 #endif
@@ -37,6 +38,11 @@ FILE* open_file(const std::string& path, const char* mode) {
 	std::wstring wide_mode;
 	for (const char* c = mode; *c; c++)
 		wide_mode += (wchar_t)*c;
+	// Reading shares the file with whoever else has it open (a copy of CamBot that is still shutting
+	// down, say, or the telemetry parser): _wfopen_s opens it for exclusive use, which makes a
+	// file that is merely open elsewhere look as if it were missing.
+	if (strchr(mode, 'r') != NULL && strchr(mode, '+') == NULL)
+		return _wfsopen(to_wide(path).c_str(), wide_mode.c_str(), _SH_DENYNO);
 	FILE* file = NULL;
 	if (_wfopen_s(&file, to_wide(path).c_str(), wide_mode.c_str()) != 0)
 		return NULL;

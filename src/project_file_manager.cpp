@@ -45,6 +45,10 @@ bool ProjectFileManager::open_path(const std::string& path) {
 	return open_existing(path);
 }
 
+std::string ProjectFileManager::ask_for_telemetry_file() {
+	return ffsw::file_dialog(TELEMETRY_EXTENSIONS, L"Locate Telemetry File (*.telem, *.log)");
+}
+
 bool ProjectFileManager::create_new_interactive() {
 	// Same dialog as the one that opens a project, but here only a name is wanted: one that is
 	// already a project is not what was asked for, and is not replaced.
@@ -60,29 +64,27 @@ bool ProjectFileManager::create_new_interactive() {
 }
 
 bool ProjectFileManager::create_new() {
-	// A new project: its inputs are the video file(s) and the telemetry log.
+	// A new project: its inputs are the video file(s) and, if there is one, the telemetry log.
 	std::vector<std::string> videos = ffsw::file_dialog_multi(VIDEO_EXTENSIONS,
 		L"Select the Video File(s) of the Flight (select all the pieces if the camera split it)");
 	if (videos.empty())
 		return false;
 	media_order::order_files(&videos);
 
-	if (videos.size() > 1) {
-		// The order is a guess from the file names; have the user check it.
-		std::string list;
-		for (size_t i = 0; i < videos.size() && i < 20; i++)
-			list += std::to_string(i + 1) + ".  " + fileio::base_name(videos[i]) + "\n";
-		if (videos.size() > 20)
-			list += "...and " + std::to_string(videos.size() - 20) + " more\n";
-		if (!ffsw::confirm_box("CamBot - Video Order",
-			"These " + std::to_string(videos.size()) + " files will be played in this order, as one continuous video:\n\n" + list +
-			"\nIs that right? (Press Cancel to stop and start over.)"))
+	// The order is a guess from the file names; Source Material in the left panel shows it, and is
+	// where it gets fixed if the guess was wrong.
+
+	// The telemetry log is optional: a flight can be a video and nothing else (the log can be added later).
+	std::string telemetry;
+	ffsw::Answer have_telemetry = ffsw::yes_no_cancel_box("CamBot - Telemetry",
+		"Is there a telemetry file for this flight?\n\nYes: choose it now.\nNo: make the project with the video alone. (A telemetry file can be added later, from Source Material in the left panel.)\nCancel: stop, and don't make a project.");
+	if (have_telemetry == ffsw::ANSWER_CANCEL)
+		return false;
+	if (have_telemetry == ffsw::ANSWER_YES) {
+		telemetry = ask_for_telemetry_file();
+		if (telemetry.empty())
 			return false;
 	}
-
-	std::string telemetry = ffsw::file_dialog(TELEMETRY_EXTENSIONS, L"Locate Telemetry File (*.telem, *.log)");
-	if (telemetry.empty())
-		return false;
 
 	m_data = ProjectData();
 	m_data.video_files = videos;
@@ -178,7 +180,7 @@ bool ProjectFileManager::resolve_missing_files(bool* changed) {
 			return false;
 		*changed = true;
 	}
-	if (!fileio::file_exists(m_data.telemetry_file)) {
+	if (!m_data.telemetry_file.empty() && !fileio::file_exists(m_data.telemetry_file)) {
 		if (!locate_file(&m_data.telemetry_file, "telemetry", TELEMETRY_EXTENSIONS, project_directory, &last_found_directory))
 			return false;
 		*changed = true;

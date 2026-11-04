@@ -61,8 +61,20 @@
   tied to when each piece was recorded. Cuts in the middle of a file can make a small click in
   the exported sound for now. Dragging clip edges to trim and dragging clips to reorder them are
   still to come.
-- The telemetry windows (map, altitude graph, flight summary) still describe all the footage,
-  not the cut video; that gets revisited when the timeline UI arrives.
+- **The telemetry follows the edit.** The map, the altitude graph, the scrub widget and the
+  flight summary now cover only the stretch of telemetry from the start of the first piece of
+  video you use to the end of the last, found through the sync. Telemetry from before take-off
+  (or after landing) is dropped as soon as the footage around it is trimmed away, and it
+  comes back if the cut is undone. The altitude references (Edit > Altitude Reference) now
+  describe the start and end of that stretch, and the launch marker's readouts follow the sync.
+  (The `window_start_elapsed_s` value in old project files is still read and written but no
+  longer used.)
+- **Telemetry is optional.** A flight can be a video alone: New Project asks whether there is a
+  telemetry file, and without one the map, graph, scrub widget and telemetry menu items are
+  simply not shown. Telemetry can be added later with **Load Telemetry...** in the new
+  **Source Material** section of the left panel (it saves the project and restarts CamBot to
+  read the file). The section also lists the video files in the order they were recorded and
+  the telemetry file; **Sync / Reorder...** is there but does nothing yet.
 
 - **One flight, many video files.** Cameras split a long recording into pieces; a new
   project now takes all of them (select several files in the dialog) and plays them as one

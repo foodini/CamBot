@@ -267,6 +267,35 @@ double EditModel::telemetry_seconds_for_timeline(int64_t timeline_ticks) const {
 	return telemetry_seconds(flight_seconds_for_timeline(timeline_ticks));
 }
 
+bool EditModel::used_flight_span(double* start_seconds, double* end_seconds) const {
+	if (m_edit_list.count() == 0)
+		return false;
+	double earliest = 0.0;
+	double latest = 0.0;
+	for (int i = 0; i < m_edit_list.count(); i++) {
+		const Clip& clip = m_edit_list.clip(i);
+		const double start = flight_seconds(FileTime(clip.media, clip.in_ticks));
+		const double end = flight_seconds(FileTime(clip.media, clip.out_ticks));
+		if (i == 0 || start < earliest)
+			earliest = start;
+		if (i == 0 || end > latest)
+			latest = end;
+	}
+	*start_seconds = earliest;
+	*end_seconds = latest;
+	return true;
+}
+
+bool EditModel::used_telemetry_span(double* start_seconds, double* end_seconds) const {
+	double flight_start = 0.0;
+	double flight_end = 0.0;
+	if (!used_flight_span(&flight_start, &flight_end))
+		return false;
+	*start_seconds = telemetry_seconds(flight_start);
+	*end_seconds = telemetry_seconds(flight_end);
+	return true;
+}
+
 int EditModel::clips_with_changed_telemetry(const EditModel& before, const EditModel& after) {
 	const double TOLERANCE_SECONDS = 0.0005;
 	const EditList& list = before.edit_list();
