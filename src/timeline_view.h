@@ -4,13 +4,15 @@
 // their files, with a ruler above them, a mark where each join is, and the playhead. The mouse
 // moves around it: left-drag (or click) scrubs, the right button drags to scan forward and back,
 // the wheel zooms about the cursor, and the middle button, Shift and the wheel, or a left-drag on
-// the ruler pans. It only
-// moves around, and the buttons along its top cut the clips at the playhead (see timeline_editor.h).
+// the ruler pans. Ctrl and the left button together pick up a clip and drop it in another place in
+// the order. The buttons along its top cut the clips at the playhead (see timeline_editor.h); a
+// timeline with no editor, such as the one in the sync view, has no such buttons.
 //
 // Drawn with ImGui, so it is the window's own, never part of the exported picture. The arithmetic
 // of what's showing is in timeline_scale.h.
 
 #include <stdint.h>
+#include <string>
 
 #include "edit_model.h"
 #include "timeline_scale.h"
@@ -19,17 +21,34 @@
 class MediaContainerMgr;
 class TimelineEditor;
 
+// What the user asked for by dropping a clip somewhere else: clip `from` is to become clip `to`
+// (see timeline_edit::move_clip). Whoever is showing the timeline carries it out, as what it means
+// differs: in the editor it rearranges the clips, in the sync view the order of the files.
+struct ReorderRequest {
+	bool requested;
+	int  from;
+	int  to;
+	ReorderRequest() : requested(false), from(0), to(0) {}
+};
+
 class TimelineView {
 public:
-	TimelineView();
+	// `window_name` is the ImGui window the timeline is drawn in; two timelines that can be on screen
+	// at once need different ones.
+	explicit TimelineView(const char* window_name = "Timeline");
 
 	// Draws the timeline filling `rect` (window pixels) and acts on the mouse in it. Call once a
 	// frame between ImGui::NewFrame() and ImGui::Render(). `model` supplies the clips; `media` is
 	// where the playhead is, and what is moved when the user moves it. The buttons above the
-	// timeline (Split, Trim Left and so on) are carried out by `editor`, on `model` and `media`.
-	void draw(const LayoutRect& rect, EditModel& model, MediaContainerMgr& media, TimelineEditor& editor);
+	// timeline (Split, Trim Left and so on) are carried out by `editor`, on `model` and `media`; with
+	// no editor (null) they are not shown. When the user drops a dragged clip, `reorder` is set.
+	void draw(const LayoutRect& rect, EditModel& model, MediaContainerMgr& media, TimelineEditor* editor, ReorderRequest* reorder);
+
+	// Shows the whole timeline.
+	void fit() { m_scale.fit(); }
 
 private:
+	std::string   m_window_name;
 	TimelineScale m_scale;
 
 	// Left button on the ruler: grabbing the timeline to slide it left and right.
@@ -39,6 +58,11 @@ private:
 	// exact frame.
 	bool    m_scrubbing;
 	int64_t m_scrub_ticks;
+
+	// Ctrl and the left button: dragging a clip (m_drag_clip, -1 when not) to another place in the
+	// order, where it would go if dropped now being m_drag_to.
+	int     m_drag_clip;
+	int     m_drag_to;
 
 	// Right button: scanning at a rate set by how far the mouse is from where it was pressed.
 	bool    m_scanning;

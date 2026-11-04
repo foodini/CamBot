@@ -214,6 +214,99 @@ static void test_history_limit() {
 	CHECK(oldest == 50);    // The first 50 were forgotten.
 }
 
+static void test_move_clip() {
+	EditList list = three_clips();   // A 0..1000 at 0, B 200..700 at 1000, C 2000..2300 at 1500; ends at 1800.
+	CHECK(!timeline_edit::can_move(list, 0, 0));
+	CHECK(!timeline_edit::can_move(list, 3, 0));
+	CHECK(!timeline_edit::can_move(list, 0, 3));
+	CHECK(!timeline_edit::can_move(list, -1, 1));
+	CHECK(!timeline_edit::move_clip(list, 1, 1, 0).ok);
+
+	// A to the end: B C A. The playhead in B (at 1200, 200 into B) is now 200 into the new first clip.
+	timeline_edit::Result result = timeline_edit::move_clip(list, 0, 2, 1200);
+	CHECK(result.ok);
+	CHECK(result.clips.size() == 3);
+	CHECK(result.clips[0] == Clip(1, 200, 700));
+	CHECK(result.clips[1] == Clip(0, 2000, 2300));
+	CHECK(result.clips[2] == Clip(0, 0, 1000));
+	CHECK(result.playhead_ticks == 200);
+	CHECK(total_of(result.clips) == 1800);
+
+	// The playhead in the moved clip goes with it: 300 into A (at 300) when A is last starts at 800 -> 1100.
+	result = timeline_edit::move_clip(list, 0, 2, 300);
+	CHECK(result.clips[2] == Clip(0, 0, 1000));
+	CHECK(result.playhead_ticks == 800 + 300);
+
+	// C to the front: C A B.
+	result = timeline_edit::move_clip(list, 2, 0, 1700);
+	CHECK(result.clips[0] == Clip(0, 2000, 2300));
+	CHECK(result.clips[1] == Clip(0, 0, 1000));
+	CHECK(result.clips[2] == Clip(1, 200, 700));
+	CHECK(result.playhead_ticks == 200);   // 200 into C.
+
+	// B to the front, playhead in A (500): B A C, A now starts at 500.
+	result = timeline_edit::move_clip(list, 1, 0, 500);
+	CHECK(result.clips[0] == Clip(1, 200, 700));
+	CHECK(result.clips[1] == Clip(0, 0, 1000));
+	CHECK(result.clips[2] == Clip(0, 2000, 2300));
+	CHECK(result.playhead_ticks == 500 + 500);
+
+	// Every move gives a valid list holding the same footage, and the playhead's frame comes from the same moment of the same file.
+	for (int from = 0; from < 3; from++) {
+		for (int to = 0; to < 3; to++) {
+			if (from == to)
+				continue;
+			for (int64_t playhead = 0; playhead < 1800; playhead += 100) {
+				timeline_edit::Result moved = timeline_edit::move_clip(list, from, to, playhead);
+				CHECK(moved.ok && moved.clips.size() == 3 && total_of(moved.clips) == 1800);
+				EditList after;
+				after.set(moved.clips);
+				FileTime before_moment = list.source_for(playhead);
+				FileTime after_moment = after.source_for(moved.playhead_ticks);
+				CHECK(before_moment == after_moment);
+			}
+		}
+	}
+}
+
+static void test_drop_index() {
+	EditList list = three_clips();   // Centers: A 500, B 1250, C 1650.
+	// Dragging A: the others are B and C.
+	CHECK(timeline_edit::drop_index(list, 0, 0.0) == 0);
+	CHECK(timeline_edit::drop_index(list, 0, 1249.0) == 0);
+	CHECK(timeline_edit::drop_index(list, 0, 1251.0) == 1);
+	CHECK(timeline_edit::drop_index(list, 0, 1651.0) == 2);
+	CHECK(timeline_edit::drop_index(list, 0, 99999.0) == 2);
+	// Dragging C: the others are A and B.
+	CHECK(timeline_edit::drop_index(list, 2, 499.0) == 0);
+	CHECK(timeline_edit::drop_index(list, 2, 501.0) == 1);
+	CHECK(timeline_edit::drop_index(list, 2, 1251.0) == 2);
+	// Dropping where it already is gives its own index.
+	CHECK(timeline_edit::drop_index(list, 1, 1250.0) == 1);
+	// One clip: nowhere else to go.
+	std::vector<Clip> one;
+	one.push_back(Clip(0, 0, 100));
+	EditList single;
+	single.set(one);
+	CHECK(timeline_edit::drop_index(single, 0, 50.0) == 0);
+	CHECK(!timeline_edit::can_move(single, 0, 0));
+}
+
+static void test_drop_marker() {
+	EditList list = three_clips();   // A 0..1000, B 1000..1500, C 1500..1800.
+	// Dragging A: the others are B (1000..1500) and C (1500..1800).
+	CHECK(timeline_edit::drop_marker_ticks(list, 0, 0) == 0);
+	CHECK(timeline_edit::drop_marker_ticks(list, 0, 1) == 1500);
+	CHECK(timeline_edit::drop_marker_ticks(list, 0, 2) == 1800);
+	// Dragging C: the others are A and B.
+	CHECK(timeline_edit::drop_marker_ticks(list, 2, 0) == 0);
+	CHECK(timeline_edit::drop_marker_ticks(list, 2, 1) == 1000);
+	CHECK(timeline_edit::drop_marker_ticks(list, 2, 2) == 1500);
+	// Dragging B.
+	CHECK(timeline_edit::drop_marker_ticks(list, 1, 1) == 1000);   // After A.
+	CHECK(timeline_edit::drop_marker_ticks(list, 1, 2) == 1800);   // After C.
+}
+
 int main() {
 	test_current_clip();
 	test_split();
@@ -223,6 +316,9 @@ int main() {
 	test_results_make_valid_lists();
 	test_history();
 	test_history_limit();
+	test_move_clip();
+	test_drop_index();
+	test_drop_marker();
 	printf(g_failures ? "FAILED\n" : "all ok\n");
 	return g_failures;
 }

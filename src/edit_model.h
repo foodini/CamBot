@@ -144,6 +144,20 @@ public:
 	bool                    edit_started() const { return m_edit_started; }
 	void                    set_edit_started(bool started) { m_edit_started = started; }
 
+	// ---- The source view ----
+	// While the user is lining up the telemetry and ordering the files, the video shows every file
+	// whole, in capture order, whatever the edit is. begin_source_view() puts that on the edit timeline
+	// and keeps the user's real clips aside; end_source_view() brings them back. The project is saved
+	// with the real clips either way (see clips_to_keep), so a save, an autosave or a quit in the
+	// middle of it can't lose the edit.
+	bool                    in_source_view() const { return m_in_source_view; }
+	void                    begin_source_view();
+	void                    end_source_view();
+	// Changing the capture order shows in the source view: the files are laid out again in the new order.
+	void                    refresh_source_view() { if (m_in_source_view) set_default_clips(); }
+	const std::vector<Clip>& clips_to_keep() const { return m_in_source_view ? m_stashed_clips : m_edit_list.clips(); }
+	bool                    edit_started_to_keep() const { return m_in_source_view ? m_stashed_edit_started : m_edit_started; }
+
 	// ---- Telemetry sync ----
 	// Telemetry time = flight time - offset, where the offset is worked out from the anchors: it
 	// is the offset at the earliest anchor before that, at the latest after it, and in between
@@ -196,6 +210,9 @@ private:
 	CaptureSequence          m_capture;
 	EditList                 m_edit_list;
 	bool                     m_edit_started;
+	bool                     m_in_source_view;
+	std::vector<Clip>        m_stashed_clips;
+	bool                     m_stashed_edit_started;
 	std::vector<SyncAnchor>  m_anchors;
 	FileTime                 m_launch_mark;
 

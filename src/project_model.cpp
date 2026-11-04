@@ -89,8 +89,8 @@ void fill_from_model(const EditModel& model, int tb_num, int tb_den, ProjectData
 	project->time_base_num = tb_num;
 	project->time_base_den = tb_den;
 	project->capture_order = model.capture().order();
-	project->clips = model.edit_list().clips();
-	project->edit_started = model.edit_started();
+	project->clips = model.clips_to_keep();
+	project->edit_started = model.edit_started_to_keep();
 
 	// One anchor at the very start of the flight that says the clocks agree is the same as
 	// having none, so it isn't kept (nudging the sync back to zero shouldn't count as an edit).

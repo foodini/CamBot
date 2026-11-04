@@ -292,6 +292,53 @@ static void test_used_spans() {
 	CHECK_NEAR(start, 45.0);    // Left alone.
 }
 
+static void test_source_view() {
+	EditModel model;
+	model.set_media(names4(), durations(100, 40, 70, 100), SPT);
+	std::vector<Clip> edit;
+	edit.push_back(Clip(2, S(10), S(30)));
+	edit.push_back(Clip(0, S(50), S(60)));
+	CHECK(model.set_clips(edit));
+	model.set_edit_started(true);
+	CHECK(!model.in_source_view());
+
+	model.begin_source_view();
+	CHECK(model.in_source_view());
+	// Every file whole, in capture order.
+	CHECK(model.edit_list().count() == 4);
+	CHECK(model.edit_list().clip(0) == Clip(0, 0, S(100)));
+	CHECK(model.edit_list().clip(3) == Clip(3, 0, S(100)));
+	CHECK_NEAR(model.ticks_to_seconds(model.edit_list().total_ticks()), 310.0);
+	// What is kept for the project is still the edit.
+	CHECK(model.clips_to_keep() == edit);
+	CHECK(model.edit_started_to_keep());
+	// The telemetry span is the whole flight while the source is shown.
+	double start = -1.0, end = -1.0;
+	CHECK(model.used_flight_span(&start, &end));
+	CHECK_NEAR(start, 0.0);
+	CHECK_NEAR(end, 310.0);
+
+	// Beginning again does not lose the stash.
+	model.begin_source_view();
+	CHECK(model.clips_to_keep() == edit);
+
+	// Reordering the files while it is shown lays the source out again.
+	std::vector<int> order;
+	order.push_back(3); order.push_back(2); order.push_back(1); order.push_back(0);
+	CHECK(model.set_capture_order(order));
+	model.refresh_source_view();
+	CHECK(model.edit_list().clip(0).media == 3);
+	CHECK(model.clips_to_keep() == edit);
+
+	model.end_source_view();
+	CHECK(!model.in_source_view());
+	CHECK(model.edit_list().clips() == edit);
+	CHECK(model.edit_started());
+	CHECK(model.clips_to_keep() == edit);
+	model.end_source_view();    // Harmless when not in it.
+	CHECK(model.edit_list().clips() == edit);
+}
+
 int main() {
 	test_edit_list();
 	test_capture_sequence();
@@ -302,6 +349,7 @@ int main() {
 	test_launch_mark_follows_its_file();
 	test_timeline_to_flight();
 	test_used_spans();
+	test_source_view();
 	printf(fails ? "FAILED\n" : "all ok\n");
 	return fails;
 }

@@ -126,4 +126,66 @@ Result remove_clip(const EditList& list, int64_t playhead_ticks, int64_t frame_t
 	return result;
 }
 
+bool can_move(const EditList& list, int from, int to) {
+	return from >= 0 && from < list.count() && to >= 0 && to < list.count() && from != to;
+}
+
+Result move_clip(const EditList& list, int from, int to, int64_t playhead_ticks) {
+	Result result;
+	if (!can_move(list, from, to))
+		return result;
+	Place place;
+	const bool have_place = locate(list, playhead_ticks, &place);
+
+	std::vector<Clip> others;
+	for (int i = 0; i < list.count(); i++) {
+		if (i != from)
+			others.push_back(list.clip(i));
+	}
+	result.clips = others;
+	result.clips.insert(result.clips.begin() + to, list.clip(from));
+
+	if (have_place) {
+		// Where the clip the playhead is in has gone to.
+		int new_index = to;
+		if (place.index != from) {
+			new_index = place.index < from ? place.index : place.index - 1;   // Its place among the others...
+			if (new_index >= to)
+				new_index++;                                                  // ...and then the moved clip goes in before it.
+		}
+		EditList moved;
+		moved.set(result.clips);
+		result.playhead_ticks = moved.start(new_index) + (place.local - list.clip(place.index).in_ticks);
+	}
+	result.ok = true;
+	return result;
+}
+
+int drop_index(const EditList& list, int dragged, double position_ticks) {
+	int index = 0;
+	for (int i = 0; i < list.count(); i++) {
+		if (i == dragged)
+			continue;
+		const double center = (double)list.start(i) + (double)list.clip(i).duration_ticks() / 2.0;
+		if (center < position_ticks)
+			index++;
+	}
+	return index;
+}
+
+int64_t drop_marker_ticks(const EditList& list, int dragged, int to) {
+	if (to <= 0)
+		return 0;
+	// The right-hand edge of the (to-1)th of the other clips.
+	int others_seen = 0;
+	int64_t boundary = 0;
+	for (int i = 0; i < list.count() && others_seen < to; i++) {
+		if (i == dragged)
+			continue;
+		boundary = list.start(i) + list.clip(i).duration_ticks();
+		others_seen++;
+	}
+	return boundary;
+}
+
 }  // namespace timeline_edit

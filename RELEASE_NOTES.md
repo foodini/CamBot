@@ -59,8 +59,7 @@
   pause playback, are not possible during an export, and are saved with the project (the title bar
   shows the `*`). The telemetry stays matched to the footage wherever it ends up, since it is
   tied to when each piece was recorded. Cuts in the middle of a file can make a small click in
-  the exported sound for now. Dragging clip edges to trim and dragging clips to reorder them are
-  still to come.
+  the exported sound for now. Dragging clip edges to trim is not planned.
 - **The telemetry follows the edit.** The map, the altitude graph, the scrub widget and the
   flight summary now cover only the stretch of telemetry from the start of the first piece of
   video you use to the end of the last, found through the sync. Telemetry from before take-off
@@ -74,8 +73,29 @@
   simply not shown. Telemetry can be added later with **Load Telemetry...** in the new
   **Source Material** section of the left panel (it saves the project and restarts CamBot to
   read the file). The section also lists the video files in the order they were recorded and
-  the telemetry file; **Sync / Reorder...** is there but does nothing yet.
-
+  the telemetry file.
+- **Moving clips.** Hold Ctrl and drag a clip on the timeline to put it somewhere else in the order:
+  a copy follows the mouse, the original goes nearly black where it was, and a white mark with a
+  pulsing glow, running the whole height of the timeline, shows where it will land (drop it past the
+  middle of a neighbour to swap with it). The picture on screen stays the
+  same even though its place on the timeline changes. It can be undone like the cuts. A Ctrl+click
+  that doesn't move does nothing. Turning the mouse wheel quickly now zooms the timeline a good deal
+  less than it did (a click or less counts in full, the rest of a fast flick at 40%).
+- **Sync / Reorder view (first part).** **Sync / Reorder...** in Source Material now opens a view
+  that takes over the window, for lining up the telemetry and putting the video files in order. It
+  plays *all* the footage, every file whole in the order recorded, whatever your edit is (the edit
+  is kept aside, saved with the project as usual, and comes back, showing the frame it was on, when
+  you press **Done** or **Cancel**); the telemetry shows in full, not just the part your edit uses.
+  The video is on the right with the usual transport bar under it, and below is a timeline of the
+  files, the same one the editor has (click or drag to move through the footage, right-drag to scan,
+  wheel to zoom, a ruler of times), with a divider above it to make it taller, sharing the editor's
+  height. **Ctrl+drag a file** to change the order they were recorded in; the picture stays put. Done
+  asks first if the new order would change the telemetry under clips you have already cut; Cancel
+  puts the order, the sync and the launch mark back as they were when the view was opened. The left
+  half will hold the map; for now it says where the frame on screen is in its file, in the flight,
+  and on the telemetry's clock. Editing keys, Undo and Export are off while it is open; the Up/Down
+  sync nudge keys still work, and the strip under the video is for looking only. Setting the sync from
+  the map is the next part.
 - **One flight, many video files.** Cameras split a long recording into pieces; a new
   project now takes all of them (select several files in the dialog) and plays them as one
   continuous video. Scrubbing, frame stepping, the timeline and export all run across the

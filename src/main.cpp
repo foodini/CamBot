@@ -32,6 +32,7 @@
 #include "project_data.h"
 #include "telemetry.h"
 #include "timecode.h"
+#include "sync_view.h"
 #include "timeline_editor.h"
 #include "timeline_view.h"
 #include "util.h"
@@ -541,10 +542,10 @@ static void draw_altitude_window(bool* open, bool* resync, bool exporting) {
 // The panel down the left of the window: the Source Material section, which says what the project
 // is made from (the video files in the order they were recorded, and the telemetry file) and has
 // the buttons to change that. Returns true when the "Load Telemetry..." button was clicked; the
-// caller does the loading, as it means restarting. "Sync / Reorder..." is not wired up yet.
-// `can_change` is false while an export runs, as that needs everything left as it is.
+// caller does the loading, as it means restarting. `open_sync_view` is set when the "Sync / Reorder..."
+// button was clicked. `can_change` is false while an export runs, as that needs everything left as it is.
 static bool draw_left_panel(const LayoutRect& rect, const EditModel& edit_model,
-    const ProjectFileManager& project_file_mgr, bool can_change) {
+    const ProjectFileManager& project_file_mgr, bool can_change, bool* open_sync_view) {
     bool load_telemetry = false;
     if (rect.w < 1.0f || rect.h < 1.0f)
         return false;
@@ -586,11 +587,12 @@ static bool draw_left_panel(const LayoutRect& rect, const EditModel& edit_model,
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
                 ImGui::SetTooltip("Pick a telemetry file for this project.\nCamBot saves the project and restarts to load it.");
 
-            ImGui::BeginDisabled();
-            ImGui::Button("Sync / Reorder...", full_width);
+            ImGui::BeginDisabled(!can_change);
+            if (ImGui::Button("Sync / Reorder...", full_width))
+                *open_sync_view = true;
             ImGui::EndDisabled();
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                ImGui::SetTooltip("Coming soon: line the telemetry up with the video, and put the video files in order.");
+                ImGui::SetTooltip("Line the telemetry up with the video, and put the video files in order.\nShows all of the footage; your edit comes back afterward.");
         }
     }
     ImGui::End();
@@ -869,6 +871,7 @@ int main()
     DateTimeWidget date_time_widget(.29f, .18f, 1.0f-.29f-.015f, 1.0f-.18f-.01f);
     TimelineView timeline_view;
     TimelineEditor timeline_editor;
+    SyncView sync_view;
     TelemetryScrubWidget telemetry_scrub_widget(1.96f, 0.04f, -.98f, -.885f);
 
     MapWidget map_widget(.35f, .35f*SCR_WIDTH/(SCR_HEIGHT+UI_HEIGHT), 0.6f, -0.765f);
@@ -907,41 +910,41 @@ int main()
     // layout (see the note on S below), and they stand aside while a text box has the keyboard.
     // Ctrl+S saves the project, and S by itself splits the clip at the playhead.
     interaction_mgr->bind_char('s', GLFW_KEY_S,
-        [window, &env_config, &timeline_editor, &edit_model, &media_container_mgr]() {
+        [window, &env_config, &timeline_editor, &edit_model, &media_container_mgr, &sync_view]() {
             if (ImGui::GetIO().WantTextInput)
                 return;
             if (ctrl_is_down(window))
                 env_config.save_project();
-            else
+            else if (!sync_view.active())
                 timeline_editor.split(&edit_model, &media_container_mgr);
         },
         nullptr,
         nullptr);
     interaction_mgr->bind_char('[', GLFW_KEY_LEFT_BRACKET,
-        [&timeline_editor, &edit_model, &media_container_mgr]() {
-            if (!ImGui::GetIO().WantTextInput)
+        [&timeline_editor, &edit_model, &media_container_mgr, &sync_view]() {
+            if (!ImGui::GetIO().WantTextInput && !sync_view.active())
                 timeline_editor.trim_left(&edit_model, &media_container_mgr);
         },
         nullptr,
         nullptr);
     interaction_mgr->bind_char(']', GLFW_KEY_RIGHT_BRACKET,
-        [&timeline_editor, &edit_model, &media_container_mgr]() {
-            if (!ImGui::GetIO().WantTextInput)
+        [&timeline_editor, &edit_model, &media_container_mgr, &sync_view]() {
+            if (!ImGui::GetIO().WantTextInput && !sync_view.active())
                 timeline_editor.trim_right(&edit_model, &media_container_mgr);
         },
         nullptr,
         nullptr);
     interaction_mgr->bind_key(GLFW_KEY_DELETE,
-        [&timeline_editor, &edit_model, &media_container_mgr]() {
-            if (!ImGui::GetIO().WantTextInput)
+        [&timeline_editor, &edit_model, &media_container_mgr, &sync_view]() {
+            if (!ImGui::GetIO().WantTextInput && !sync_view.active())
                 timeline_editor.remove_clip(&edit_model, &media_container_mgr);
         },
         nullptr,
         nullptr);
     // Ctrl+Z undoes (with Shift, redoes); Ctrl+Y redoes.
     interaction_mgr->bind_char('z', GLFW_KEY_Z,
-        [window, &timeline_editor, &edit_model, &media_container_mgr]() {
-            if (ImGui::GetIO().WantTextInput || !ctrl_is_down(window))
+        [window, &timeline_editor, &edit_model, &media_container_mgr, &sync_view]() {
+            if (ImGui::GetIO().WantTextInput || !ctrl_is_down(window) || sync_view.active())
                 return;
             if (shift_is_down(window))
                 timeline_editor.redo(&edit_model, &media_container_mgr);
@@ -951,8 +954,8 @@ int main()
         nullptr,
         nullptr);
     interaction_mgr->bind_char('y', GLFW_KEY_Y,
-        [window, &timeline_editor, &edit_model, &media_container_mgr]() {
-            if (!ImGui::GetIO().WantTextInput && ctrl_is_down(window))
+        [window, &timeline_editor, &edit_model, &media_container_mgr, &sync_view]() {
+            if (!ImGui::GetIO().WantTextInput && ctrl_is_down(window) && !sync_view.active())
                 timeline_editor.redo(&edit_model, &media_container_mgr);
         },
         nullptr,
@@ -967,6 +970,7 @@ int main()
     // one project it was started with. These say that is what's happening, and which project is next.
     bool switching_project = false;
     bool load_telemetry_requested = false;   // The Source Material panel's button; handled after the frame is drawn.
+    bool open_sync_view_requested = false;   // Likewise.
     std::string next_project_path;   // Empty: start the usual way (which, after Close, asks).
     bool show_shortcuts_window = false;
     std::string window_title;          // What the title bar currently says (see the render loop).
@@ -1013,6 +1017,7 @@ int main()
     float timeline_height = (float)window_state.timeline_height;   // What the user asked for; the layout may hold it to less.
     float panel_width = (float)window_state.panel_width;          // Likewise: the least the left panel should be.
     WindowLayout layout = window_layout::compute((float)start_width, (float)start_height, menu_height, canvas_aspect, panel_width, timeline_height);
+    SyncLayout sync_layout = window_layout::compute_sync((float)start_width, (float)start_height, menu_height, canvas_aspect, timeline_height);
 
     // render loop
     // -----------
@@ -1041,7 +1046,9 @@ int main()
             bool maximized = glfwGetWindowAttrib(window, GLFW_MAXIMIZED) != 0;
             if (!minimized && window_width > 0 && window_height > 0) {
                 layout = window_layout::compute((float)window_width, (float)window_height, menu_height, canvas_aspect, panel_width, timeline_height);
-                timeline_height = layout.timeline.h;   // So a drag past a limit doesn't wind up.
+                sync_layout = window_layout::compute_sync((float)window_width, (float)window_height, menu_height, canvas_aspect, timeline_height);
+                // So a drag past a limit doesn't wind up. (The sync view shares the timeline's height.)
+                timeline_height = sync_view.active() ? sync_layout.timeline.h : layout.timeline.h;
                 // What to remember for next time: the normal size, and whether it was maximized.
                 if (!maximized) {
                     window_state.width = window_width;
@@ -1049,13 +1056,16 @@ int main()
                 }
                 window_state.maximized = maximized;
             }
-            interaction_mgr->set_canvas_rect(layout.preview.x, layout.preview.y, layout.preview.w, layout.preview.h);
+            // Where the picture is shown depends on the view; the mouse is turned into canvas coordinates from it.
+            const LayoutRect& shown = sync_view.active() ? sync_layout.preview : layout.preview;
+            interaction_mgr->set_canvas_rect(shown.x, shown.y, shown.w, shown.h);
         }
 
         interaction_mgr->tick(window);
         //TODO(P1) Find a way for these things to get their updates automatically, so I don't have to remember
         //         to do it for each widget that receives input.
-        if (has_telemetry)
+        // (Not in the sync view, where the map is how the sync is set; a stray click on the strip must not change it.)
+        if (has_telemetry && !sync_view.active())
             telemetry_scrub_widget.handle_input();
 
         // Notice the instant an export stops -- normal completion at end-of-video and an
@@ -1160,7 +1170,7 @@ int main()
                         pending_overlay_screenshot_path = ffsw::file_dialog(L"png", L"Save Frame with Telemetry Overlay As (*.png)", false);
                     }
                     ImGui::Separator();
-                    if (ImGui::MenuItem("Export Video...", nullptr, false, !media_container_mgr.recording())) {
+                    if (ImGui::MenuItem("Export Video...", nullptr, false, !media_container_mgr.recording() && !sync_view.active())) {
                         std::string export_path = ffsw::file_dialog(L"mp4", L"Export Video As (*.mp4)", false);
                         if (!export_path.empty()) {
                             size_t slash = export_path.find_last_of("/\\");
@@ -1235,20 +1245,35 @@ int main()
                 ImGui::EndMainMenuBar();
             }
 
-            if (draw_left_panel(layout.left_panel, edit_model, project_file_mgr, !media_container_mgr.recording()))
-                load_telemetry_requested = true;
-            draw_panel_splitter(layout.panel_splitter, layout.widest_panel, &panel_width);
-            draw_splitter(layout.splitter, &timeline_height);
-            timeline_view.draw(layout.timeline, edit_model, media_container_mgr, timeline_editor);
-            draw_transport_bar(layout.transport, media_container_mgr, &pending_raw_screenshot_path, &pending_overlay_screenshot_path);
+            // The preview rectangle for whichever view is showing; the picture is drawn into it below.
+            LayoutRect shown_preview = layout.preview;
+            if (sync_view.active()) {
+                shown_preview = sync_layout.preview;
+                draw_splitter(sync_layout.splitter, &timeline_height);
+                const SyncView::Outcome outcome = sync_view.draw(sync_layout, edit_model, media_container_mgr, has_telemetry);
+                draw_transport_bar(sync_layout.transport, media_container_mgr, &pending_raw_screenshot_path, &pending_overlay_screenshot_path);
+                // Done may be answered with a question (about telemetry the change moved under the edit).
+                if (outcome == SyncView::CANCEL || (outcome == SyncView::DONE && sync_view.confirm_done(edit_model)))
+                    sync_view.leave(outcome == SyncView::DONE, &edit_model, &media_container_mgr);
+            } else {
+                if (draw_left_panel(layout.left_panel, edit_model, project_file_mgr, !media_container_mgr.recording(), &open_sync_view_requested))
+                    load_telemetry_requested = true;
+                draw_panel_splitter(layout.panel_splitter, layout.widest_panel, &panel_width);
+                draw_splitter(layout.splitter, &timeline_height);
+                ReorderRequest reorder;
+                timeline_view.draw(layout.timeline, edit_model, media_container_mgr, &timeline_editor, &reorder);
+                if (reorder.requested)
+                    timeline_editor.move_clip(&edit_model, &media_container_mgr, reorder.from, reorder.to);
+                draw_transport_bar(layout.transport, media_container_mgr, &pending_raw_screenshot_path, &pending_overlay_screenshot_path);
+            }
             // The preview is the canvas, shown from ImGui's background list rather than in a window of
             // its own, so ImGui doesn't count the mouse as being over a window of its own when it is
             // over the picture (the widgets drawn in the canvas take the clicks there). The canvas
             // texture has row 0 at the bottom, hence the flipped texture coordinates.
-            if (layout.preview.w > 0.0f && layout.preview.h > 0.0f) {
+            if (shown_preview.w > 0.0f && shown_preview.h > 0.0f) {
                 ImGui::GetBackgroundDrawList()->AddImage((ImTextureID)(uintptr_t)canvas.texture(),
-                    ImVec2(layout.preview.x, layout.preview.y),
-                    ImVec2(layout.preview.x + layout.preview.w, layout.preview.y + layout.preview.h),
+                    ImVec2(shown_preview.x, shown_preview.y),
+                    ImVec2(shown_preview.x + shown_preview.w, shown_preview.y + shown_preview.h),
                     ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
             }
 
@@ -1431,6 +1456,13 @@ int main()
         // throttled-away frame, so Escape-to-cancel-export stays instant.
         // -------------------------------------------------------------------------------
         glfwPollEvents();
+
+        // The Source Material panel's Sync / Reorder button: from the next frame the window shows the sync view.
+        if (open_sync_view_requested) {
+            open_sync_view_requested = false;
+            if (!media_container_mgr.recording() && !sync_view.enter(&edit_model, &media_container_mgr))
+                ffsw::message_box("CamBot", "The video could not be set up to show all of the footage.");
+        }
 
         // The Source Material panel's telemetry button. The telemetry is read when the program starts,
         // so adding it means saving the project (with whatever else has changed) and starting over

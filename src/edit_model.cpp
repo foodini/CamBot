@@ -115,7 +115,7 @@ FileTime CaptureSequence::file_time_for(int64_t flight_ticks) const {
 // EditModel
 // ---------------------------------------------------------------------------------------------
 
-EditModel::EditModel() : m_seconds_per_tick(1.0 / 90000.0), m_edit_started(false) {
+EditModel::EditModel() : m_seconds_per_tick(1.0 / 90000.0), m_edit_started(false), m_in_source_view(false), m_stashed_edit_started(false) {
 }
 
 int64_t EditModel::seconds_to_ticks(double seconds) const {
@@ -132,6 +132,8 @@ void EditModel::set_media(const std::vector<std::string>& paths, const std::vect
 	for (int i = 0; i < (int)paths.size(); i++)
 		identity.push_back(i);
 	m_capture.set(identity, m_durations);
+	m_in_source_view = false;
+	m_stashed_clips.clear();
 	set_default_clips();
 	m_edit_started = false;
 	m_anchors.clear();
@@ -164,6 +166,24 @@ void EditModel::set_default_clips() {
 	for (size_t position = 0; position < order.size(); position++)
 		clips.push_back(Clip(order[position], 0, m_durations[order[position]]));
 	m_edit_list.set(clips);
+}
+
+void EditModel::begin_source_view() {
+	if (m_in_source_view)
+		return;
+	m_stashed_clips = m_edit_list.clips();
+	m_stashed_edit_started = m_edit_started;
+	m_in_source_view = true;
+	set_default_clips();
+}
+
+void EditModel::end_source_view() {
+	if (!m_in_source_view)
+		return;
+	m_in_source_view = false;
+	m_edit_list.set(m_stashed_clips);
+	m_edit_started = m_stashed_edit_started;
+	m_stashed_clips.clear();
 }
 
 void EditModel::set_anchors(const std::vector<SyncAnchor>& anchors) {

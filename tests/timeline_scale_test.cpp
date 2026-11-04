@@ -127,6 +127,18 @@ static void test_scan_curve() {
 	CHECK(near(scan_gesture::drag_for_pixels(960.0f), 1.0, 1e-6));
 }
 
+static void test_wheel_notches() {
+	CHECK(timeline_zoom::notches(0.0) == 0.0);
+	CHECK(near(timeline_zoom::notches(1.0), 1.0, 1e-12));
+	CHECK(near(timeline_zoom::notches(0.25), 0.25, 1e-12));
+	CHECK(near(timeline_zoom::notches(-1.0), -1.0, 1e-12));
+	// More than a click at once counts for less than it says, in either direction, and more than a click.
+	CHECK(near(timeline_zoom::notches(5.0), 1.0 + 4.0 * timeline_zoom::FAST_WHEEL_WEIGHT, 1e-12));
+	CHECK(near(timeline_zoom::notches(-5.0), -(1.0 + 4.0 * timeline_zoom::FAST_WHEEL_WEIGHT), 1e-12));
+	CHECK(timeline_zoom::notches(5.0) > timeline_zoom::notches(1.0) && timeline_zoom::notches(5.0) < 5.0);
+	CHECK(timeline_zoom::notches(3.0) < timeline_zoom::notches(4.0));
+}
+
 int main() {
 	test_fit();
 	test_zoom_keeps_the_point_under_the_cursor();
@@ -134,6 +146,7 @@ int main() {
 	test_reveal();
 	test_ruler();
 	test_scan_curve();
+	test_wheel_notches();
 	printf(g_failures ? "FAILED\n" : "all ok\n");
 	return g_failures;
 }

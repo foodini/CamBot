@@ -119,8 +119,58 @@ static void test_tiny_windows() {
 	CHECK(window_layout::compute(1200, 900, 19, 0.0f, 280.0f, 180.0f).preview.w == 0.0f);
 }
 
+static void test_sync_layout() {
+	const float ASPECT = 1920.0f / 1214.0f;
+	const float MENU = 19.0f;
+	const float sizes[][2] = { {1200, 900}, {1920, 1080}, {900, 600}, {1000, 2000}, {3000, 700}, {300, 100}, {0, 0}, {50, 400} };
+	const float timelines[] = { 0.0f, 110.0f, 180.0f, 400.0f, 5000.0f };
+	for (int i = 0; i < 8; i++) {
+	  for (int j = 0; j < 5; j++) {
+		float w = sizes[i][0];
+		float h = sizes[i][1];
+		SyncLayout layout = window_layout::compute_sync(w, h, MENU, ASPECT, timelines[j]);
+		LayoutRect whole(0, 0, w, h);
+		const LayoutRect* parts[] = { &layout.header, &layout.map, &layout.preview_area, &layout.transport, &layout.splitter, &layout.timeline };
+		for (int a = 0; a < 6; a++) {
+			CHECK(parts[a]->w >= 0.0f && parts[a]->h >= 0.0f);
+			if (h >= MENU)
+				CHECK(inside(*parts[a], whole));
+			for (int b = a + 1; b < 6; b++)
+				CHECK(!overlap(*parts[a], *parts[b]));
+		}
+		CHECK(inside(layout.preview, layout.preview_area));
+		if (w < 100 || h < 100)
+			continue;
+		// The panes are the two halves of the width, and the bars run the whole width.
+		CHECK(layout.map.x == 0.0f && layout.map.w + layout.preview_area.w == w);
+		CHECK(layout.preview_area.x == layout.map.w);
+		CHECK(layout.header.w == w && layout.transport.w == w && layout.splitter.w == w && layout.timeline.w == w);
+		// Stacked top to bottom with nothing missing, ending at the bottom of the window.
+		CHECK(layout.header.y == MENU);
+		CHECK(layout.map.y == layout.header.y + layout.header.h);
+		CHECK(layout.transport.y == layout.map.y + layout.map.h);
+		CHECK(layout.splitter.y == layout.transport.y + layout.transport.h);
+		CHECK(layout.timeline.y == layout.splitter.y + layout.splitter.h);
+		CHECK(fabsf(layout.timeline.y + layout.timeline.h - h) < 0.01f);
+		// The timeline's height is the one asked for, held between its limits (when the window has room for them).
+		if (h >= 700) {
+			CHECK(layout.timeline.h >= window_layout::MIN_TIMELINE_HEIGHT);
+			CHECK(layout.timeline.h <= timelines[j] || timelines[j] < window_layout::MIN_TIMELINE_HEIGHT);
+			CHECK(layout.map.h >= window_layout::SYNC_MIN_PANES_HEIGHT - 0.01f);
+		}
+		// The picture keeps its shape and fills one direction.
+		CHECK(fabsf(layout.preview.w - layout.preview.h * ASPECT) <= 1.0f * ASPECT + 0.01f);
+		float room_w = layout.preview_area.w - 2 * window_layout::PREVIEW_MARGIN;
+		float room_h = layout.preview_area.h - 2 * window_layout::PREVIEW_MARGIN;
+		if (room_w > 0 && room_h > 0)
+			CHECK(layout.preview.w >= room_w - 1.5f || layout.preview.h >= room_h - 1.5f);
+	  }
+	}
+}
+
 int main() {
 	test_typical_windows();
+	test_sync_layout();
 	test_known_case();
 	test_panel_width();
 	test_timeline_height_limits();

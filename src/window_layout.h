@@ -30,6 +30,21 @@ struct WindowLayout {
 	float      widest_panel;   // The most the left panel may be asked for; more is held to this.
 };
 
+// The sync view, which takes over the whole window while the telemetry is being lined up with the
+// video and the files put in order. From the top: a bar with the Done and Cancel buttons; two panes
+// side by side, the map in the left half and the video (with its telemetry) in the right; the
+// transport bar, across both; and the timeline of the files, with a divider above it to make it
+// taller or shorter, where they can be scrubbed through and put in order.
+struct SyncLayout {
+	LayoutRect header;
+	LayoutRect map;            // The left half of the panes.
+	LayoutRect preview_area;   // The right half of the panes.
+	LayoutRect preview;        // The picture itself, as large as fits, centered in preview_area.
+	LayoutRect transport;
+	LayoutRect splitter;       // The divider between the panes and the timeline.
+	LayoutRect timeline;
+};
+
 namespace window_layout {
 
 const float LEFT_PANEL_WIDTH = 280.0f;     // The default; the user can drag the panel's edge.
@@ -52,5 +67,13 @@ const float DEFAULT_TIMELINE_HEIGHT = 180.0f;
 // MIN_TIMELINE_HEIGHT and what leaves MIN_UPPER_HEIGHT above it, and the height used is in
 // `timeline.h`. A window too small for anything gets empty rectangles, never negative ones.
 WindowLayout compute(float window_width, float window_height, float menu_height, float canvas_aspect, float panel_width, float timeline_height);
+
+const float SYNC_HEADER_HEIGHT = 36.0f;
+const float SYNC_MIN_PANES_HEIGHT = 200.0f;   // The most the timeline may take is all but this much (and the bars).
+
+// Where the parts of the sync view go in a window of this size, under the menu bar. The timeline is
+// `timeline_height` tall if that is within its limits (see MIN_TIMELINE_HEIGHT), and held to them if
+// not. Like compute(), it never gives a negative size, and the picture keeps its shape to the pixel.
+SyncLayout compute_sync(float window_width, float window_height, float menu_height, float canvas_aspect, float timeline_height);
 
 }  // namespace window_layout

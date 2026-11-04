@@ -87,6 +87,24 @@ bool TimelineEditor::trim_left(EditModel* model, MediaContainerMgr* media)   { r
 bool TimelineEditor::trim_right(EditModel* model, MediaContainerMgr* media)  { return edit(TRIM_RIGHT, model, media); }
 bool TimelineEditor::remove_clip(EditModel* model, MediaContainerMgr* media) { return edit(REMOVE, model, media); }
 
+bool TimelineEditor::move_clip(EditModel* model, MediaContainerMgr* media, int from, int to) {
+	if (media->recording())
+		return false;
+	const timeline_edit::Result result = timeline_edit::move_clip(model->edit_list(), from, to, media->current_ticks());
+	if (!result.ok)
+		return false;
+	EditState before = current_state(*model, *media);
+	EditState after;
+	after.clips = result.clips;
+	after.edit_started = true;
+	after.playhead_ticks = result.playhead_ticks;
+	EnvConfig::instance->pause();
+	if (!apply_state(after, model, media))
+		return false;
+	m_history.record(before);
+	return true;
+}
+
 bool TimelineEditor::undo(EditModel* model, MediaContainerMgr* media) {
 	if (media->recording())
 		return false;

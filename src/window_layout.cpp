@@ -86,4 +86,61 @@ WindowLayout compute(float window_width, float window_height, float menu_height,
 	return layout;
 }
 
+SyncLayout compute_sync(float window_width, float window_height, float menu_height, float canvas_aspect, float timeline_height) {
+	SyncLayout layout;
+	const float width = at_least_zero(window_width);
+	const float below_menu = at_least_zero(window_height - menu_height);
+
+	// The header and the transport bar take what they need, as far as there is room. The timeline
+	// gets what the user asked for within its limits, and the panes the rest.
+	const float header_height = smaller(SYNC_HEADER_HEIGHT, below_menu);
+	float left = below_menu - header_height;
+	const float transport_height = smaller(TRANSPORT_HEIGHT, left);
+	left -= transport_height;
+	float tallest_timeline = left - SPLITTER_HEIGHT - SYNC_MIN_PANES_HEIGHT;
+	float timeline_used = timeline_height;
+	if (timeline_used < MIN_TIMELINE_HEIGHT)
+		timeline_used = MIN_TIMELINE_HEIGHT;
+	if (timeline_used > tallest_timeline)
+		timeline_used = tallest_timeline;
+	timeline_used = at_least_zero(floorf(timeline_used));
+	const float splitter_height = timeline_used > 0.0f ? SPLITTER_HEIGHT : 0.0f;
+	if (timeline_used + splitter_height > left)
+		timeline_used = at_least_zero(left - splitter_height);
+	left -= timeline_used + splitter_height;
+	const float panes_height = at_least_zero(left);
+
+	float y = menu_height;
+	layout.header = LayoutRect(0.0f, y, width, header_height);
+	y += header_height;
+	const float half = floorf(width / 2.0f);
+	layout.map = LayoutRect(0.0f, y, half, panes_height);
+	layout.preview_area = LayoutRect(half, y, width - half, panes_height);
+	y += panes_height;
+	layout.transport = LayoutRect(0.0f, y, width, transport_height);
+	y += transport_height;
+	layout.splitter = LayoutRect(0.0f, y, width, splitter_height);
+	y += splitter_height;
+	layout.timeline = LayoutRect(0.0f, y, width, timeline_used);
+
+	layout.preview = LayoutRect(layout.preview_area.x, layout.preview_area.y, 0.0f, 0.0f);
+	const float available_width = at_least_zero(layout.preview_area.w - 2.0f * PREVIEW_MARGIN);
+	const float available_height = at_least_zero(layout.preview_area.h - 2.0f * PREVIEW_MARGIN);
+	if (available_width <= 0.0f || available_height <= 0.0f || canvas_aspect <= 0.0f)
+		return layout;
+	float picture_width = floorf(available_width);
+	float picture_height = floorf(picture_width / canvas_aspect + 0.5f);
+	if (picture_height > available_height) {
+		picture_height = floorf(available_height);
+		picture_width = floorf(picture_height * canvas_aspect + 0.5f);
+	}
+	if (picture_width > available_width)
+		picture_width = floorf(available_width);
+	layout.preview = LayoutRect(
+		layout.preview_area.x + floorf((layout.preview_area.w - picture_width) / 2.0f),
+		layout.preview_area.y + floorf((layout.preview_area.h - picture_height) / 2.0f),
+		picture_width, picture_height);
+	return layout;
+}
+
 }  // namespace window_layout

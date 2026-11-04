@@ -91,6 +91,16 @@ bool TimelineScale::reveal(double ticks) {
 	return true;
 }
 
+namespace timeline_zoom {
+
+double notches(double wheel) {
+	const double size = fabs(wheel);
+	const double counted = size <= 1.0 ? size : 1.0 + FAST_WHEEL_WEIGHT * (size - 1.0);
+	return wheel < 0.0 ? -counted : counted;
+}
+
+}  // namespace timeline_zoom
+
 namespace timeline_ruler {
 
 double step_seconds(double seconds_per_pixel, double min_pixels) {

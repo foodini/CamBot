@@ -49,6 +49,22 @@ Result trim_right(const EditList& list, int64_t playhead_ticks, int64_t frame_ti
 bool   can_remove(const EditList& list, int64_t playhead_ticks, int64_t frame_ticks);
 Result remove_clip(const EditList& list, int64_t playhead_ticks, int64_t frame_ticks);
 
+// Moves clip `from` so that it is clip `to` afterwards (both 0 .. count-1; `to` counts the list as it
+// will be, with the moved clip in it). The playhead stays on the same frame of the same piece of
+// footage, which has moved with its clip, so the picture doesn't change. Not possible when `to` is
+// where the clip already is. This is also what reordering the files in the sync view is: there
+// each clip is a whole file.
+bool   can_move(const EditList& list, int from, int to);
+Result move_clip(const EditList& list, int from, int to, int64_t playhead_ticks);
+
+// While a clip is being dragged: where it would go if dropped with the mouse at `position_ticks`
+// (a timeline time). The answer is a `to` for move_clip(): the number of the other clips that are
+// centered before the mouse.
+int     drop_index(const EditList& list, int dragged, double position_ticks);
+// Where to draw the mark that shows the drop: the timeline time of the right-hand edge of the
+// clip the dragged one would go after (not counting the dragged clip itself), or 0 if it would go first.
+int64_t drop_marker_ticks(const EditList& list, int dragged, int to);
+
 // Which clip the playhead is in, or -1 when there are none. The same answer the timeline uses to
 // show the "current" clip.
 int    current_clip(const EditList& list, int64_t playhead_ticks);

@@ -30,6 +30,9 @@ public:
 	bool trim_left(EditModel* model, MediaContainerMgr* media);
 	bool trim_right(EditModel* model, MediaContainerMgr* media);
 	bool remove_clip(EditModel* model, MediaContainerMgr* media);
+	// Moves clip `from` so that it is clip `to` afterwards (see timeline_edit::move_clip); the picture
+	// on screen stays the same. Undoable like the cuts.
+	bool move_clip(EditModel* model, MediaContainerMgr* media, int from, int to);
 	bool undo(EditModel* model, MediaContainerMgr* media);
 	bool redo(EditModel* model, MediaContainerMgr* media);
 

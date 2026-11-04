@@ -53,6 +53,17 @@ private:
 	bool    m_fitted;
 };
 
+namespace timeline_zoom {
+
+// How many "notches" of zoom a wheel movement of `wheel` is worth (the wheel counts a click as 1,
+// though some mice and drivers report several at once when it is turned quickly). A click or less
+// counts in full; the part of a movement past one click counts for FAST_WHEEL_WEIGHT of a notch
+// each, so a quick flick zooms further than a click but not wildly further. Signed, like `wheel`.
+const double FAST_WHEEL_WEIGHT = 0.4;
+double notches(double wheel);
+
+}  // namespace timeline_zoom
+
 namespace timeline_ruler {
 
 // The spacing of the labelled marks, in seconds, for a view in which a pixel is `seconds_per_pixel`:

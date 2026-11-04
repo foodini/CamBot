@@ -180,6 +180,7 @@
     <ClCompile Include="edit_history.cpp" />
     <ClCompile Include="scan_gesture.cpp" />
     <ClCompile Include="timeline_edit.cpp" />
+    <ClCompile Include="sync_view.cpp" />
     <ClCompile Include="timeline_editor.cpp" />
     <ClCompile Include="timeline_scale.cpp" />
     <ClCompile Include="timeline_view.cpp" />
@@ -250,6 +251,7 @@
     <ClInclude Include="recent_projects.h" />
     <ClInclude Include="scan_gesture.h" />
     <ClInclude Include="timeline_edit.h" />
+    <ClInclude Include="sync_view.h" />
     <ClInclude Include="timeline_editor.h" />
     <ClInclude Include="timeline_scale.h" />
     <ClInclude Include="timeline_view.h" />
