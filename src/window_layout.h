@@ -1,9 +1,14 @@
 #pragma once
 
-// Where the parts of the main window go: a panel down the left, a transport bar along the bottom
-// of the rest, and the preview picture in whatever space is left over. Plain arithmetic with no
-// OpenGL or ImGui in it, so it can be tested. All numbers are window coordinates in pixels, with
-// (0, 0) at the top left, the way ImGui and the mouse count them.
+// Where the parts of the main window go. Under the menu bar the window has two bands: above, a
+// panel down the left and, beside it, the preview picture with the transport bar under it; below,
+// the timeline editor across the whole width, with a divider between the bands that the user can
+// drag to make the timeline taller or shorter. The preview column is only as wide as the picture
+// needs (with a small border), so whatever the picture can't use goes to the left panel; a second
+// divider, between the panel and the preview column, can be dragged to make the panel wider and
+// the picture smaller. Plain arithmetic with no OpenGL or ImGui in it, so
+// it can be tested. All numbers are window coordinates in pixels, with (0, 0) at the top left, the
+// way ImGui and the mouse count them.
 
 struct LayoutRect {
 	float x;
@@ -16,20 +21,36 @@ struct LayoutRect {
 
 struct WindowLayout {
 	LayoutRect left_panel;
+	LayoutRect panel_splitter; // The divider between the left panel and the preview column.
 	LayoutRect transport;      // Under the preview.
 	LayoutRect preview_area;   // All the room the preview could use.
 	LayoutRect preview;        // The picture itself, as large as fits, centered in preview_area.
+	LayoutRect splitter;       // The divider between the upper band and the timeline.
+	LayoutRect timeline;       // The timeline editor, across the bottom.
+	float      widest_panel;   // The most the left panel may be asked for; more is held to this.
 };
 
 namespace window_layout {
 
-const float LEFT_PANEL_WIDTH = 280.0f;
+const float LEFT_PANEL_WIDTH = 280.0f;     // The default; the user can drag the panel's edge.
+const float MIN_PANEL_WIDTH = 120.0f;
+const float PANEL_SPLITTER_WIDTH = 6.0f;
+const float MIN_PREVIEW_COLUMN_WIDTH = 620.0f;   // The transport bar's buttons and times need this much.
 const float TRANSPORT_HEIGHT = 72.0f;
 const float PREVIEW_MARGIN = 8.0f;
+const float SPLITTER_HEIGHT = 6.0f;
+const float MIN_TIMELINE_HEIGHT = 110.0f;
+const float MIN_UPPER_HEIGHT = 280.0f;     // The most the timeline may take is all but this much of the window.
+const float DEFAULT_TIMELINE_HEIGHT = 180.0f;
 
 // `menu_height` is the menu bar across the top, which the rest sits under. `canvas_aspect` is the
 // picture's width divided by its height; the preview keeps it exactly (to the pixel) however the
-// window is shaped. A window too small for anything gets empty rectangles, never negative ones.
-WindowLayout compute(float window_width, float window_height, float menu_height, float canvas_aspect);
+// window is shaped. `panel_width` is the least the user wants the left panel to be; it is wider
+// when the picture, at the biggest size the height allows, leaves room, and never so wide that
+// the preview column is narrower than MIN_PREVIEW_COLUMN_WIDTH (the limit is in `widest_panel`).
+// `timeline_height` is what the user asked for; it is kept between
+// MIN_TIMELINE_HEIGHT and what leaves MIN_UPPER_HEIGHT above it, and the height used is in
+// `timeline.h`. A window too small for anything gets empty rectangles, never negative ones.
+WindowLayout compute(float window_width, float window_height, float menu_height, float canvas_aspect, float panel_width, float timeline_height);
 
 }  // namespace window_layout

@@ -16,7 +16,7 @@ private:
 };
 
 
-// Shared base for the two scrub-bar widgets (MediaScrubWidget and TelemetryScrubWidget): same
+// Shared base for scrub-bar widgets (just TelemetryScrubWidget now; the media position is scrubbed on the timeline): same
 // left-drag-to-absolute-position / right-drag-to-scan mouse gestures, same rate curve, just
 // applied to a different underlying quantity. A subclass says what its bar's fill position
 // means (current_parametric()), what its native 1x rate is (native_rate()), and how to actually
@@ -32,7 +32,7 @@ public:
 protected:
 	// [0..1] position to render the bar's fill at.
 	virtual float current_parametric() const = 0;
-	// "Units" per second at native 1x speed -- video frame rate for MediaScrubWidget,
+	// "Units" per second at native 1x speed -- video frame rate for a media bar,
 	// TELEMETRY_FREQUENCY for TelemetryScrubWidget. Scales the scan-rate curve.
 	virtual float native_rate() const = 0;
 	// Left-click/drag: jump straight to an absolute parametric position.
@@ -40,7 +40,7 @@ protected:
 	// Right-click scan: precise, one-unit-at-a-time step (the only path this gesture reaches today
 	// -- see the per-tick cap in handle_input()).
 	virtual void  step(int64_t delta) = 0;
-	// Same safety-net slot MediaScrubWidget already had for a larger, approximate step; currently
+	// Same safety-net slot the media bar had for a larger, approximate step; currently
 	// unreachable from this gesture for either subclass, kept for parity / future use.
 	virtual void  step_fast(int64_t delta) = 0;
 
@@ -61,25 +61,8 @@ private:
 	float m_last_scan_tick_time = 0.0f;
 };
 
-class MediaScrubWidget : public ScrubWidget {
-public:
-	//TODO(P1): make width, height, pos all part of vec2s.
-	MediaScrubWidget(float width, float height, float x_pos, float y_pos);
-	virtual ~MediaScrubWidget();
-
-	virtual void render();
-
-protected:
-	float current_parametric() const override;
-	float native_rate() const override;
-	void  seek_to_parametric(float parametric) override;
-	void  step(int64_t delta) override;
-	void  step_fast(int64_t delta) override;
-private:
-};
-
 // Scrubs the fixed time offset between the video's clock and the telemetry device's clock
-// (they aren't hardware-synced -- see TelemetryMgr::offset()). Behaves like MediaScrubWidget --
+// (they aren't hardware-synced -- see TelemetryMgr::offset()). Behaves like the media bar did --
 // its bar's fill position is telemetry's own [0..1] position across its own recorded duration
 // -- but moving it never touches the video position, only the offset: dragging to parametric p
 // means "telemetry's elapsed time should be p*duration right now," which is solved for a new
@@ -101,7 +84,7 @@ protected:
 private:
 	// Clamped [0,1] position of a cutoff marker, read from EnvConfig's launch-marker-derived
 	// telemetry_window_start_elapsed() (is_left selects which one: the left cutoff is that
-	// value itself, the right is that value plus media_in_duration()). Not interactive -- the
+	// value itself, the right is that value plus flight_duration()). Not interactive -- the
 	// markers are drawn purely for feedback; there's no drag path that reaches this. *in_bounds
 	// is set to false when the true, unclamped position fell outside [0,1] -- i.e. we've run
 	// out of recorded telemetry on that side -- so the caller can draw the clamped marker but

@@ -32,6 +32,7 @@
 #include "project_data.h"
 #include "telemetry.h"
 #include "timecode.h"
+#include "timeline_view.h"
 #include "util.h"
 #include "widget.h"
 #include "window_layout.h"
@@ -598,6 +599,62 @@ static void draw_transport_bar(const LayoutRect& rect, MediaContainerMgr& media,
     ImGui::End();
 }
 
+// The divider between the upper part of the window and the timeline: drag it to make the timeline
+// taller or shorter. It follows the mouse, so the timeline's top edge is wherever the pointer is.
+static void draw_splitter(const LayoutRect& rect, float* timeline_height) {
+    if (rect.w < 1.0f || rect.h < 1.0f)
+        return;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::SetNextWindowPos(ImVec2(rect.x, rect.y));
+    ImGui::SetNextWindowSize(ImVec2(rect.w, rect.h));
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoBackground;
+    if (ImGui::Begin("Splitter", nullptr, flags)) {
+        ImGui::InvisibleButton("##splitter", ImVec2(rect.w, rect.h));
+        const bool hovered = ImGui::IsItemHovered();
+        const bool active = ImGui::IsItemActive();
+        if (hovered || active)
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+        if (active) {
+            ImGuiIO& io = ImGui::GetIO();
+            *timeline_height = io.DisplaySize.y - io.MousePos.y - rect.h / 2.0f;
+        }
+        ImU32 color = active ? IM_COL32(120, 160, 220, 255) : (hovered ? IM_COL32(90, 100, 120, 255) : IM_COL32(45, 45, 52, 255));
+        ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(rect.x, rect.y), ImVec2(rect.x + rect.w, rect.y + rect.h), color);
+    }
+    ImGui::End();
+    ImGui::PopStyleVar();
+}
+
+// The divider between the left panel and the preview: drag it to make the panel wider (and the
+// picture smaller). It follows the mouse; the layout stops it where the picture is as big as the
+// window allows, as the panel already has all the room the picture doesn't use.
+static void draw_panel_splitter(const LayoutRect& rect, float widest_panel, float* panel_width) {
+    if (rect.w < 1.0f || rect.h < 1.0f)
+        return;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::SetNextWindowPos(ImVec2(rect.x, rect.y));
+    ImGui::SetNextWindowSize(ImVec2(rect.w, rect.h));
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoBackground;
+    if (ImGui::Begin("PanelSplitter", nullptr, flags)) {
+        ImGui::InvisibleButton("##panel_splitter", ImVec2(rect.w, rect.h));
+        const bool hovered = ImGui::IsItemHovered();
+        const bool active = ImGui::IsItemActive();
+        if (hovered || active)
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+        if (active) {
+            // Held to the most the layout allows, so a drag past it doesn't wind up.
+            float wanted = ImGui::GetIO().MousePos.x - rect.w / 2.0f;
+            *panel_width = wanted < widest_panel ? wanted : widest_panel;
+        }
+        ImU32 color = active ? IM_COL32(120, 160, 220, 255) : (hovered ? IM_COL32(90, 100, 120, 255) : IM_COL32(45, 45, 52, 255));
+        ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(rect.x, rect.y), ImVec2(rect.x + rect.w, rect.y + rect.h), color);
+    }
+    ImGui::End();
+    ImGui::PopStyleVar();
+}
+
 int main()
 {
     // glfw: initialize and configure
@@ -728,7 +785,7 @@ int main()
     EnvConfig env_config(&media_container_mgr, &font_manager, &project_file_mgr, &edit_model, (float)SCR_WIDTH, (float)SCR_HEIGHT + (float)UI_HEIGHT, (float)UI_HEIGHT);
 
     DateTimeWidget date_time_widget(.29f, .18f, 1.0f-.29f-.015f, 1.0f-.18f-.01f);
-    MediaScrubWidget media_scrub_widget(1.96f, 0.04f, -.98f, -.835f);
+    TimelineView timeline_view;
     TelemetryScrubWidget telemetry_scrub_widget(1.96f, 0.04f, -.98f, -.885f);
 
     MapWidget map_widget(.35f, .35f*SCR_WIDTH/(SCR_HEIGHT+UI_HEIGHT), 0.6f, -0.765f);
@@ -749,7 +806,6 @@ int main()
     // a click there falls through and does pause/unpause the video.
     std::vector<WidgetBase*> all_widgets;
     all_widgets.push_back(&date_time_widget);
-    all_widgets.push_back(&media_scrub_widget);
     all_widgets.push_back(&telemetry_scrub_widget);
     all_widgets.push_back(&map_widget);
     all_widgets.push_back(&climb_widget);
@@ -822,7 +878,9 @@ int main()
     // window_layout.h). The preview shows the whole canvas, scaled to fit with its shape kept.
     const float canvas_aspect = (float)SCR_WIDTH / (float)(SCR_HEIGHT + UI_HEIGHT);
     float menu_height = (float)MENU_HEIGHT;
-    WindowLayout layout = window_layout::compute((float)start_width, (float)start_height, menu_height, canvas_aspect);
+    float timeline_height = (float)window_state.timeline_height;   // What the user asked for; the layout may hold it to less.
+    float panel_width = (float)window_state.panel_width;          // Likewise: the least the left panel should be.
+    WindowLayout layout = window_layout::compute((float)start_width, (float)start_height, menu_height, canvas_aspect, panel_width, timeline_height);
 
     // render loop
     // -----------
@@ -847,7 +905,8 @@ int main()
             bool minimized = glfwGetWindowAttrib(window, GLFW_ICONIFIED) != 0;
             bool maximized = glfwGetWindowAttrib(window, GLFW_MAXIMIZED) != 0;
             if (!minimized && window_width > 0 && window_height > 0) {
-                layout = window_layout::compute((float)window_width, (float)window_height, menu_height, canvas_aspect);
+                layout = window_layout::compute((float)window_width, (float)window_height, menu_height, canvas_aspect, panel_width, timeline_height);
+                timeline_height = layout.timeline.h;   // So a drag past a limit doesn't wind up.
                 // What to remember for next time: the normal size, and whether it was maximized.
                 if (!maximized) {
                     window_state.width = window_width;
@@ -861,7 +920,6 @@ int main()
         interaction_mgr->tick(window);
         //TODO(P1) Find a way for these things to get their updates automatically, so I don't have to remember
         //         to do it for each widget that receives input.
-        media_scrub_widget.handle_input();
         telemetry_scrub_widget.handle_input();
 
         // Notice the instant an export stops -- normal completion at end-of-video and an
@@ -994,6 +1052,9 @@ int main()
             }
 
             draw_left_panel(layout.left_panel);
+            draw_panel_splitter(layout.panel_splitter, layout.widest_panel, &panel_width);
+            draw_splitter(layout.splitter, &timeline_height);
+            timeline_view.draw(layout.timeline, edit_model, media_container_mgr);
             draw_transport_bar(layout.transport, media_container_mgr, &pending_raw_screenshot_path, &pending_overlay_screenshot_path);
             // The preview is the canvas, shown from ImGui's background list rather than in a window of
             // its own, so ImGui doesn't count the mouse as being over a window of its own when it is
@@ -1141,7 +1202,6 @@ int main()
         save_frame_as_png(canvas, pending_raw_screenshot_path);
         pending_raw_screenshot_path.clear();
         date_time_widget.render();
-        media_scrub_widget.render();
         telemetry_scrub_widget.render();
         map_widget.render();
         climb_widget.render();
@@ -1195,6 +1255,8 @@ int main()
         }
     }
 
+    window_state.timeline_height = (int)timeline_height;
+    window_state.panel_width = (int)panel_width;
     env_config.window_settings(window_state);
     env_config.save_user_settings();
     env_config.discard_recovery();   // Leaving normally: saved, or the user chose not to.

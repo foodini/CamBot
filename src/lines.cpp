@@ -12,6 +12,7 @@ Lines::Lines(float line_width, float dot_frequency) :
 	m_dot_frequency(dot_frequency),
 	m_remaining_dist(0.0),
 	m_vert_count(0),
+	m_uploaded_vert_count(0),
 	m_dot_vector()
 {
 	glGenVertexArrays(1, &m_VAO);
@@ -39,7 +40,14 @@ void Lines::push_vert(glm::vec2& xy, std::vector<float>& start_vals, std::vector
 	m_vert_count++;
 }
 
+void Lines::clear() {
+	std::lock_guard<std::mutex> lock(m_mutex);
+	m_dot_vector.clear();
+	m_vert_count = 0;
+}
+
 void Lines::add_segment(glm::vec2& xy, std::vector<float>& supplementary) {
+	std::lock_guard<std::mutex> lock(m_mutex);
 	if (m_dot_vector.size() == 0) {
 		push_vert(xy, supplementary, supplementary, 0.0);
 		m_remaining_dist = 0.0;
@@ -80,8 +88,22 @@ void Lines::add_segment(glm::vec2& xy, std::vector<float>& supplementary) {
 // MAKE SURE you call shader.use() (and set your uniforms) on your shader before calling this thing.
 // When use() is run, it wipes any old values, so I changed render() to not call use() and depend
 // upon the caller to do so.
+//
+// The points are copied to the GPU under the lock, and the draw uses the count that was copied, never
+// the live count: the parse thread may have added more by then, and drawing more verts than the buffer
+// holds reads past its end.
 void Lines::render(void(*set_vertex_attribs)(), bool upload_data) {
-	if (m_dot_vector.size() == 0)
+	if (upload_data) {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		if (m_dot_vector.size() == 0) {
+			m_uploaded_vert_count = 0;
+		} else {
+			glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
+			glBufferData(GL_ARRAY_BUFFER, sizeof(float) * m_dot_vector.size(), m_dot_vector.data(), GL_DYNAMIC_DRAW);
+			m_uploaded_vert_count = m_vert_count;
+		}
+	}
+	if (m_uploaded_vert_count == 0)
 		return;
 
 	glEnable(GL_CULL_FACE);
@@ -92,9 +114,6 @@ void Lines::render(void(*set_vertex_attribs)(), bool upload_data) {
 	glPointSize(m_line_width);
 
 	glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
-	if (upload_data) {
-		glBufferData(GL_ARRAY_BUFFER, sizeof(float) * m_dot_vector.size(), m_dot_vector.data(), GL_DYNAMIC_DRAW);
-	}
 
 	if (set_vertex_attribs) {
 		(*set_vertex_attribs)();
@@ -104,7 +123,7 @@ void Lines::render(void(*set_vertex_attribs)(), bool upload_data) {
 	}
 
 	glBindVertexArray(m_VAO);
-	glDrawArrays(GL_POINTS, 0, m_vert_count);
+	glDrawArrays(GL_POINTS, 0, m_uploaded_vert_count);
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0);

@@ -177,6 +177,9 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="project_data.cpp" />
     <ClCompile Include="render_target.cpp" />
+    <ClCompile Include="scan_gesture.cpp" />
+    <ClCompile Include="timeline_scale.cpp" />
+    <ClCompile Include="timeline_view.cpp" />
     <ClCompile Include="timecode.cpp" />
     <ClCompile Include="window_layout.cpp" />
     <ClCompile Include="project_model.cpp" />
@@ -223,7 +226,6 @@
     <None Include="map_widget_2_arrow.vert" />
     <None Include="mask_shader.frag" />
     <None Include="mask_shader.vert" />
-    <None Include="media_scrub_widget.frag" />
     <None Include="media_scrub_widget.vert" />
     <None Include="telemetry_scrub_widget.frag" />
     <None Include="text.frag" />
@@ -241,6 +243,9 @@
     <ClInclude Include="media_order.h" />
     <ClInclude Include="project_data.h" />
     <ClInclude Include="render_target.h" />
+    <ClInclude Include="scan_gesture.h" />
+    <ClInclude Include="timeline_scale.h" />
+    <ClInclude Include="timeline_view.h" />
     <ClInclude Include="timecode.h" />
     <ClInclude Include="window_layout.h" />
     <ClInclude Include="project_file_manager.h" />

@@ -42,13 +42,17 @@ struct SummarySettings {
 };
 
 // The size the main window had when CamBot was last closed, so it opens the same way next time.
-// `width` and `height` are the window's normal (not maximized) size.
+// `width` and `height` are the window's normal (not maximized) size; `panel_width` and
+// `timeline_height` are how wide the user has dragged the left panel and how tall the timeline
+// editor along the bottom.
 struct WindowSettings {
-	WindowSettings() : width(1200), height(900), maximized(false) {}
+	WindowSettings() : width(1200), height(900), maximized(false), panel_width(280), timeline_height(180) {}
 
 	int  width;
 	int  height;
 	bool maximized;
+	int  panel_width;
+	int  timeline_height;
 };
 
 class UserSettings {
@@ -114,6 +118,8 @@ public:
 			else if (strcmp(key, "window_w") == 0)           { if (value >= 400.0f && value <= 16384.0f) window.width = (int)value; }
 			else if (strcmp(key, "window_h") == 0)           { if (value >= 300.0f && value <= 16384.0f) window.height = (int)value; }
 			else if (strcmp(key, "window_maximized") == 0)   { window.maximized = (value != 0.0f); }
+			else if (strcmp(key, "window_panel_w") == 0)     { if (value >= 60.0f && value <= 8000.0f)   window.panel_width = (int)value; }
+			else if (strcmp(key, "window_timeline_h") == 0)  { if (value >= 60.0f && value <= 8000.0f)   window.timeline_height = (int)value; }
 		}
 		fclose(fd);
 		if (map_zoom.max_width_km < map_zoom.min_width_km)
@@ -139,6 +145,8 @@ public:
 		fprintf(fd, "window_w:%d\n", window.width);
 		fprintf(fd, "window_h:%d\n", window.height);
 		fprintf(fd, "window_maximized:%d\n", window.maximized ? 1 : 0);
+		fprintf(fd, "window_panel_w:%d\n", window.panel_width);
+		fprintf(fd, "window_timeline_h:%d\n", window.timeline_height);
 		fclose(fd);
 		return true;
 	}

@@ -17,17 +17,29 @@
   bar). The launch marker is likewise tied to a file and a moment in it.
 - **New window layout.** The window is resizable (minimum 900x600) and opens at the size, and
   maximized or not, it had when last closed (first run: 1200x900). The video and its overlays
-  are shown as a preview that grows to fill the space beside the left panel while keeping its
-  shape, with a transport bar under it: the position as `h:mm:ss#frame / length (@29.97fps)`
+  are shown as a preview that is as big as the window's height allows while keeping its shape,
+  with only a thin border around it; the left panel takes all the width the preview doesn't use,
+  and the divider between them can be dragged to make the panel wider (and the preview smaller),
+  with the width remembered. A transport bar sits under the preview: the position as `h:mm:ss#frame / length (@29.97fps)`
   and the two screenshot buttons on the top row, and Start, -1, Play/Pause, +1, End below.
   Reverse, slow and fast play are shown but off until playback supports them. The left panel is a placeholder for the
-  media list and the telemetry sync controls. For now the preview still includes the scrub-bar
-  strip under the video, and the scrub bars, the right-click scan and click-to-pause work on
-  it as before. Everything is drawn through ImGui, so none of it ends up in exports.
+  media list and the telemetry sync controls. For now the preview still includes the strip
+  under the video with the telemetry scrub bar, which, with the right-click scan and
+  click-to-pause, works as before. Everything is drawn through ImGui, so none of it ends up in exports.
 - Each frame is now drawn into an off-screen picture (the video, the telemetry and the scrub-bar
   strip, 1920x1214 as before) and then copied to the window. Exports and both screenshot
   buttons read that picture rather than the window, so the saved frame no longer depends on
   the window. Nothing should look different.
+- **Timeline (view only).** A timeline now runs the full width of the window along the bottom,
+  with a draggable divider above it; drag the divider to make it taller or shorter (the height
+  is remembered, minimum 110 pixels). Each source file is a coloured block with its name,
+  yellow lines mark the joins, a ruler shows time, and a red line shows the playhead. Left-click
+  or drag to scrub (it follows keyframes while you drag and lands on the exact frame when you
+  let go), right-drag to scan at a speed that grows with the distance dragged (the same feel as
+  the old scrub bar), mouse wheel to zoom around the cursor, Shift+wheel, middle-drag or a left-drag on the ruler to pan,
+  and the Fit button to show everything. The timeline follows the playhead during playback.
+  This replaces the video scrub bar that used to sit under the video; the telemetry scrub bar
+  is unchanged for now. Nothing can be edited on the timeline yet.
 - The telemetry windows (map, altitude graph, flight summary) still describe all the footage,
   not the cut video; that gets revisited when the timeline UI arrives.
 
