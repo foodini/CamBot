@@ -284,6 +284,9 @@ void TextPanel::draw_properties(const TextBox& box) {
 
 	// When it shows. Each is in seconds; they run one after another from the frame the box is tied to.
 	ImGui::SeparatorText("Timing");
+	ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+	ImGui::TextWrapped("Drag a value to change it, or Ctrl+click to type one.");
+	ImGui::PopStyleColor();
 	const char* const timing_names[3] = { "Fade in", "Dwell", "Fade out" };
 	const char* const timing_tips[3] = { "How long the text takes to fade in, ending where it is fully shown.",
 		"How long the text stays fully shown.", "How long the text takes to fade out." };
@@ -325,6 +328,8 @@ void TextPanel::draw_properties(const TextBox& box) {
 	}
 	end_edit_if_deactivated();
 	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Drag to change it, or Ctrl+click to type a value.");
+	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("The height of the type in pixels on a picture 1080 tall; it scales with the picture.");
 	if (ImGui::Checkbox("Bold", &style.bold))
 		set_style_once(id, style);
@@ -356,6 +361,8 @@ void TextPanel::draw_properties(const TextBox& box) {
 		m_editor->set_style(m_model, id, style);
 	}
 	end_edit_if_deactivated();
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Drag to change it, or Ctrl+click to type a value.");
 	float offsets[2] = { style.shadow_dx * FRAME_PIXELS, style.shadow_dy * FRAME_PIXELS };
 	ImGui::SetNextItemWidth(control_width);
 	const bool offset_changed = ImGui::DragFloat2("Offset", offsets, 0.1f, -100.0f, 100.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
@@ -366,6 +373,8 @@ void TextPanel::draw_properties(const TextBox& box) {
 		m_editor->set_style(m_model, id, style);
 	}
 	end_edit_if_deactivated();
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Drag to change it, or Ctrl+click to type a value.");
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("How far the shadow is across and down from the text, in pixels on a picture 1080 tall.");
 	if (color_control("Shadow colour", PICK_SHADOW, style.shadow_color))

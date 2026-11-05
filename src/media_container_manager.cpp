@@ -28,6 +28,7 @@ MediaContainerMgr::MediaContainerMgr(MediaDecoder* decoder, const std::string& v
     m_center_ndc_y((extents[0].y + extents[3].y) / 2.0f),
     m_shader(vert.c_str(), frag.c_str()),
     m_recording(false),
+    m_export_cancelled(false),
     m_output_format(nullptr),
     m_output_format_context(nullptr),
     m_output_video_codec(nullptr),
@@ -89,7 +90,7 @@ MediaContainerMgr::MediaContainerMgr(MediaDecoder* decoder, const std::string& v
     // a proper trailer either way, so a cancelled file is still a valid, playable .mp4, just
     // shorter than the full video.
     InteractionMgr::instance()->bind_key(GLFW_KEY_ESCAPE,
-        [this]() { if (m_recording) finalize_output(); },
+        [this]() { if (m_recording) { m_export_cancelled = true; finalize_output(); } },
         nullptr,
         nullptr);
 }
@@ -323,6 +324,7 @@ bool MediaContainerMgr::init_video_output(const std::string& video_file_name, un
     if (m_recording)
         return true;
     m_last_error.clear();
+    m_export_cancelled = false;
     if (start_output(video_file_name, width, height))
         return true;
     // Whatever got built before the failure is torn down, so the program isn't left believing

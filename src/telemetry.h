@@ -187,6 +187,9 @@ public:
 
 	void tick();
 	bool parsing_done() const { return m_parse_done && !m_thread_running; }
+	// What was wrong with the telemetry file (it could not be opened, or had no samples in it), as a sentence for the
+	// user; empty when it was fine. Only meaningful once parsing_done().
+	const std::string& load_problem() const { return m_load_problem; }
 	static TelemetryMgr* instance;
 
 private:
@@ -207,6 +210,7 @@ private:
 	std::atomic<bool>           m_parse_done;
 	std::atomic<bool>           m_stop_requested;   // Set by the destructor to end the parse early.
 	std::atomic<bool>           m_thread_running;
+	std::string                 m_load_problem;   // Written by the parse thread before m_parse_done is set.
 	TelemetrySlice              m_default_slice;
 	EditModel*                   m_model;   // Owns the sync; must outlive this object.
 	bool                         m_has_file;   // A telemetry file was named (it might still turn out to be empty).

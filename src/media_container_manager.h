@@ -90,6 +90,8 @@ public:
 	bool init_video_output(const std::string& video_file_name, unsigned int width, unsigned int height);
 	bool output_video_frame(uint8_t* buf);
 	bool finalize_output();
+	// Whether the last export was stopped early with Escape (it is still a valid, shorter file).
+	bool export_cancelled() const { return m_export_cancelled; }
 	// A sentence about what went wrong with the last export step that failed, for the user.
 	const std::string& last_error() const { return m_last_error; }
 
@@ -121,6 +123,7 @@ private:
 	void write_pending_audio();
 	bool write_encoded_packets();
 	bool                   m_recording;
+	bool                   m_export_cancelled;
 	std::string            m_last_error;
 	const AVOutputFormat*  m_output_format;  // av_guess_format() now returns a const pointer
 	AVFormatContext*       m_output_format_context;

@@ -187,8 +187,15 @@ public:
 
 	// ---- Launch ----
 	const FileTime&         launch_mark() const { return m_launch_mark; }
+	// Sets where launch is without saying the user chose it (see launch_marked()): the start of the flight stands in
+	// for it until they do.
 	void                    set_launch_mark(const FileTime& mark) { m_launch_mark = mark; }
+	// Whether the user has marked launch themselves. Until they have, the flight clock and the distance flown count
+	// from the start of the footage, which is rarely where the glider left the ground.
+	bool                    launch_marked() const { return m_launch_marked; }
+	void                    set_launch_marked(bool marked) { m_launch_marked = marked; }
 	double                  launch_flight_seconds() const;
+	// Marks launch (so launch_marked() is true afterward).
 	void                    set_launch_flight_seconds(double seconds);
 
 	// ---- Mapping between the clocks ----
@@ -227,6 +234,7 @@ private:
 	bool                     m_stashed_edit_started;
 	std::vector<SyncAnchor>  m_anchors;
 	FileTime                 m_launch_mark;
+	bool                     m_launch_marked;
 	std::vector<TextBox>     m_text_boxes;
 	int                      m_next_text_id;
 

@@ -73,9 +73,11 @@ bool apply_to_model(const ProjectData& project, const std::vector<int64_t>& medi
 		FileTime launch = project.launch_mark;
 		launch.local_ticks = rescale_ticks(launch.local_ticks, from_num, from_den, tb_num, tb_den);
 		model->set_launch_mark(launch);
+		model->set_launch_marked(true);
 	} else if (!model->capture().order().empty()) {
 		// Not marked: the start of the flight, as it always was.
 		model->set_launch_mark(FileTime(model->capture().order()[0], 0));
+		model->set_launch_marked(false);
 	}
 
 	std::vector<TextBox> text_boxes;
@@ -115,7 +117,7 @@ void fill_from_model(const EditModel& model, int tb_num, int tb_den, ProjectData
 		if (!is_nothing)
 			project->sync_anchors.push_back(anchors[i]);
 	}
-	project->launch_mark = model.launch_mark();
+	project->launch_mark = model.launch_marked() ? model.launch_mark() : FileTime(-1, 0);
 	project->text_boxes = model.text_boxes();
 	project->has_version2_sync = false;
 	project->version2_offset_s = 0.0f;

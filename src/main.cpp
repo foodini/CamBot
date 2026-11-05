@@ -1096,6 +1096,9 @@ int main()
     bool was_recording = false;
     bool show_export_done = false;
     std::string export_display_name;
+    // What the "Export" popup says once an export has stopped (worked out the moment it stops).
+    std::string export_result_message;
+    bool export_result_is_problem = false;
     float export_start_wallclock = 0.0f;
     float export_start_video_elapsed = 0.0f;
     // Export runs flat-out rather than redrawing every frame -- see do_present below -- but
@@ -1119,6 +1122,7 @@ int main()
     // render loop
     // -----------
     bool map_prefetch_started = false;
+    bool telemetry_problem_reported = false;
     while (!switching_project && !exit_confirmed(window, env_config, project_file_mgr))
     {
         telemetry_mgr.tick();
@@ -1127,6 +1131,13 @@ int main()
         if (!map_prefetch_started && telemetry_mgr.parsing_done()) {
             map_prefetch_started = true;
             start_map_prefetch(telemetry_mgr, &tile_layer);
+        }
+        // A telemetry file that was missing or empty is said once, as soon as that is known; the flight carries on
+        // as video alone (has_telemetry() is false).
+        if (!telemetry_problem_reported && telemetry_mgr.parsing_done()) {
+            telemetry_problem_reported = true;
+            if (!telemetry_mgr.load_problem().empty())
+                ffsw::message_box("CamBot - Telemetry", telemetry_mgr.load_problem() + "\n\nCamBot will carry on without telemetry.");
         }
         if (!sync_view.active())
             tile_layer.service();
@@ -1179,6 +1190,15 @@ int main()
         bool now_recording = media_container_mgr.recording();
         if (!now_recording && was_recording) {
             show_export_done = true;
+            export_result_is_problem = !media_container_mgr.last_error().empty();
+            if (export_result_is_problem) {
+                export_result_message = ffsw::format("The export to \"%s\" did not finish cleanly.\n\n%s",
+                    export_display_name.c_str(), media_container_mgr.last_error().c_str());
+            } else if (media_container_mgr.export_cancelled()) {
+                export_result_message = ffsw::format("Export cancelled. What was exported so far is saved in \"%s\".", export_display_name.c_str());
+            } else {
+                export_result_message = ffsw::format("Export finished: \"%s\".", export_display_name.c_str());
+            }
         }
         was_recording = now_recording;
 
@@ -1273,9 +1293,24 @@ int main()
                         pending_overlay_screenshot_path = ffsw::file_dialog(L"png", L"Save Frame with Telemetry Overlay As (*.png)", false);
                     }
                     ImGui::Separator();
-                    if (ImGui::MenuItem("Export Video...", nullptr, false, !media_container_mgr.recording() && !sync_view.active())) {
-                        std::string export_path = ffsw::file_dialog(L"mp4", L"Export Video As (*.mp4)", false);
+                    // Not while the telemetry is still being read: the overlay would be missing the rest of the flight.
+                    const bool telemetry_loading = telemetry_mgr.has_telemetry() && !telemetry_mgr.parsing_done();
+                    if (ImGui::MenuItem("Export Video...", nullptr, false, !media_container_mgr.recording() && !sync_view.active() && !telemetry_loading)) {
+                        // With nothing marked, the flight timer and the distance flown would count from the start of
+                        // the original footage, which a cut-down edit usually doesn't begin at. Offer to count from
+                        // the first frame of the export instead; they can also go back and mark launch properly.
+                        bool go_on = true;
+                        if (telemetry_mgr.has_telemetry() && !edit_model.launch_marked()) {
+                            go_on = ffsw::confirm_box("CamBot - No Launch Point",
+                                "You haven't marked where you launched (Edit > Set Launch Here), so the flight timer and the "
+                                "distance flown have no starting point.\n\n"
+                                "OK exports with the first frame of the video as the start (timer 0:00).\n"
+                                "Cancel lets you go back and mark launch first.");
+                        }
+                        std::string export_path = go_on ? ffsw::file_dialog(L"mp4", L"Export Video As (*.mp4)", false) : std::string();
                         if (!export_path.empty()) {
+                            if (telemetry_mgr.has_telemetry() && !edit_model.launch_marked())
+                                env_config.launch_time((float)edit_model.flight_seconds_for_timeline(0));
                             size_t slash = export_path.find_last_of("/\\");
                             export_display_name = (slash == std::string::npos) ? export_path : export_path.substr(slash + 1);
                             export_start_wallclock = ffsw::elapsed();
@@ -1300,8 +1335,11 @@ int main()
                     ImGui::EndMenu();
                 }
                 if (ImGui::BeginMenu("Edit")) {
-                    if (ImGui::MenuItem("Mark Launch Point", nullptr, false, has_telemetry)) {
+                    if (ImGui::MenuItem("Set Launch Here", nullptr, false, has_telemetry)) {
                         env_config.launch_time(env_config.flight_elapsed());
+                    }
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                        ImGui::SetTooltip("The flight timer and distance flown count from the frame on screen.");
                     }
                     ImGui::Separator();
                     // The same turns the keys bound in MediaContainerMgr's constructor make; the
@@ -1387,6 +1425,22 @@ int main()
                     ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
             }
 
+            // The export's outcome, to be acknowledged. (The throttled frames while exporting never reach here with
+            // this set, as it is only raised once the export has stopped.)
+            if (show_export_done) {
+                ImGui::OpenPopup("Export");
+                show_export_done = false;
+            }
+            if (ImGui::BeginPopupModal("Export", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+                ImGui::TextWrapped("%s", export_result_message.c_str());
+                ImGui::Spacing();
+                if (ImGui::Button("OK", ImVec2(80.0f, 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::SetItemDefaultFocus();
+                ImGui::EndPopup();
+            }
+
             if (show_about_popup) {
                 ImGui::OpenPopup("About CamBot");
                 show_about_popup = false;
@@ -1428,9 +1482,9 @@ int main()
             // like the other overlays -- specifically because ImGui's own render pass happens
             // after the capture point below, so unlike the telemetry overlays, this text never
             // ends up baked into the exported video itself.
-            if (media_container_mgr.recording() || show_export_done) {
+            if (media_container_mgr.recording()) {
                 std::string status_text;
-                if (media_container_mgr.recording()) {
+                {   // (Scoped so the ETA working-out below stays out of the rest of this frame's variables.)
                     float elapsed_wallclock = ffsw::elapsed() - export_start_wallclock;
                     float video_done = media_container_mgr.in_elapsed() - export_start_video_elapsed;
                     float video_remaining = media_container_mgr.in_duration() - media_container_mgr.in_elapsed();
@@ -1441,8 +1495,6 @@ int main()
                     int eta_minutes = (int)(eta_seconds / 60.0f);
                     int eta_whole_seconds = (int)eta_seconds % 60;
                     status_text = ffsw::format("Exporting %s. ETA %d:%02d", export_display_name.c_str(), eta_minutes, eta_whole_seconds);
-                } else {
-                    status_text = ffsw::format("Export done: %s", export_display_name.c_str());
                 }
 
                 ImGui::SetNextWindowPos(ImVec2(layout.preview.x + layout.preview.w / 2.0f, layout.preview.y + layout.preview.h - 12.0f),

@@ -189,20 +189,30 @@ void TelemetryMgr::parse_telemetry_file(const std::string& path, std::vector<Wid
 	// So we can actually measure the effect of parsing changes instead of going by feel.
 	auto parse_start_time = std::chrono::steady_clock::now();
 
-	//TODO(P2): User needs to know if there were issues with the file.
-	//TODO(P2): Check that the file exists (and feedback to the user.)
-	//TODO(P0): This accempts a non-existent file as being empty. Complain if file 1) DNE or 2) empty.
+	//TODO(P2): User needs to know about lines that were not valid samples.
 	std::ifstream infile(path);
+	if (!infile.is_open()) {
+		m_load_problem = "The telemetry file could not be opened:\n" + path;
+		m_parse_done = true;
+		return;
+	}
 	std::string line;
 	std::vector<std::string> lines;
 
 	// I do this as two separate loops because the read is fast, but construction of the slices is slow and,
 	// if I want to get polygonalization started early, I need a full count of the number of lines before I
 	// start sending slices to Widgets for processing.
+	// Comment lines start with '#'. Blank lines (and a lone trailing '\r', from a file written on Windows) are not samples.
 	while (std::getline(infile, line)) {
-		if (line[0] != '#') {
+		size_t first = line.find_first_not_of(" \t\r\n");
+		if (first != std::string::npos && line[first] != '#') {
 			lines.push_back(line);
 		}
+	}
+	if (lines.empty()) {
+		m_load_problem = "The telemetry file has no flight data in it:\n" + path;
+		m_parse_done = true;
+		return;
 	}
 
 	// m_telemetry.reserve()d to its final size (known now, from the pass above) before any

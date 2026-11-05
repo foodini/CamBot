@@ -206,6 +206,44 @@ static void test_text_boxes_round_trip() {
 	CHECK(without.text_boxes().empty());
 }
 
+// Whether the user has marked launch survives saving and loading; until they have, nothing is written for it.
+static void test_launch_marked_round_trip() {
+	std::vector<int64_t> durations;
+	durations.push_back(30000 * 20);
+	durations.push_back(30000 * 10);
+	ProjectData project = make_project(2);
+	project.time_base_num = 1;
+	project.time_base_den = 30000;
+	std::string error;
+
+	// Nothing marked: launch stands at the start of the flight, but is not counted as chosen.
+	EditModel unmarked;
+	CHECK(project_io::apply_to_model(project, durations, 1, 30000, &unmarked, &error));
+	CHECK(!unmarked.launch_marked());
+	CHECK(unmarked.launch_mark() == FileTime(0, 0));
+	ProjectData written;
+	project_io::fill_from_model(unmarked, 1, 30000, &written);
+	CHECK(written.launch_mark.media < 0);
+
+	// Marking it makes it stick.
+	unmarked.set_launch_flight_seconds(0.5);
+	CHECK(unmarked.launch_marked());
+	project_io::fill_from_model(unmarked, 1, 30000, &written);
+	CHECK(written.launch_mark.media == 0);
+	written.video_files = project.video_files;   // (The file names are the caller's to fill in.)
+	EditModel reloaded;
+	CHECK(project_io::apply_to_model(written, durations, 1, 30000, &reloaded, &error));
+	CHECK(reloaded.launch_marked());
+	CHECK(reloaded.launch_mark() == unmarked.launch_mark());
+
+	// And a new flight starts out unmarked again.
+	std::vector<std::string> paths;
+	paths.push_back("a.mp4");
+	paths.push_back("b.mp4");
+	reloaded.set_media(paths, durations, 1.0 / 30000.0);
+	CHECK(!reloaded.launch_marked());
+}
+
 static void test_paths() {
 	CHECK(fileio::base_name("C:\\a\\b\\c.mp4") == "c.mp4");
 	CHECK(fileio::base_name("/a/b/c.mp4") == "c.mp4");
@@ -266,6 +304,7 @@ int main(int argc, char** argv) {
 	test_bad_projects_are_refused();
 	test_time_base_change();
 	test_text_boxes_round_trip();
+	test_launch_marked_round_trip();
 	test_paths();
 	test_file_io(dir);
 	if (g_failures == 0)

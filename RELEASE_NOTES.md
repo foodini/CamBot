@@ -263,6 +263,18 @@
   (a drag of a slider is one). Whatever you last changed on any box (its place and size in the picture, its type and
   colours, its shadow and its times) is what the next new box starts out as, and is remembered for the next run (in the
   user settings, with the recent colours).
+- **Launch point.** The Edit menu item formerly called "Mark Launch Point" is now **Set Launch Here** (with a tooltip
+  saying what it does: the flight timer and the distance flown count from the frame on screen). A project remembers
+  whether you have set it. If you export without having done so, CamBot says so and offers to start the timer at the first
+  frame of the exported video (0:00), or to let you go back and set it properly.
+- **Export.** Export Video is unavailable while the telemetry is still being read (it would be missing the rest of the
+  flight). When an export stops, a box now tells you how it went (finished, cancelled with Esc, or a problem, with
+  what it was) and waits for OK, instead of a line of text at the bottom of the picture.
+- **Telemetry files.** A telemetry file that can't be opened, or has no samples in it, is now reported (once, as soon as it
+  is known) and the flight carries on as video alone. Blank lines in a telemetry file are skipped instead of being read as a
+  broken sample.
+- **Text panel.** A line under *Timing* (and tooltips on the size, opacity and offset fields) say that values are dragged to
+  change them and Ctrl+click types one.
 - **Tests.** `tests/run_tests.sh` (run it with `wsl ./tests/run_tests.sh`) builds and runs
   the unit tests: climb filters, map zoom, flight statistics, altitude references, user
   settings, the source timeline and file ordering, project reading, and the multi-file

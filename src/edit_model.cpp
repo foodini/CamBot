@@ -116,7 +116,7 @@ FileTime CaptureSequence::file_time_for(int64_t flight_ticks) const {
 // ---------------------------------------------------------------------------------------------
 
 EditModel::EditModel() : m_seconds_per_tick(1.0 / 90000.0), m_edit_started(false), m_in_source_view(false), m_stashed_edit_started(false),
-	m_text_boxes(), m_next_text_id(1) {
+	m_launch_marked(false), m_text_boxes(), m_next_text_id(1) {
 }
 
 int64_t EditModel::seconds_to_ticks(double seconds) const {
@@ -139,6 +139,7 @@ void EditModel::set_media(const std::vector<std::string>& paths, const std::vect
 	m_edit_started = false;
 	m_anchors.clear();
 	m_launch_mark = FileTime();
+	m_launch_marked = false;
 	m_text_boxes.clear();
 	m_next_text_id = 1;
 	rebuild_sync();
@@ -357,6 +358,7 @@ double EditModel::launch_flight_seconds() const {
 
 void EditModel::set_launch_flight_seconds(double seconds) {
 	m_launch_mark = file_time_for_flight_seconds(seconds);
+	m_launch_marked = true;
 }
 
 double EditModel::flight_seconds_for_timeline(int64_t timeline_ticks) const {
