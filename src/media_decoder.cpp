@@ -66,7 +66,6 @@ MediaDecoder::MediaDecoder() :
 	m_audio_index(-1),
 	m_quiet(false),
 	m_video_start(0),
-	m_audio_start(0),
 	m_draining(false),
 	m_packet(nullptr),
 	m_decoded(nullptr),
@@ -76,23 +75,18 @@ MediaDecoder::MediaDecoder() :
 	m_decoder_pts(AV_NOPTS_VALUE),
 	m_pts_before_switch(0),
 	m_check_gap(false),
-	m_capture_audio(false),
 	m_cache_bytes(0)
 {
 	m_global_tb.num = 1;
 	m_global_tb.den = 90000;
-	m_audio_tb.num = 1;
-	m_audio_tb.den = 48000;
 	m_avg_frame_rate.num = 30;
 	m_avg_frame_rate.den = 1;
 	m_real_frame_rate = m_avg_frame_rate;
 	m_file_video_tb = m_global_tb;
-	m_file_audio_tb = m_audio_tb;
 }
 
 MediaDecoder::~MediaDecoder() {
 	close_file();
-	end_audio_capture();
 	if (m_sws)
 		sws_freeContext(m_sws);
 	av_packet_free(&m_packet);
@@ -181,11 +175,6 @@ bool MediaDecoder::open_file(int index, std::string* error) {
 
 	m_file_video_tb = video_stream->time_base;
 	m_video_start = video_stream->start_time == AV_NOPTS_VALUE ? 0 : video_stream->start_time;
-	if (m_audio_index >= 0) {
-		AVStream* audio_stream = m_fmt->streams[m_audio_index];
-		m_file_audio_tb = audio_stream->time_base;
-		m_audio_start = audio_stream->start_time == AV_NOPTS_VALUE ? 0 : audio_stream->start_time;
-	}
 	m_cur_file = index;
 	m_draining = false;
 	return true;
@@ -224,7 +213,6 @@ bool MediaDecoder::read_file_properties(int index, std::string* error) {
 		if (m_audio_index >= 0) {
 			m_audio_params = avcodec_parameters_alloc();
 			avcodec_parameters_copy(m_audio_params, m_fmt->streams[m_audio_index]->codecpar);
-			m_audio_tb = m_file_audio_tb;
 		}
 		if (m_width <= 0 || m_height <= 0 || (m_width % 2) != 0 || (m_height % 2) != 0) {
 			*error = string_printf("\"%s\" has an unusable picture size (%dx%d).", name.c_str(), m_width, m_height);
@@ -296,7 +284,6 @@ bool MediaDecoder::open(const std::vector<std::string>& paths, std::string* erro
 
 	// Starting over, in case this object was used before.
 	close_file();
-	end_audio_capture();
 	m_clips.clear();
 	m_media_durations.clear();
 	m_cur_clip = 0;
@@ -448,13 +435,6 @@ bool MediaDecoder::position_media(int media, int64_t local_ticks) {
 	}
 	avcodec_flush_buffers(m_vctx);
 	m_draining = false;
-	// Packets already queued for an export in progress still belong to it; otherwise they're stale.
-	if (!m_capture_audio) {
-		while (!m_audio_queue.empty()) {
-			av_packet_free(&m_audio_queue.front());
-			m_audio_queue.pop_front();
-		}
-	}
 	return true;
 }
 
@@ -470,44 +450,6 @@ int64_t MediaDecoder::local_ticks_of(const AVFrame* frame) const {
 	if (m_decoder_pts == AV_NOPTS_VALUE)
 		return clip.in_ticks;
 	return clip.in_ticks + (m_decoder_pts - m_clips.start(m_cur_clip)) + m_frame_ticks;
-}
-
-void MediaDecoder::queue_audio_packet() {
-	// Which clip is this sound for? Packets are read a little ahead of the picture, so it can
-	// belong to a following clip of the same file as well as the current one.
-	int64_t packet_time = (m_packet->pts != AV_NOPTS_VALUE) ? m_packet->pts : m_packet->dts;
-	int clip_index = m_cur_clip;
-	if (packet_time != AV_NOPTS_VALUE) {
-		int64_t local_start = av_rescale_q(packet_time - m_audio_start, m_file_audio_tb, m_global_tb);
-		int64_t local_end = local_start + av_rescale_q(m_packet->duration, m_file_audio_tb, m_global_tb);
-		if (local_end <= local_start)
-			local_end = local_start + 1;
-		clip_index = -1;
-		for (int c = m_cur_clip; c < m_clips.count() && c <= m_cur_clip + 3; c++) {
-			const Clip& clip = m_clips.clip(c);
-			if (clip.media == m_cur_file && local_end > clip.in_ticks && local_start < clip.out_ticks) {
-				clip_index = c;
-				break;
-			}
-		}
-		if (clip_index < 0)
-			return;   // Sound from a part of the file that isn't in the edit.
-	}
-
-	AVPacket* copy = av_packet_clone(m_packet);
-	if (copy == nullptr)
-		return;
-	// Onto the timeline: take off this file's own start, change to the first file's audio time
-	// base, and move by where the clip begins relative to where it was cut from. That is
-	// converted as a whole (rather than adding up roundings), so the error never builds up.
-	int64_t clip_offset = av_rescale_q(m_clips.start(clip_index) - m_clips.clip(clip_index).in_ticks, m_global_tb, m_audio_tb);
-	if (copy->pts != AV_NOPTS_VALUE)
-		copy->pts = av_rescale_q(copy->pts - m_audio_start, m_file_audio_tb, m_audio_tb) + clip_offset;
-	if (copy->dts != AV_NOPTS_VALUE)
-		copy->dts = av_rescale_q(copy->dts - m_audio_start, m_file_audio_tb, m_audio_tb) + clip_offset;
-	copy->duration = av_rescale_q(copy->duration, m_file_audio_tb, m_audio_tb);
-	copy->pos = -1;
-	m_audio_queue.push_back(copy);
 }
 
 // Turns what the decoder just produced (m_decoded) into the current frame, at `local_ticks` into
@@ -612,8 +554,6 @@ bool MediaDecoder::decode_next() {
 							m_packet->flags &= ~AV_PKT_FLAG_DISCARD;
 					}
 					avcodec_send_packet(m_vctx, m_packet);
-				} else if (m_packet->stream_index == m_audio_index && m_capture_audio) {
-					queue_audio_packet();
 				}
 				av_packet_unref(m_packet);
 				continue;
@@ -896,29 +836,4 @@ bool MediaDecoder::keyframe_times(int media, std::vector<int64_t>* local_ticks) 
 		local_ticks->push_back(ticks);
 	}
 	return true;
-}
-
-// ---------------------------------------------------------------------------------------------
-// Audio capture
-// ---------------------------------------------------------------------------------------------
-
-void MediaDecoder::begin_audio_capture() {
-	end_audio_capture();
-	m_capture_audio = true;
-}
-
-void MediaDecoder::end_audio_capture() {
-	m_capture_audio = false;
-	while (!m_audio_queue.empty()) {
-		av_packet_free(&m_audio_queue.front());
-		m_audio_queue.pop_front();
-	}
-}
-
-AVPacket* MediaDecoder::pop_audio_packet() {
-	if (m_audio_queue.empty())
-		return nullptr;
-	AVPacket* packet = m_audio_queue.front();
-	m_audio_queue.pop_front();
-	return packet;
 }

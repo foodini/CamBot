@@ -67,6 +67,8 @@ public:
 	void forget_last_project()                             { m_user_settings.forget_last_project(); m_user_settings.save(); }
 	// The main window's size, kept for the next run. Saved by save_user_settings().
 	void window_settings(const WindowSettings& settings)   { m_user_settings.window = settings; }
+	// How loud the preview is and whether it is muted. Saved by save_user_settings().
+	void sound_settings(const SoundSettings& settings)     { m_user_settings.sound = settings; }
 	// The true altitudes (ft) the user gave for the start and end of the video. These belong to
 	// the project (they're about this video's location), so setting them saves the project file.
 	// They take effect through sync_altitude_correction().
@@ -98,6 +100,7 @@ public:
 	const MapTraceSettings& map_trace_settings()     const { return m_user_settings.map_trace; }
 	const SummarySettings&  summary_settings()       const { return m_user_settings.summary; }
 	const TextSettings&     text_defaults()          const { return m_user_settings.text_defaults; }
+	const SoundSettings&    sound_settings()         const { return m_user_settings.sound; }
 	const AltitudeReferences& altitude_references()  const { return m_altitude_refs; }
 	// Where the first and last frames of the video fall in telemetry, as sample indices clamped
 	// to the recording -- the moments the altitude references describe.

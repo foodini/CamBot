@@ -1,5 +1,5 @@
 // Tests MediaDecoder's logic against fake_ffmpeg.cpp's synthetic files: reading across file joins,
-// draining each file's decoder, seeking, the frame cache, and audio timestamps.
+// draining each file's decoder, seeking and the frame cache.
 #include <stdio.h>
 #include <stdlib.h>
 #include <vector>
@@ -456,43 +456,6 @@ static void test_cut_between_frames() {
 	CHECK_MSG(expected == 20, "ended at frame %d", expected);
 }
 
-static void test_audio_follows_clips() {
-	fake_ffmpeg_reset();
-	FakeFileSpec spec;
-	spec.frames = 40; spec.gop = 5; spec.delay = 0; spec.tag = 0;
-	fake_ffmpeg_add_file("cut.mp4", spec);
-	std::vector<std::string> paths;
-	paths.push_back("cut.mp4");
-	MediaDecoder decoder;
-	std::string error;
-	CHECK(decoder.open(paths, &error));
-	std::vector<Clip> clips;
-	clips.push_back(Clip(0, 10 * FT, 20 * FT));
-	clips.push_back(Clip(0, 30 * FT, 40 * FT));
-	CHECK(decoder.set_clips(clips, 0));
-	decoder.begin_audio_capture();
-	CHECK(decoder.seek_keyframe(0));
-	std::vector<long long> pts;
-	while (true) {
-		AVPacket* p;
-		while ((p = decoder.pop_audio_packet()) != nullptr) { pts.push_back(p->pts); av_packet_free(&p); }
-		if (!decoder.read_frame())
-			break;
-	}
-	AVPacket* p;
-	while ((p = decoder.pop_audio_packet()) != nullptr) { pts.push_back(p->pts); av_packet_free(&p); }
-	decoder.end_audio_capture();
-	// Packet n is two frames long and starts at frame 2n. Clip one is frames 10-19 (packets 5-9)
-	// from timeline 0; clip two is frames 30-39 (packets 15-19) from timeline frame 10. Each
-	// packet's time moves by how far its clip was moved: 4800 samples per two frames.
-	std::vector<long long> expected;
-	for (int n = 5; n < 10; n++) expected.push_back((long long)(n - 5) * 4800);
-	for (int n = 15; n < 20; n++) expected.push_back((long long)(n - 15) * 4800 + 5 * 4800);
-	CHECK_MSG(pts.size() == expected.size(), "audio packets %zu expected %zu", pts.size(), expected.size());
-	for (size_t i = 0; i < pts.size() && i < expected.size(); i++)
-		CHECK_MSG(pts[i] == expected[i], "audio packet %zu: %lld expected %lld", i, pts[i], expected[i]);
-}
-
 // Random operations on random edit lists, checked against the plan.
 static void test_random_edit_lists() {
 	srand(7);
@@ -675,57 +638,14 @@ static void test_random_operations() {
 	}
 }
 
-static void test_audio_timestamps() {
-	// Three files, with sound; the second has an audio start offset of its own.
-	fake_ffmpeg_reset();
-	std::vector<std::string> paths;
-	int frames[] = { 20, 30, 10 };
-	long long audio_starts[] = { 0, 1234, 0 };
-	for (int i = 0; i < 3; i++) {
-		FakeFileSpec spec;
-		spec.frames = frames[i]; spec.gop = 5; spec.tag = i; spec.audio_start = audio_starts[i];
-		std::string path = "a" + std::to_string(i) + ".mp4";
-		fake_ffmpeg_add_file(path, spec);
-		paths.push_back(path);
-	}
+// Whether there is sound is known from the files; the sound itself is not the decoder's business (see audio_timeline.h).
+static void test_audio_presence() {
+	int frames[] = { 10, 10 }, gops[] = { 5, 5 }, delays[] = { 1, 1 };
+	Setup s = make_setup(frames, gops, delays, 2, true);
 	MediaDecoder decoder;
 	std::string error;
-	CHECK(decoder.open(paths, &error));
+	CHECK(decoder.open(s.paths, &error));
 	CHECK(decoder.has_audio());
-	CHECK(decoder.audio_time_base().den == 48000);
-
-	decoder.begin_audio_capture();
-	CHECK(decoder.seek_keyframe(0));
-	std::vector<long long> pts;
-	while (true) {
-		AVPacket* p;
-		while ((p = decoder.pop_audio_packet()) != nullptr) {
-			pts.push_back(p->pts);
-			CHECK(p->dts == p->pts);
-			av_packet_free(&p);
-		}
-		if (!decoder.read_frame())
-			break;
-	}
-	AVPacket* p;
-	while ((p = decoder.pop_audio_packet()) != nullptr) { pts.push_back(p->pts); av_packet_free(&p); }
-	decoder.end_audio_capture();
-
-	// Per file: frames/2 packets of 4800 samples (two frames' worth), starting at the file's place
-	// on the global clock (its start in ticks of 1/600 s, times 80 samples per tick).
-	long long file_start_samples[] = { 0, 20 * FT * 80LL, (20 + 30) * FT * 80LL };
-	std::vector<long long> expected;
-	for (int f = 0; f < 3; f++)
-		for (int k = 0; k < frames[f] / 2; k++)
-			expected.push_back(file_start_samples[f] + (long long)k * 4800);
-	CHECK_MSG(pts.size() == expected.size(), "audio packets %zu expected %zu", pts.size(), expected.size());
-	for (size_t i = 0; i < pts.size() && i < expected.size(); i++)
-		CHECK_MSG(pts[i] == expected[i], "audio packet %zu: %lld expected %lld", i, pts[i], expected[i]);
-
-	// Not capturing: nothing is queued.
-	CHECK(decoder.seek_keyframe(0));
-	while (decoder.read_frame()) {}
-	CHECK(decoder.pop_audio_packet() == nullptr);
 }
 
 static void test_no_audio_files() {
@@ -735,9 +655,7 @@ static void test_no_audio_files() {
 	std::string error;
 	CHECK(decoder.open(s.paths, &error));
 	CHECK(!decoder.has_audio());
-	decoder.begin_audio_capture();
 	while (decoder.read_frame()) {}
-	CHECK(decoder.pop_audio_packet() == nullptr);
 }
 
 static void test_open_errors() {
@@ -830,13 +748,12 @@ int main() {
 	test_clips_reordered_across_files();
 	test_contiguous_clips_do_not_reseek();
 	test_cut_between_frames();
-	test_audio_follows_clips();
 	test_random_edit_lists();
 	test_read_frame_after_cache_hit_continues_from_screen();
 	test_seek_keyframe();
 	test_fast_seek_by_frames();
 	test_random_operations();
-	test_audio_timestamps();
+	test_audio_presence();
 	test_no_audio_files();
 	test_open_errors();
 	if (g_failures == 0)

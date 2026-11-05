@@ -54,5 +54,18 @@ int main() {
         if (clamped.text_defaults.x + clamped.text_defaults.w > 1.0001f) { printf("FAIL: text box not clamped\n"); return 1; }
         printf("text defaults ok\n");
     }
+    {
+        UserSettings s;
+        s.sound.volume = 0.35f; s.sound.muted = true;
+        s.save();
+        const UserSettings back;
+        if (fabsf(back.sound.volume - 0.35f) > 0.001f || !back.sound.muted) { printf("FAIL: sound settings did not come back\n"); return 1; }
+        // A volume out of range is ignored on reading (the default is used).
+        s.sound.volume = 7.0f; s.sound.muted = false;
+        s.save();
+        const UserSettings ignored;
+        if (ignored.sound.volume != 1.0f || ignored.sound.muted) { printf("FAIL: bad sound volume was not ignored\n"); return 1; }
+        printf("sound settings ok\n");
+    }
     printf("reload:   type %d win %.1f tau %.1f range %.0f trace %.0f/%.0f/%.0f zoom %.1f/%.1f/%.0f\n", b.climb_filter.type, b.climb_filter.window_seconds, b.climb_filter.time_constant_seconds, b.climb_color_range, b.map_trace.recent_width_px, b.map_trace.old_width_px, b.map_trace.recent_seconds, b.map_zoom.min_width_km, b.map_zoom.max_width_km, b.map_zoom.transition_seconds);
 }

@@ -144,7 +144,7 @@
            third_party\ffmpeg now (see the IncludePath/LibraryPath comment above and
            tools\fetch_ffmpeg.ps1), and its import libs need to be named explicitly;
            nothing auto-links them. -->
-      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;opengl32.lib;avcodec.lib;avformat.lib;avutil.lib;swscale.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;opengl32.lib;avcodec.lib;avformat.lib;avutil.lib;swresample.lib;swscale.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -161,7 +161,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>avcodec.lib;avformat.lib;avutil.lib;swscale.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>avcodec.lib;avformat.lib;avutil.lib;swresample.lib;swscale.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -176,6 +176,12 @@
     <ClCompile Include="text_box.cpp" />
     <ClCompile Include="text_box_geometry.cpp" />
     <ClCompile Include="text_fonts.cpp" />
+    <ClCompile Include="audio_file_reader.cpp" />
+    <ClCompile Include="audio_output.cpp" />
+    <ClCompile Include="audio_player.cpp" />
+    <ClCompile Include="audio_plan.cpp" />
+    <ClCompile Include="audio_timeline.cpp" />
+    <ClCompile Include="playback.cpp" />
     <ClCompile Include="text_lanes.cpp" />
     <ClCompile Include="text_layout.cpp" />
     <ClCompile Include="text_panel.cpp" />
@@ -261,6 +267,12 @@
     <ClInclude Include="text_box.h" />
     <ClInclude Include="text_box_geometry.h" />
     <ClInclude Include="text_fonts.h" />
+    <ClInclude Include="audio_file_reader.h" />
+    <ClInclude Include="audio_output.h" />
+    <ClInclude Include="audio_player.h" />
+    <ClInclude Include="audio_plan.h" />
+    <ClInclude Include="audio_timeline.h" />
+    <ClInclude Include="playback.h" />
     <ClInclude Include="text_lanes.h" />
     <ClInclude Include="text_layout.h" />
     <ClInclude Include="text_panel.h" />

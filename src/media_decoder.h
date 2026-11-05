@@ -79,8 +79,6 @@ public:
 	bool          has_audio() const { return m_audio_params != nullptr; }
 	// Describe the first file's streams. Valid as long as this object is open.
 	const AVCodecParameters* video_parameters() const { return m_video_params; }
-	const AVCodecParameters* audio_parameters() const { return m_audio_params; }
-	AVRational    audio_time_base() const { return m_audio_tb; }  // Time base of audio packets handed out below.
 
 	// ---- The current frame ----
 	const AVFrame* frame() const { return m_frame; }   // 8-bit YUV 4:2:0, width() x height().
@@ -113,15 +111,6 @@ public:
 	// being read from another has to be sought to again (as with any move to another file).
 	bool keyframe_times(int media, std::vector<int64_t>* local_ticks);
 
-	// ---- Audio, for export ----
-	// Audio is never decoded here, only passed along as compressed packets. While capturing,
-	// every audio packet the decoder reads is queued, with timestamps on the global clock in
-	// audio_time_base() units. Poll with pop_audio_packet() after each read_frame().
-	void begin_audio_capture();
-	void end_audio_capture();
-	// The oldest queued packet, or nullptr. The caller owns it (av_packet_free()).
-	AVPacket* pop_audio_packet();
-
 private:
 	// Media probing and per-file state.
 	bool open_file(int index, std::string* error);
@@ -135,7 +124,6 @@ private:
 	// Frames.
 	bool decode_next();
 	bool store_decoded_frame(int64_t local_ticks);
-	void queue_audio_packet();
 
 	// Cache.
 	bool serve_from_cache(int64_t ticks);
@@ -152,7 +140,6 @@ private:
 	int                      m_width;
 	int                      m_height;
 	AVRational               m_global_tb;
-	AVRational               m_audio_tb;
 	AVRational               m_avg_frame_rate;
 	AVRational               m_real_frame_rate;
 	int64_t                  m_frame_ticks;
@@ -168,9 +155,7 @@ private:
 	int                      m_audio_index;
 	bool                     m_quiet;
 	AVRational               m_file_video_tb;
-	AVRational               m_file_audio_tb;
 	int64_t                  m_video_start;      // Stream start_time, in file ticks.
-	int64_t                  m_audio_start;
 	bool                     m_draining;         // End of file reached; waiting for the decoder to run dry.
 
 	AVPacket*                m_packet;
@@ -182,9 +167,6 @@ private:
 	                                             // can lag it, when it was served from the cache).
 	int64_t                  m_pts_before_switch;
 	bool                     m_check_gap;
-
-	bool                     m_capture_audio;
-	std::deque<AVPacket*>    m_audio_queue;
 
 	std::vector<CachedFrame> m_cache;
 	uint64_t                 m_cache_bytes;

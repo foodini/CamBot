@@ -32,6 +32,9 @@ for test in *_test.cpp; do
     if [ "$name" = "text_layout_test" ]; then extra="../src/text_layout.cpp ../src/text_box.cpp"; fi
     if [ "$name" = "user_settings_test" ] || [ "$name" = "recent_projects_test" ]; then extra="../src/text_box.cpp ../src/text_box_geometry.cpp"; fi
     if [ "$name" = "text_box_geometry_test" ]; then extra="../src/text_box_geometry.cpp"; fi
+    if [ "$name" = "audio_plan_test" ]; then extra="../src/audio_plan.cpp ../src/edit_model.cpp ../src/text_box.cpp"; fi
+    if [ "$name" = "audio_player_test" ]; then extra="fake_audio_output.cpp fake_audio_file_reader.cpp ../src/audio_player.cpp ../src/audio_timeline.cpp ../src/audio_plan.cpp ../src/edit_model.cpp ../src/text_box.cpp"; fi
+    if [ "$name" = "audio_timeline_test" ]; then extra="fake_audio_file_reader.cpp ../src/audio_timeline.cpp ../src/audio_plan.cpp ../src/edit_model.cpp ../src/text_box.cpp"; fi
     if [ "$name" = "text_lanes_test" ]; then extra="../src/text_lanes.cpp"; fi
     if [ "$name" = "text_fonts_test" ]; then extra="../src/text_fonts.cpp"; fi
     if [ "$name" = "thumbnail_layout_test" ]; then extra="../src/thumbnail_layout.cpp"; fi
@@ -44,7 +47,9 @@ for test in *_test.cpp; do
         failed=1
         continue
     fi
-    if "$OUT/$name" "$OUT" > "$OUT/$name.log" 2>&1; then
+    # Run from the scratch folder, so what tests write (the user settings tests save a settings file in the current folder)
+    # never lands in the source tree, and a file left there by an earlier run cannot change the next one.
+    if (cd "$OUT" && "$OUT/$name" "$OUT" > "$OUT/$name.log" 2>&1); then
         echo "ok      $name"
     else
         echo "FAILED  $name"

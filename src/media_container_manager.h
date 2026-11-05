@@ -17,6 +17,7 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
+#include "audio_timeline.h"
 #include "media_decoder.h"
 #include "shader_s.h"
 
@@ -72,6 +73,10 @@ public:
 	// What one tick is, in seconds (numerator / denominator).
 	AVRational  tick_time_base() const { return m_decoder->time_base(); }
 	int64_t     frame_ticks() const { return m_decoder->frame_ticks(); }   // How long one frame lasts, in ticks.
+	// The edit being played and the files it is made of, for playing the sound that goes with it.
+	const EditList&    edit_list() const { return m_decoder->edit_list(); }
+	int                media_count() const { return m_decoder->media_count(); }
+	const std::string& media_path(int media) const { return m_decoder->media_path(media); }
 	int64_t     total_ticks() const { return m_decoder->total_ticks(); }   // How long the whole video is, in ticks.
 	void rotation_angle(float angle) { m_rotation_angle = angle; }
 	float rotation_angle() { return m_rotation_angle;  }
@@ -120,7 +125,15 @@ private:
 	bool start_output(const std::string& video_file_name, unsigned int width, unsigned int height);
 	void abort_output();
 	void free_output_assets();
-	void write_pending_audio();
+	bool start_audio_output();
+	// The sound of the export is made from the edit (see audio_timeline.h) and encoded as AAC, rather than copied from the
+	// files, so that cuts get their fades and the sound stays in step with the picture however the clips are arranged.
+	// Renders the sound up to the end of the frame on screen, and encodes it.
+	void write_audio_for_current_frame();
+	void write_audio_through(int64_t timeline_sample);
+	// Encodes whole encoder frames of what is waiting; with `flush`, the last part-frame too, and then the encoder is emptied.
+	void encode_audio(bool flush);
+	void write_audio_packets();
 	bool write_encoded_packets();
 	bool                   m_recording;
 	bool                   m_export_cancelled;
@@ -133,12 +146,13 @@ private:
 	SwsContext*            m_output_scale_context;
 	AVStream*              m_output_video_stream;
 
-	// Audio is a straight stream copy of the decoder's audio packets, never decoded or
-	// re-encoded -- the only thing needed for it is the output AVStream itself, with its
-	// codecpar copied from the input audio stream. Null if the video has no sound.
+	// The output's sound. Null stream if the video has no sound.
 	AVStream*              m_output_audio_stream;
-	int64_t                m_last_audio_dts;       // Of the last packet written, in the decoder's audio time base.
-	int                    m_dropped_audio_packets;
+	AVCodecContext*        m_output_audio_codec_context;
+	AVFrame*               m_output_audio_frame;      // One encoder frame's worth, reused.
+	AudioTimeline          m_audio_timeline;
+	std::vector<float>     m_audio_pending;           // Rendered, interleaved, not yet given to the encoder.
+	int64_t                m_audio_samples_encoded;   // Sent to the encoder so far (the next frame's time).
 };
 
 #endif

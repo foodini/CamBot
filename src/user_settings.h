@@ -46,6 +46,14 @@ struct SummarySettings {
 	bool  show_xc;
 };
 
+// How loud the preview plays, 0 to 1, and whether it is muted (the sound of an export is not affected by either).
+struct SoundSettings {
+	SoundSettings() : volume(1.0f), muted(false) {}
+
+	float volume;
+	bool  muted;
+};
+
 // The size the main window had when CamBot was last closed, so it opens the same way next time.
 // `width` and `height` are the window's normal (not maximized) size; `panel_width` and
 // `timeline_height` are how wide the user has dragged the left panel and how tall the timeline
@@ -117,7 +125,7 @@ struct TextSettings {
 
 class UserSettings {
 public:
-	UserSettings() : climb_filter(), climb_color_range(800.0f), map_dim(0.25f), map_trace(), map_zoom(), summary(), window(), text_defaults() {
+	UserSettings() : climb_filter(), climb_color_range(800.0f), map_dim(0.25f), map_trace(), map_zoom(), summary(), window(), sound(), text_defaults() {
 		load();
 	}
 
@@ -128,6 +136,7 @@ public:
 	MapZoomSettings     map_zoom;
 	SummarySettings     summary;
 	WindowSettings      window;
+	SoundSettings       sound;
 	TextSettings        text_defaults;
 	// The project to open when CamBot starts (empty after the user closes it deliberately), and the
 	// ones opened lately, most recent first. Paths are UTF-8.
@@ -206,6 +215,8 @@ public:
 			else if (strcmp(key, "window_h") == 0)           { if (value >= 300.0f && value <= 16384.0f) window.height = (int)value; }
 			else if (strcmp(key, "window_maximized") == 0)   { window.maximized = (value != 0.0f); }
 			else if (strcmp(key, "window_panel_w") == 0)     { if (value >= 60.0f && value <= 8000.0f)   window.panel_width = (int)value; }
+			else if (strcmp(key, "sound_volume") == 0)       { if (value >= 0.0f && value <= 1.0f)     sound.volume = value; }
+			else if (strcmp(key, "sound_muted") == 0)        { sound.muted = (value != 0.0f); }
 			else if (strcmp(key, "last_project") == 0)       { last_project = text; }
 			else if (strcmp(key, "recent_project") == 0)     { recent_projects.append(text); }
 			else if (strcmp(key, "window_timeline_h") == 0)  { if (value >= 60.0f && value <= 8000.0f)   window.timeline_height = (int)value; }
@@ -257,6 +268,8 @@ public:
 		fprintf(fd, "window_maximized:%d\n", window.maximized ? 1 : 0);
 		fprintf(fd, "window_panel_w:%d\n", window.panel_width);
 		fprintf(fd, "window_timeline_h:%d\n", window.timeline_height);
+		fprintf(fd, "sound_volume:%f\n", sound.volume);
+		fprintf(fd, "sound_muted:%d\n", sound.muted ? 1 : 0);
 		fprintf(fd, "text_x:%f\n", text_defaults.x);
 		fprintf(fd, "text_y:%f\n", text_defaults.y);
 		fprintf(fd, "text_w:%f\n", text_defaults.w);

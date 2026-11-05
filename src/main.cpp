@@ -26,6 +26,7 @@
 #include "lines.h"
 #include "project_file_manager.h"
 #include "media_container_manager.h"
+#include "playback.h"
 #include "render_target.h"
 #include "edit_model.h"
 #include "media_decoder.h"
@@ -636,10 +637,11 @@ static bool draw_left_panel(const LayoutRect& rect, const EditModel& edit_model,
 // The bar under the preview: where the video is now and the two screenshot buttons (the same as the
 // File menu's, they set the path the render loop saves to), and below them the buttons to move around
 // and play.
-// Reverse, slow and fast play are shown but off until playback can do them. While an export runs
-// the controls are off, as it needs the video to itself.
-static void draw_transport_bar(const LayoutRect& rect, MediaContainerMgr& media, std::string* raw_screenshot_path,
-    std::string* overlay_screenshot_path) {
+// Reverse, slow and fast play are shown but off until playback can do them. At the end of the row, the volume of the preview
+// (not of exports) and a mute button; *sound_settled is set when one has just been finished with, so it can be saved. While an
+// export runs the controls are off, as it needs the video to itself.
+static void draw_transport_bar(const LayoutRect& rect, MediaContainerMgr& media, SoundSettings* sound, bool* sound_settled,
+    std::string* raw_screenshot_path, std::string* overlay_screenshot_path) {
     if (rect.w < 1.0f || rect.h < 1.0f)
         return;
     ImGui::SetNextWindowPos(ImVec2(rect.x, rect.y));
@@ -711,6 +713,22 @@ static void draw_transport_bar(const LayoutRect& rect, MediaContainerMgr& media,
         ImGui::Button("Slow", button_size);
         ImGui::SameLine();
         ImGui::Button("Fast", button_size);
+        ImGui::EndDisabled();
+
+        // Sound: a button to silence the preview and a slider for its volume. (The volume is kept while muted.)
+        ImGui::SameLine(0.0f, 24.0f);
+        if (ImGui::Button(sound->muted ? "Unmute" : "Mute", button_size)) {
+            sound->muted = !sound->muted;
+            *sound_settled = true;
+        }
+        ImGui::SameLine();
+        float percent = sound->volume * 100.0f;
+        ImGui::SetNextItemWidth(110.0f);
+        ImGui::BeginDisabled(sound->muted);
+        if (ImGui::SliderFloat("##volume", &percent, 0.0f, 100.0f, "Volume %.0f%%", ImGuiSliderFlags_AlwaysClamp))
+            sound->volume = percent / 100.0f;
+        if (ImGui::IsItemDeactivatedAfterEdit())
+            *sound_settled = true;
         ImGui::EndDisabled();
     }
     ImGui::End();
@@ -1058,6 +1076,11 @@ int main()
         nullptr,
         nullptr);
 
+    // Playing in real time, with the sound; and how loud that is (kept between runs).
+    Playback playback(&media_container_mgr);
+    SoundSettings sound_state = env_config.sound_settings();
+    bool sound_settled = false;
+
     float frame_time = ffsw::elapsed();
     float prev_frame_time = frame_time;
     float duration_avg = -1.0;
@@ -1393,7 +1416,7 @@ int main()
                 shown_preview = sync_layout.preview;
                 draw_splitter(sync_layout.splitter, &timeline_height);
                 const SyncView::Outcome outcome = sync_view.draw(sync_layout, edit_model, media_container_mgr, has_telemetry);
-                draw_transport_bar(sync_layout.transport, media_container_mgr, &pending_raw_screenshot_path, &pending_overlay_screenshot_path);
+                draw_transport_bar(sync_layout.transport, media_container_mgr, &sound_state, &sound_settled, &pending_raw_screenshot_path, &pending_overlay_screenshot_path);
                 // Done may be answered with a question (about telemetry the change moved under the edit).
                 if (outcome == SyncView::CANCEL || (outcome == SyncView::DONE && sync_view.confirm_done(edit_model)))
                     sync_view.leave(outcome == SyncView::DONE, &edit_model, &media_container_mgr);
@@ -1411,7 +1434,7 @@ int main()
                     timeline_height = taller_timeline;
                 if (reorder.requested)
                     timeline_editor.move_clip(&edit_model, &media_container_mgr, reorder.from, reorder.to);
-                draw_transport_bar(layout.transport, media_container_mgr, &pending_raw_screenshot_path, &pending_overlay_screenshot_path);
+                draw_transport_bar(layout.transport, media_container_mgr, &sound_state, &sound_settled, &pending_raw_screenshot_path, &pending_overlay_screenshot_path);
                 text_panel.draw_on_preview(layout.preview, !media_container_mgr.recording());
             }
             // The preview is the canvas, shown from ImGui's background list rather than in a window of
@@ -1662,14 +1685,27 @@ int main()
         }
 
         // Exporting runs flat-out regardless of whatever `paused` happened to be set to when
-        // it started -- it isn't "playback", so pause doesn't apply to it. Either way, running
-        // off the end of the video no longer closes the app -- it just stops advancing on the
-        // last frame, same as an ordinary pause (and, if this was an export, advance_frame()
-        // already finalized the output file itself -- see its AVERROR_EOF handling).
-        if (!paused || media_container_mgr.recording()) {
+        // it started -- it isn't "playback", so pause doesn't apply to it (and the speakers are quietened).
+        // Either way, running off the end of the video no longer closes the app -- it just stops
+        // advancing on the last frame, same as an ordinary pause (and, if this was an export,
+        // advance_frame() already finalized the output file itself -- see its AVERROR_EOF handling).
+        if (media_container_mgr.recording()) {
+            playback.update(true);
             if (!media_container_mgr.advance_frame()) {
                 paused = true;
             }
+        } else {
+            // Playing follows the clock (the sound's, when there is any), not the screen's refresh.
+            if (!playback.update(paused)) {
+                paused = true;
+            }
+        }
+        // The volume and mute the user has asked for, to what is playing now and to the settings for next time.
+        playback.set_sound(sound_state);
+        env_config.sound_settings(sound_state);
+        if (sound_settled) {
+            env_config.save_user_settings();
+            sound_settled = false;
         }
     }
 

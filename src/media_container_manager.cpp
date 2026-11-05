@@ -37,8 +37,9 @@ MediaContainerMgr::MediaContainerMgr(MediaDecoder* decoder, const std::string& v
     m_output_scale_context(nullptr),
     m_output_video_stream(nullptr),
     m_output_audio_stream(nullptr),
-    m_last_audio_dts(AV_NOPTS_VALUE),
-    m_dropped_audio_packets(0)
+    m_output_audio_codec_context(nullptr),
+    m_output_audio_frame(nullptr),
+    m_audio_samples_encoded(0)
 {
     init_rendering(extents);
 
@@ -228,14 +229,16 @@ void MediaContainerMgr::render() {
 
 bool MediaContainerMgr::advance_frame() {
     bool got_frame = m_decoder->read_frame();
-    // Audio comes along with the frames: whatever the decoder read on the way to this frame
-    // goes straight into the export.
-    if (m_recording) {
-        write_pending_audio();
-    }
     if (!got_frame) {
+        // The picture is over; so is the sound, to the very end of the edit.
+        if (m_recording)
+            write_audio_through(m_audio_timeline.total_samples());
         finalize_output();
         return false;
+    }
+    // Audio comes along with the frames: the sound for this frame goes into the export now.
+    if (m_recording) {
+        write_audio_for_current_frame();
     }
     return true;
 }
@@ -337,8 +340,8 @@ bool MediaContainerMgr::init_video_output(const std::string& video_file_name, un
 
 bool MediaContainerMgr::start_output(const std::string& video_file_name, unsigned int width, unsigned int height) {
     m_recording = true;
-    m_last_audio_dts = AV_NOPTS_VALUE;
-    m_dropped_audio_packets = 0;
+    m_audio_samples_encoded = 0;
+    m_audio_pending.clear();
 
     if (!(m_output_format = av_guess_format(nullptr, video_file_name.c_str(), nullptr))) {
         m_last_error = "Cannot tell what kind of file to write from that file name. Try a name ending in .mp4.";
@@ -400,24 +403,9 @@ bool MediaContainerMgr::start_output(const std::string& video_file_name, unsigne
     av_opt_set(m_output_video_codec_context, "tune", "hq", 0);
     avcodec_parameters_from_context(m_output_video_stream->codecpar, m_output_video_codec_context);
 
-    // Audio is a straight stream copy (see write_pending_audio()) -- no decoder or encoder
-    // needed, just an output stream whose codecpar matches the input audio exactly.
-    if (m_decoder->has_audio()) {
-        m_output_audio_stream = avformat_new_stream(m_output_format_context, nullptr);
-        if (!m_output_audio_stream) {
-            m_last_error = "Failed to create the audio stream in the output file.";
-            return false;
-        }
-        err = avcodec_parameters_copy(m_output_audio_stream->codecpar, m_decoder->audio_parameters());
-        if (err < 0) {
-            m_last_error = "Failed to copy the audio settings to the output file.";
-            return false;
-        }
-        // The input and output containers don't necessarily agree on codec tag numbering --
-        // clearing it lets the muxer pick the right tag for the output container itself rather
-        // than carrying over a stale (or wrong) one from the input.
-        m_output_audio_stream->codecpar->codec_tag = 0;
-    }
+    // The sound is made from the edit and encoded (see start_audio_output()).
+    if (m_decoder->has_audio() && !start_audio_output())
+        return false;
 
     err = avcodec_open2(m_output_video_codec_context, m_output_video_codec, nullptr);
     if (err < 0) {
@@ -442,16 +430,17 @@ bool MediaContainerMgr::start_output(const std::string& video_file_name, unsigne
     av_dump_format(m_output_format_context, 0, video_file_name.c_str(), 1);
 
     // Export always covers the whole input, start to finish, regardless of wherever playback
-    // happened to be sitting when it was started. The audio capture begins first, so the audio
-    // read on the way to the first frame isn't lost, and seek_keyframe() always does a real
-    // seek (never an answer from the frame cache, which would leave the demuxer wherever the
+    // happened to be sitting when it was started. seek_keyframe() always does a real seek
+    // (never an answer from the frame cache, which would leave the demuxer wherever the
     // previous run stopped).
-    m_decoder->begin_audio_capture();
     if (!m_decoder->seek_keyframe(0)) {
         m_last_error = "Could not go back to the start of the video.";
         return false;
     }
-    write_pending_audio();
+    if (m_output_audio_stream != nullptr) {
+        m_audio_timeline.seek(0);
+        write_audio_for_current_frame();
+    }
 
     return true;
 }
@@ -463,38 +452,129 @@ void MediaContainerMgr::abort_output() {
     if (m_output_format_context && m_output_format && !(m_output_format->flags & AVFMT_NOFILE) && m_output_format_context->pb) {
         avio_closep(&m_output_format_context->pb);
     }
-    m_decoder->end_audio_capture();
     free_output_assets();
     m_recording = false;
 }
 
-// Moves the audio packets the decoder has queued into the output file. They arrive on the
-// global clock; the only fix-up here is dropping any packet that would go backward in time.
-// Separately-recorded files rarely agree on exactly how long their audio is, and where one file's
-// sound runs a few milliseconds past the start of the next, the muxer would refuse the overlap.
-void MediaContainerMgr::write_pending_audio() {
-    AVPacket* packet;
-    while ((packet = m_decoder->pop_audio_packet()) != nullptr) {
-        if (!m_recording || m_output_audio_stream == nullptr) {
-            av_packet_free(&packet);
-            continue;
+// Sets up the output's sound: an AAC encoder and its stream, and the edit's sound ready to be rendered into it.
+bool MediaContainerMgr::start_audio_output() {
+    const AVCodec* codec = avcodec_find_encoder(AV_CODEC_ID_AAC);
+    if (codec == nullptr) {
+        m_last_error = "Could not find the AAC audio encoder.";
+        return false;
+    }
+    m_output_audio_stream = avformat_new_stream(m_output_format_context, nullptr);
+    m_output_audio_codec_context = avcodec_alloc_context3(codec);
+    m_output_audio_frame = av_frame_alloc();
+    if (m_output_audio_stream == nullptr || m_output_audio_codec_context == nullptr || m_output_audio_frame == nullptr) {
+        m_last_error = "Failed to create the audio stream in the output file.";
+        return false;
+    }
+    AVCodecContext* encoder = m_output_audio_codec_context;
+    encoder->sample_rate = audio_plan::SAMPLE_RATE;
+    av_channel_layout_default(&encoder->ch_layout, 2);
+    encoder->sample_fmt = AV_SAMPLE_FMT_FLTP;
+    encoder->bit_rate = 192000;
+    encoder->time_base.num = 1;
+    encoder->time_base.den = audio_plan::SAMPLE_RATE;
+    // MP4 wants the codec's setup data once, in the header, not in every packet.
+    if (m_output_format->flags & AVFMT_GLOBALHEADER)
+        encoder->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+    if (avcodec_open2(encoder, codec, nullptr) < 0) {
+        m_last_error = "Failed to start the audio encoder.";
+        return false;
+    }
+    if (avcodec_parameters_from_context(m_output_audio_stream->codecpar, encoder) < 0) {
+        m_last_error = "Failed to copy the audio settings to the output file.";
+        return false;
+    }
+    m_output_audio_stream->time_base = encoder->time_base;
+
+    m_output_audio_frame->nb_samples = encoder->frame_size;
+    m_output_audio_frame->format = encoder->sample_fmt;
+    m_output_audio_frame->sample_rate = encoder->sample_rate;
+    if (av_channel_layout_copy(&m_output_audio_frame->ch_layout, &encoder->ch_layout) < 0 ||
+        av_frame_get_buffer(m_output_audio_frame, 0) < 0) {
+        m_last_error = "Out of memory while setting up the audio encoder.";
+        return false;
+    }
+
+    std::vector<std::string> paths;
+    for (int i = 0; i < m_decoder->media_count(); i++)
+        paths.push_back(m_decoder->media_path(i));
+    const AVRational tick = m_decoder->time_base();
+    m_audio_timeline.set_edit(paths, m_decoder->edit_list(), (double)tick.num / (double)tick.den);
+    m_audio_timeline.seek(0);
+    return true;
+}
+
+// The sound up to the end of the frame the decoder is on.
+void MediaContainerMgr::write_audio_for_current_frame() {
+    const double seconds_per_tick = (double)m_decoder->time_base().num / (double)m_decoder->time_base().den;
+    const int64_t frame_end = m_decoder->pts() + m_decoder->frame_ticks();
+    write_audio_through(audio_plan::ticks_to_samples(frame_end, seconds_per_tick));
+}
+
+void MediaContainerMgr::write_audio_through(int64_t timeline_sample) {
+    if (!m_recording || m_output_audio_stream == nullptr)
+        return;
+    if (timeline_sample > m_audio_timeline.total_samples())
+        timeline_sample = m_audio_timeline.total_samples();
+    const int BLOCK = 4096;
+    while (m_audio_timeline.position() < timeline_sample) {
+        int64_t count = timeline_sample - m_audio_timeline.position();
+        if (count > BLOCK)
+            count = BLOCK;
+        const size_t old_size = m_audio_pending.size();
+        m_audio_pending.resize(old_size + (size_t)count * 2);
+        m_audio_timeline.render(m_audio_pending.data() + old_size, (int)count);
+    }
+    encode_audio(false);
+}
+
+void MediaContainerMgr::encode_audio(bool flush) {
+    if (m_output_audio_codec_context == nullptr)
+        return;
+    const int frame_size = m_output_audio_codec_context->frame_size;
+    while ((int)(m_audio_pending.size() / 2) >= frame_size || (flush && !m_audio_pending.empty())) {
+        int count = (int)(m_audio_pending.size() / 2);
+        if (count > frame_size)
+            count = frame_size;
+        if (av_frame_make_writable(m_output_audio_frame) < 0)
+            return;
+        // The encoder wants the two channels apart; what has been rendered has them interleaved.
+        float* left = (float*)m_output_audio_frame->data[0];
+        float* right = (float*)m_output_audio_frame->data[1];
+        for (int i = 0; i < frame_size; i++) {
+            left[i] = (i < count) ? m_audio_pending[(size_t)i * 2] : 0.0f;       // (The last frame is padded with silence.)
+            right[i] = (i < count) ? m_audio_pending[(size_t)i * 2 + 1] : 0.0f;
         }
-        if (packet->dts != AV_NOPTS_VALUE) {
-            if (m_last_audio_dts != AV_NOPTS_VALUE && packet->dts <= m_last_audio_dts) {
-                m_dropped_audio_packets++;
-                av_packet_free(&packet);
-                continue;
-            }
-            m_last_audio_dts = packet->dts;
-        }
+        m_audio_pending.erase(m_audio_pending.begin(), m_audio_pending.begin() + (size_t)count * 2);
+        m_output_audio_frame->pts = m_audio_samples_encoded;
+        m_audio_samples_encoded += frame_size;
+        if (avcodec_send_frame(m_output_audio_codec_context, m_output_audio_frame) < 0)
+            return;
+        write_audio_packets();
+    }
+    if (flush) {
+        avcodec_send_frame(m_output_audio_codec_context, nullptr);
+        write_audio_packets();
+    }
+}
+
+void MediaContainerMgr::write_audio_packets() {
+    AVPacket* packet = av_packet_alloc();
+    if (packet == nullptr)
+        return;
+    while (avcodec_receive_packet(m_output_audio_codec_context, packet) == 0) {
         packet->stream_index = m_output_audio_stream->index;
-        av_packet_rescale_ts(packet, m_decoder->audio_time_base(), m_output_audio_stream->time_base);
+        av_packet_rescale_ts(packet, m_output_audio_codec_context->time_base, m_output_audio_stream->time_base);
         int err = av_interleaved_write_frame(m_output_format_context, packet);
         if (err) {
-            printf("  audio remux error: %d\n", err);
+            printf("  audio write error: %d\n", err);
         }
-        av_packet_free(&packet);
     }
+    av_packet_free(&packet);
 }
 
 // Writes out every packet the encoder has ready. (It runs a few frames behind what's been
@@ -611,6 +691,9 @@ void MediaContainerMgr::free_output_assets() {
     if (m_output_video_codec_context) {
         avcodec_free_context(&m_output_video_codec_context);
     }
+    av_frame_free(&m_output_audio_frame);
+    avcodec_free_context(&m_output_audio_codec_context);
+    m_audio_pending.clear();
     if (m_output_format_context) {
         // Frees the AVFormatContext and its streams (m_output_video_stream/
         // m_output_audio_stream point into it, so they go away here too, not separately) --
@@ -632,8 +715,10 @@ bool MediaContainerMgr::finalize_output() {
     // read but not yet written, before the file is closed.
     avcodec_send_frame(m_output_video_codec_context, nullptr);
     write_encoded_packets();
-    write_pending_audio();
-    m_decoder->end_audio_capture();
+    encode_audio(true);
+    // A file whose sound could not be read comes out silent in the export; that is worth telling the user.
+    if (m_output_audio_stream != nullptr && m_last_error.empty() && !m_audio_timeline.last_error().empty())
+        m_last_error = "Part of the sound could not be read, so it is missing from the export.\n" + m_audio_timeline.last_error();
 
     av_write_trailer(m_output_format_context);
     bool closed_cleanly = true;
@@ -644,9 +729,6 @@ bool MediaContainerMgr::finalize_output() {
             m_last_error = "The exported file could not be closed properly. Is the disk full?";
             closed_cleanly = false;
         }
-    }
-    if (m_dropped_audio_packets > 0) {
-        printf("Export: dropped %d overlapping audio packets at file joins.\n", m_dropped_audio_packets);
     }
 
     // Whether or not the close above succeeded, the output is done with -- leave the assets

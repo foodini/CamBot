@@ -1,0 +1,257 @@
+// Playing an edit's sound (audio_timeline.h), against a fake file reader whose samples say where they came from: the left channel
+// is the sample number in the file, the right is the file's tag (fake_audio_file_reader.cpp).
+#include <math.h>
+#include <stdio.h>
+#include <vector>
+
+#include "audio_timeline.h"
+
+void fake_audio_reset();
+int  fake_audio_seek_count();
+int  fake_audio_open_count();
+
+static int g_failures = 0;
+#define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); g_failures++; } } while (0)
+
+using namespace audio_plan;
+
+static const double TICK = 0.001;   // 48 samples to a tick.
+
+static std::vector<std::string> names(const char* a, const char* b, const char* c) {
+	std::vector<std::string> paths;
+	paths.push_back(a);
+	paths.push_back(b);
+	paths.push_back(c);
+	return paths;
+}
+
+static EditList make_list(const std::vector<Clip>& clips) {
+	EditList list;
+	list.set(clips);
+	return list;
+}
+
+static void test_plays_clips_in_order() {
+	fake_audio_reset();
+	std::vector<Clip> clips;
+	clips.push_back(Clip(0, 100, 200));    // File a, from sample 4800: 4800 samples.
+	clips.push_back(Clip(1, 0, 100));      // File b, from the start.
+	AudioTimeline timeline;
+	timeline.set_edit(names("a.mp4", "b.mp4", "c.mp4"), make_list(clips), TICK);
+	CHECK(timeline.total_samples() == 9600);
+
+	std::vector<float> out(9600 * 2, -1.0f);
+	timeline.render(out.data(), 9600);
+	CHECK(timeline.position() == 9600);
+	// The middle of the first clip: file a at 4800 + n, tag 1, full volume.
+	CHECK(out[2000 * 2] == 4800.0f + 2000.0f && out[2000 * 2 + 1] == 1.0f);
+	// And of the second: file b at n, tag 2.
+	CHECK(out[(4800 + 2000) * 2] == 2000.0f && out[(4800 + 2000) * 2 + 1] == 2.0f);
+	// Faded to nothing either side of the cut (and at the very ends).
+	CHECK(out[0] == 0.0f && out[1] == 0.0f);
+	CHECK(out[(4800 - 1) * 2] == 0.0f);
+	CHECK(out[4800 * 2] == 0.0f);
+	CHECK(out[(9600 - 1) * 2] == 0.0f);
+	// Rising: the right channel (a steady tag) shows the gain directly.
+	CHECK(out[(4800 + 100) * 2 + 1] > out[(4800 + 50) * 2 + 1]);
+	CHECK(fabsf(out[(4800 + 240) * 2 + 1] - 1.0f) < 1.0f);   // Halfway up a fade to 2.0.
+	CHECK(fabsf(out[(4800 + 480) * 2 + 1] - 2.0f) < 1e-6f);
+}
+
+static void test_split_carries_on_without_fade_or_seek() {
+	fake_audio_reset();
+	std::vector<Clip> clips;
+	clips.push_back(Clip(0, 100, 150));
+	clips.push_back(Clip(0, 150, 300));   // A split: straight on.
+	AudioTimeline timeline;
+	timeline.set_edit(names("a.mp4", "b.mp4", "c.mp4"), make_list(clips), TICK);
+	std::vector<float> out((size_t)timeline.total_samples() * 2);
+	timeline.render(out.data(), (int)timeline.total_samples());
+	const int join = 50 * 48;
+	// No dip at the join, and the left channel runs on unbroken from one clip into the next.
+	for (int i = join - 4; i < join + 4; i++) {
+		CHECK(out[i * 2 + 1] == 1.0f);
+		CHECK(out[i * 2] == 4800.0f + (float)i);
+	}
+	// One seek for the start of the first clip and none for the second.
+	CHECK(fake_audio_seek_count() == 1);
+}
+
+static void test_reordered_clips_seek() {
+	fake_audio_reset();
+	std::vector<Clip> clips;
+	clips.push_back(Clip(0, 200, 300));
+	clips.push_back(Clip(0, 0, 100));   // Back to an earlier part of the same file.
+	AudioTimeline timeline;
+	timeline.set_edit(names("a.mp4", "b.mp4", "c.mp4"), make_list(clips), TICK);
+	std::vector<float> out((size_t)timeline.total_samples() * 2);
+	timeline.render(out.data(), (int)timeline.total_samples());
+	CHECK(out[1000 * 2] == 9600.0f + 1000.0f);
+	CHECK(out[(4800 + 1000) * 2] == 1000.0f);
+	CHECK(fake_audio_seek_count() == 2);
+	CHECK(out[4800 * 2 + 1] == 0.0f);   // Faded at the cut.
+}
+
+static void test_render_in_small_blocks_matches() {
+	std::vector<Clip> clips;
+	clips.push_back(Clip(0, 100, 150));
+	clips.push_back(Clip(1, 0, 40));
+	clips.push_back(Clip(0, 300, 330));
+	AudioTimeline whole;
+	whole.set_edit(names("a.mp4", "b.mp4", "c.mp4"), make_list(clips), TICK);
+	const int total = (int)whole.total_samples();
+	std::vector<float> expected((size_t)total * 2);
+	whole.render(expected.data(), total);
+
+	AudioTimeline pieces;
+	pieces.set_edit(names("a.mp4", "b.mp4", "c.mp4"), make_list(clips), TICK);
+	std::vector<float> got((size_t)total * 2);
+	int at = 0;
+	const int blocks[5] = { 1, 1000, 333, 4096, 7 };
+	int which = 0;
+	while (at < total) {
+		int n = blocks[which++ % 5];
+		if (n > total - at)
+			n = total - at;
+		pieces.render(got.data() + (size_t)at * 2, n);
+		at += n;
+	}
+	bool same = true;
+	for (size_t i = 0; i < got.size(); i++)
+		same = same && got[i] == expected[i];
+	CHECK(same);
+}
+
+static void test_seek_and_the_end() {
+	std::vector<Clip> clips;
+	clips.push_back(Clip(0, 0, 100));
+	AudioTimeline timeline;
+	timeline.set_edit(names("a.mp4", "b.mp4", "c.mp4"), make_list(clips), TICK);
+	timeline.seek(2000);
+	CHECK(timeline.position() == 2000);
+	std::vector<float> out(2 * 8000, 7.0f);
+	timeline.render(out.data(), 8000);   // Runs 2800 past the end.
+	CHECK(out[0] == 2000.0f);
+	CHECK(timeline.position() == 10000);
+	CHECK(out[(4799 - 2000) * 2] == 0.0f);        // Last sample of the edit, faded out.
+	CHECK(out[(4800 - 2000) * 2] == 0.0f && out[(4800 - 2000) * 2 + 1] == 0.0f);   // Then silence.
+	CHECK(out[7999 * 2] == 0.0f);
+	timeline.seek(-5);
+	CHECK(timeline.position() == 0);
+	timeline.seek(1 << 30);
+	CHECK(timeline.position() == 4800);
+}
+
+// What the fades are for: cutting a steady tone into pieces and putting them back out of order must not make a click. A click is
+// a jump between neighbouring samples much bigger than the tone itself ever makes (a 1 kHz sine at full level moves 0.13 at most
+// from one sample to the next; a hard cut at the wrong phase jumps by up to 2).
+static float biggest_step(const std::vector<float>& out, int total) {
+	float biggest = 0.0f;
+	for (int i = 1; i < total; i++) {
+		const float step = fabsf(out[i * 2] - out[(i - 1) * 2]);
+		if (step > biggest)
+			biggest = step;
+	}
+	return biggest;
+}
+
+static void test_cuts_make_no_click() {
+	std::vector<Clip> clips;
+	// Ten pieces of a one-second stretch, from places that do not line up, in a shuffled order.
+	const int order[10] = { 7, 2, 9, 0, 4, 8, 1, 6, 3, 5 };
+	for (int i = 0; i < 10; i++)
+		clips.push_back(Clip(0, order[i] * 77 + 5, order[i] * 77 + 5 + 61));
+	AudioTimeline timeline;
+	timeline.set_edit(names("tone.mp4", "b.mp4", "c.mp4"), make_list(clips), TICK);
+	const int total = (int)timeline.total_samples();
+	std::vector<float> out((size_t)total * 2);
+	timeline.render(out.data(), total);
+	CHECK(biggest_step(out, total) < 0.2f);
+
+	// The same edit with every cut left raw (the fades taken out) does click, so the check above is a real one.
+	float raw_biggest = 0.0f;
+	for (int c = 1; c < 10; c++) {
+		const int64_t before = audio_plan::ticks_to_samples(clips[c - 1].out_ticks - 1, TICK);
+		const int64_t after = audio_plan::ticks_to_samples(clips[c].in_ticks, TICK);
+		const float a = (float)sin(2.0 * 3.14159265358979 * 1013.0 * (double)before / 48000.0);
+		const float b = (float)sin(2.0 * 3.14159265358979 * 1013.0 * (double)after / 48000.0);
+		if (fabsf(a - b) > raw_biggest)
+			raw_biggest = fabsf(a - b);
+	}
+	CHECK(raw_biggest > 0.5f);
+
+	// A split carries on with no step at all.
+	std::vector<Clip> split;
+	split.push_back(Clip(0, 100, 150));
+	split.push_back(Clip(0, 150, 400));
+	AudioTimeline carried;
+	carried.set_edit(names("tone.mp4", "b.mp4", "c.mp4"), make_list(split), TICK);
+	const int carried_total = (int)carried.total_samples();
+	std::vector<float> carried_out((size_t)carried_total * 2);
+	carried.render(carried_out.data(), carried_total);
+	CHECK(biggest_step(carried_out, carried_total) < 0.14f);
+}
+
+static void test_files_without_sound() {
+	fake_audio_reset();
+	std::vector<Clip> clips;
+	clips.push_back(Clip(1, 0, 100));    // No sound: silence, not an error.
+	clips.push_back(Clip(0, 0, 100));
+	clips.push_back(Clip(2, 0, 100));    // Won't open: silence, and the user is told.
+	AudioTimeline timeline;
+	timeline.set_edit(names("a.mp4", "silent.mp4", "missing.mp4"), make_list(clips), TICK);
+	std::vector<float> out((size_t)timeline.total_samples() * 2, 5.0f);
+	timeline.render(out.data(), (int)timeline.total_samples());
+	CHECK(out[1000 * 2] == 0.0f && out[1000 * 2 + 1] == 0.0f);
+	CHECK(out[(4800 + 1000) * 2 + 1] == 1.0f);
+	CHECK(out[(9600 + 1000) * 2] == 0.0f);
+	CHECK(timeline.last_error().find("missing") != std::string::npos);
+	// Each is tried once, however often it comes up.
+	timeline.seek(0);
+	timeline.render(out.data(), (int)timeline.total_samples());
+	CHECK(fake_audio_open_count() == 3);
+}
+
+static void test_editing_keeps_readers() {
+	fake_audio_reset();
+	std::vector<Clip> clips;
+	clips.push_back(Clip(0, 0, 100));
+	AudioTimeline timeline;
+	timeline.set_edit(names("a.mp4", "b.mp4", "c.mp4"), make_list(clips), TICK);
+	std::vector<float> out(2 * 100);
+	timeline.render(out.data(), 100);
+	CHECK(fake_audio_open_count() == 1);
+	// A different edit of the same files does not reopen anything.
+	clips.push_back(Clip(0, 200, 300));
+	timeline.set_edit(names("a.mp4", "b.mp4", "c.mp4"), make_list(clips), TICK);
+	CHECK(timeline.total_samples() == 9600);
+	timeline.seek(0);
+	timeline.render(out.data(), 100);
+	CHECK(fake_audio_open_count() == 1);
+	// Other files do.
+	timeline.set_edit(names("c.mp4", "b.mp4", "a.mp4"), make_list(clips), TICK);
+	timeline.seek(0);
+	timeline.render(out.data(), 100);
+	CHECK(fake_audio_open_count() == 2);
+	// An empty edit is silent and harmless.
+	std::vector<Clip> none;
+	timeline.set_edit(names("a.mp4", "b.mp4", "c.mp4"), make_list(none), TICK);
+	CHECK(timeline.total_samples() == 0);
+	out.assign(20, 1.0f);
+	timeline.render(out.data(), 10);
+	CHECK(out[0] == 0.0f && out[19] == 0.0f);
+}
+
+int main() {
+	test_plays_clips_in_order();
+	test_split_carries_on_without_fade_or_seek();
+	test_reordered_clips_seek();
+	test_render_in_small_blocks_matches();
+	test_seek_and_the_end();
+	test_cuts_make_no_click();
+	test_files_without_sound();
+	test_editing_keeps_readers();
+	if (g_failures == 0)
+		printf("audio_timeline_test: all ok\n");
+	return g_failures == 0 ? 0 : 1;
+}

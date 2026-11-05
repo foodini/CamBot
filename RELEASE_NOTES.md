@@ -275,6 +275,20 @@
   broken sample.
 - **Text panel.** A line under *Timing* (and tooltips on the size, opacity and offset fields) say that values are dragged to
   change them and Ctrl+click types one.
+- **Sound in exports is now made from the edit.** It used to be copied, packet for packet, from the camera files, which
+  clicked at cuts and could drift where clips were moved or files joined. CamBot now reads each clip's sound from its file,
+  plays the clips one after another with a 10 ms fade each side of every cut (none where a clip just carries on from the
+  one before, as after a split), and encodes the result as AAC (48 kHz stereo, 192 kbit/s). The sound is laid out from the
+  edit itself, so it stays in step with the picture however the clips are cut and arranged. A file whose sound can't be
+  read comes out silent, and the export says so when it finishes. (This is also the groundwork for hearing the sound while
+  you edit and for changing a clip's speed.)
+- **Sound while you edit, and real-time playback.** Play now plays the sound of the edit through the speakers (Windows'
+  built-in audio, no new files to install), with a **Mute** button and a **Volume** slider at the end of the transport bar's
+  lower row; both are remembered for next time and affect only what you hear, never an export. Playback also now keeps real
+  time: the picture follows the sound (or, for footage with no sound or a machine with no speakers, the computer's clock), and
+  if the machine can't decode fast enough it skips frames instead of running slowly. Before, playback advanced one frame per
+  screen refresh, which only looked right when the screen's rate matched the video's. Stepping, scrubbing and the other ways
+  of moving around are silent, and playing carries on from wherever you put the picture.
 - **Tests.** `tests/run_tests.sh` (run it with `wsl ./tests/run_tests.sh`) builds and runs
   the unit tests: climb filters, map zoom, flight statistics, altitude references, user
   settings, the source timeline and file ordering, project reading, and the multi-file
