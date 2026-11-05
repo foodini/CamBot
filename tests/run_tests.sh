@@ -28,6 +28,7 @@ for test in *_test.cpp; do
     if [ "$name" = "map_view_test" ]; then extra="../src/map_view.cpp"; fi
     if [ "$name" = "tile_fetcher_test" ]; then extra="../src/tile_fetcher.cpp ../src/map_tiles.cpp ../src/map_view.cpp ../src/file_io.cpp -pthread"; fi
     if [ "$name" = "map_tiles_test" ]; then extra="../src/map_tiles.cpp ../src/map_view.cpp"; fi
+    if [ "$name" = "thumbnail_layout_test" ]; then extra="../src/thumbnail_layout.cpp"; fi
     if [ "$name" = "timeline_scale_test" ]; then extra="../src/timeline_scale.cpp ../src/scan_gesture.cpp"; fi
     # The decoder test runs the real MediaDecoder against a fake FFmpeg (fake_ffmpeg.cpp) that
     # serves small synthetic files, so no FFmpeg libraries or video files are needed.

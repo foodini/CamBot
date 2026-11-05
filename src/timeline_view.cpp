@@ -1,6 +1,7 @@
 #include "timeline_view.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <string>
 
 #include "imgui/imgui.h"
@@ -9,6 +10,8 @@
 #include "file_io.h"
 #include "media_container_manager.h"
 #include "scan_gesture.h"
+#include "thumbnail_layout.h"
+#include "thumbnail_store.h"
 #include "timeline_edit.h"
 #include "timeline_editor.h"
 
@@ -18,7 +21,11 @@ const float  RULER_HEIGHT = 22.0f;
 const float  TRACK_GAP = 4.0f;                 // Between the ruler and the clips.
 const float  TRACK_BOTTOM_MARGIN = 6.0f;
 const float  MIN_TRACK_HEIGHT = 24.0f;
-const float  MAX_TRACK_HEIGHT = 64.0f;
+const float  MAX_TRACK_HEIGHT = 120.0f;
+const float  CLIP_ROUNDING = 6.0f;             // The corners of a clip.
+const float  CLIP_BORDER_WIDTH = 2.0f;
+const float  RULER_TINT_FACTOR = 0.5f;         // The file's color on the ruler is darkened, so the times on it stay easy to read.
+const int    MAX_PICTURES_PER_CLIP = 80;
 const double FRAME_PIXELS_AT_MAX_ZOOM = 32.0;  // Zoomed in as far as it goes, one frame is this wide.
 const double MIN_LABEL_PIXELS = 90.0;          // Least room between labelled marks on the ruler.
 const float  ZOOM_PER_WHEEL_NOTCH = 1.25f;
@@ -30,6 +37,8 @@ const ImU32 COLOR_RULER_MARK = IM_COL32(120, 120, 135, 255);
 const ImU32 COLOR_RULER_TEXT = IM_COL32(190, 190, 205, 255);
 const ImU32 COLOR_CLIP_BORDER = IM_COL32(12, 12, 15, 255);
 const ImU32 COLOR_CLIP_TEXT = IM_COL32(240, 240, 245, 255);
+const ImU32 COLOR_CLIP_BACKDROP = IM_COL32(30, 30, 36, 255);       // Behind the pictures, where one hasn't arrived.
+const ImU32 COLOR_NAME_PLATE = IM_COL32(0, 0, 0, 150);             // Under a file's name, so it can be read over any picture.
 const ImU32 COLOR_JOIN = IM_COL32(235, 200, 70, 255);
 const ImU32 COLOR_PLAYHEAD = IM_COL32(240, 70, 70, 255);
 const ImU32 COLOR_CURRENT_CLIP = IM_COL32(245, 245, 250, 255);   // Outlines the clip the playhead is in.
@@ -37,12 +46,40 @@ const ImU32 COLOR_DROP_MARK = IM_COL32(255, 255, 255, 255);      // Where a drag
 const ImU32 COLOR_DROP_GLOW = IM_COL32(235, 245, 255, 255);      // with a pulsing glow, and a dark edge so it shows on pale blocks too.
 const ImU32 COLOR_DROP_EDGE = IM_COL32(0, 0, 0, 230);
 
-// Each file gets its own muted color, so footage from the same file looks the same wherever it is.
-ImU32 color_for_media(int media) {
-	float hue = fmodf((float)media * 0.618034f, 1.0f);
-	float red = 0.0f, green = 0.0f, blue = 0.0f;
-	ImGui::ColorConvertHSVtoRGB(hue, 0.35f, 0.50f, red, green, blue);
-	return IM_COL32((int)(red * 255.0f), (int)(green * 255.0f), (int)(blue * 255.0f), 255);
+// The files' colors, chosen to be told apart by people who see red and green poorly: the Okabe-Ito set, whose colors differ
+// along the blue-yellow axis and in brightness, which such eyes still see. They go round again past the seventh file, so the
+// number on each clip (see capture_number) is what finally tells files apart.
+const ImU32 FILE_COLORS[7] = {
+	IM_COL32(0, 114, 178, 255),     // Blue.
+	IM_COL32(230, 159, 0, 255),     // Orange.
+	IM_COL32(86, 180, 233, 255),    // Sky blue.
+	IM_COL32(240, 228, 66, 255),    // Yellow.
+	IM_COL32(213, 94, 0, 255),      // Vermillion.
+	IM_COL32(0, 158, 115, 255),     // Bluish green.
+	IM_COL32(204, 121, 167, 255),   // Reddish purple.
+};
+
+ImU32 color_for_number(int number) {
+	return FILE_COLORS[((number > 0 ? number : 1) - 1) % 7];
+}
+
+// Where the file comes in the order the files were recorded, from 1: the number shown on its clips. (In the Sync /
+// Reorder view that is the order the files are laid out in, left to right.)
+int capture_number(const EditModel& model, int media) {
+	const std::vector<int>& order = model.capture().order();
+	for (size_t i = 0; i < order.size(); i++) {
+		if (order[i] == media)
+			return (int)i + 1;
+	}
+	return media + 1;
+}
+
+// Black or white, whichever reads better on `background`.
+ImU32 text_color_on(ImU32 background) {
+	const int red = (int)((background >> IM_COL32_R_SHIFT) & 0xFF);
+	const int green = (int)((background >> IM_COL32_G_SHIFT) & 0xFF);
+	const int blue = (int)((background >> IM_COL32_B_SHIFT) & 0xFF);
+	return (299 * red + 587 * green + 114 * blue) > 150000 ? IM_COL32(0, 0, 0, 255) : IM_COL32(255, 255, 255, 255);
 }
 
 // A button that is greyed out, and does nothing, unless `enabled`; hovering it says what it does.
@@ -69,7 +106,7 @@ float smaller(float a, float b) { return a < b ? a : b; }
 }  // namespace
 
 TimelineView::TimelineView(const char* window_name) :
-	m_window_name(window_name), m_panning(false), m_scrubbing(false), m_scrub_ticks(-1), m_drag_clip(-1), m_drag_to(-1),
+	m_window_name(window_name), m_thumbnails(nullptr), m_panning(false), m_scrubbing(false), m_scrub_ticks(-1), m_drag_clip(-1), m_drag_to(-1),
 	m_scanning(false), m_scan_origin_x(0.0f), m_scan_accumulator(0.0f), m_last_playhead(-1), m_follow(true)
 {
 }
@@ -269,8 +306,20 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 	draw->PushClipRect(strip_min, strip_max, true);
 	draw->AddRectFilled(strip_min, strip_max, COLOR_BACKGROUND);
 
-	// The ruler.
+	// The ruler, tinted with the color of the file under each stretch of it, so footage cut up and shuffled about
+	// can be told by color alone.
 	const float ruler_bottom = origin.y + RULER_HEIGHT;
+	for (int i = 0; i < clips.count(); i++) {
+		const double tint_start = (double)clips.start(i);
+		const double tint_end = tint_start + (double)clips.clip(i).duration_ticks();
+		float tint_left = origin.x + m_scale.tick_to_x(tint_start);
+		float tint_right = origin.x + m_scale.tick_to_x(tint_end);
+		if (tint_right < strip_min.x || tint_left > strip_max.x)
+			continue;
+		tint_left = larger(tint_left, strip_min.x);
+		tint_right = smaller(tint_right, strip_max.x);
+		draw->AddRectFilled(ImVec2(tint_left, origin.y), ImVec2(tint_right, ruler_bottom), darkened(color_for_number(capture_number(model, clips.clip(i).media)), RULER_TINT_FACTOR));
+	}
 	const double seconds_per_tick = model.seconds_per_tick();
 	const double step = timeline_ruler::step_seconds(m_scale.ticks_per_pixel() * seconds_per_tick, MIN_LABEL_PIXELS);
 	const int64_t first_mark = (int64_t)floor(m_scale.view_start() * seconds_per_tick / step);
@@ -291,6 +340,12 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 	float track_height = available.y - RULER_HEIGHT - TRACK_GAP - TRACK_BOTTOM_MARGIN;
 	track_height = larger(MIN_TRACK_HEIGHT, smaller(MAX_TRACK_HEIGHT, track_height));
 	const float track_bottom = track_top + track_height;
+	// The pictures are as wide as the track is tall, the video's shape. (A video upside down in the preview is upside down here.)
+	const float picture_aspect = m_thumbnails != nullptr ? m_thumbnails->aspect() : 16.0f / 9.0f;
+	const double picture_width = (double)(track_height * picture_aspect);
+	const bool turned_over = cosf(media.rotation_angle()) < 0.0f;
+	if (m_thumbnails != nullptr)
+		m_thumbnails->begin_frame();
 	for (int i = 0; i < clips.count(); i++) {
 		const Clip& clip = clips.clip(i);
 		const double start = (double)clips.start(i);
@@ -300,27 +355,82 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 		if (right < strip_min.x || left > strip_max.x)
 			continue;
 		const bool join_in_view = left >= strip_min.x && i > 0;
+		// The ends as they really are (in doubles, as zoomed in far they are a long way off the strip), for laying out the pictures.
+		const double true_left = (double)origin.x + (start - m_scale.view_start()) / m_scale.ticks_per_pixel();
+		const double true_right = (double)origin.x + (end - m_scale.view_start()) / m_scale.ticks_per_pixel();
 		// Coordinates far outside the strip are held just outside it, where the clipping hides them.
 		left = larger(left, strip_min.x - 4.0f);
 		right = smaller(right, strip_max.x + 4.0f);
-		ImU32 fill = color_for_media(clip.media);
-		if (i == m_drag_clip)
-			fill = darkened(fill, 0.15f);   // Nearly black where it was picked up.
-		draw->AddRectFilled(ImVec2(left, track_top), ImVec2(right, track_bottom), fill);
-		draw->AddRect(ImVec2(left, track_top), ImVec2(right, track_bottom), COLOR_CLIP_BORDER);
+		const int number = capture_number(model, clip.media);
+		const ImU32 file_color = color_for_number(number);
+		draw->AddRectFilled(ImVec2(left, track_top), ImVec2(right, track_bottom), COLOR_CLIP_BACKDROP, CLIP_ROUNDING);
 
-		// The file's name, kept in view while any of the clip is.
+		// The pictures: from the clip's left end, one after another, the last cut short where the clip ends.
+		if (m_thumbnails != nullptr) {
+			const std::vector<thumbnails::TileSlot> slots = thumbnails::visible_tiles(true_left, true_right, (double)strip_min.x - 1.0,
+				(double)strip_max.x + 1.0, picture_width, MAX_PICTURES_PER_CLIP);
+			for (size_t t = 0; t < slots.size(); t++) {
+				const thumbnails::TileSlot& slot = slots[t];
+				ImDrawFlags corners = ImDrawFlags_RoundCornersNone;
+				if (slot.index == 0)
+					corners |= ImDrawFlags_RoundCornersLeft;
+				if (slot.right >= true_right - 0.001)
+					corners |= ImDrawFlags_RoundCornersRight;
+				const int64_t moment = thumbnails::tile_ticks(clip.in_ticks, clip.out_ticks, slot.index, picture_width, m_scale.ticks_per_pixel());
+				// The first picture of a clip is that exact frame: it is the one being cut around.
+				const unsigned int texture = m_thumbnails->want(clip.media, moment, slot.index == 0);
+				const ImVec2 picture_min((float)slot.left, track_top);
+				const ImVec2 picture_max((float)slot.right, track_bottom);
+				if (texture == 0)
+					continue;   // The backdrop shows.
+				const float shown = (float)slot.shown;
+				const ImVec2 uv_min = turned_over ? ImVec2(1.0f, 1.0f) : ImVec2(0.0f, 0.0f);
+				const ImVec2 uv_max = turned_over ? ImVec2(1.0f - shown, 0.0f) : ImVec2(shown, 1.0f);
+				draw->AddImageRounded((ImTextureID)(uintptr_t)texture, picture_min, picture_max, uv_min, uv_max, IM_COL32_WHITE,
+					CLIP_ROUNDING, corners);
+			}
+		}
+		if (i == m_drag_clip)
+			draw->AddRectFilled(ImVec2(left, track_top), ImVec2(right, track_bottom), IM_COL32(0, 0, 0, 200), CLIP_ROUNDING);   // Nearly black where it was picked up.
+		draw->AddRect(ImVec2(left, track_top), ImVec2(right, track_bottom), file_color, CLIP_ROUNDING, 0, CLIP_BORDER_WIDTH);
+
+		// The file's number and name, in the corner of the clip and kept in view while any of the clip is, on a dark plate so
+		// it reads over any picture; the number is on a patch of the file's color. A clip too narrow for the whole of it shows
+		// just the number (or nothing, when narrower still), and hovering it names the file.
 		const float text_left = larger(left, strip_min.x);
 		const float text_right = smaller(right, strip_max.x);
+		const std::string name = fileio::base_name(model.media_path(clip.media));
+		bool name_hidden = true;
 		if (text_right - text_left > 24.0f) {
-			const std::string name = fileio::base_name(model.media_path(clip.media));
+			char number_text[16];
+			snprintf(number_text, sizeof(number_text), "%d", number);
+			const ImVec2 number_size = ImGui::CalcTextSize(number_text);
+			const ImVec2 name_size = ImGui::CalcTextSize(name.c_str());
+			const float badge_width = number_size.x + 10.0f;
+			const float plate_height = number_size.y + 4.0f;
+			const float full_width = badge_width + name_size.x + 10.0f;
+			const float room = text_right - text_left - 10.0f;
+			const ImVec2 plate_min(text_left + 5.0f, track_top + 5.0f);
 			draw->PushClipRect(ImVec2(text_left + 1.0f, track_top), ImVec2(text_right - 1.0f, track_bottom), true);
-			draw->AddText(ImVec2(text_left + 6.0f, track_top + 5.0f), COLOR_CLIP_TEXT, name.c_str());
+			if (room >= full_width) {
+				draw->AddRectFilled(plate_min, ImVec2(plate_min.x + full_width, plate_min.y + plate_height), COLOR_NAME_PLATE, 3.0f);
+				draw->AddText(ImVec2(plate_min.x + badge_width + 5.0f, plate_min.y + 2.0f), COLOR_CLIP_TEXT, name.c_str());
+				name_hidden = false;
+			}
+			if (room >= badge_width) {
+				draw->AddRectFilled(plate_min, ImVec2(plate_min.x + badge_width, plate_min.y + plate_height), file_color, 3.0f);
+				draw->AddText(ImVec2(plate_min.x + 5.0f, plate_min.y + 2.0f), text_color_on(file_color), number_text);
+			}
 			draw->PopClipRect();
 		}
+		if (name_hidden && hovered && !m_scrubbing && !m_scanning && m_drag_clip < 0 && io.MousePos.x >= left && io.MousePos.x <= right &&
+				io.MousePos.y >= track_top && io.MousePos.y <= track_bottom)
+			ImGui::SetTooltip("%d: %s", number, name.c_str());
 		if (join_in_view)
 			draw->AddLine(ImVec2(left, origin.y + 2.0f), ImVec2(left, track_bottom), COLOR_JOIN, 2.0f);
 	}
+	if (m_thumbnails != nullptr)
+		m_thumbnails->end_frame();
 
 	// The clip the playhead is in, which the edit buttons and keys act on.
 	const int current = timeline_edit::current_clip(clips, playhead);
@@ -329,7 +439,7 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 		const double end = start + (double)clips.clip(current).duration_ticks();
 		const float left = larger(origin.x + m_scale.tick_to_x(start), strip_min.x - 4.0f);
 		const float right = smaller(origin.x + m_scale.tick_to_x(end), strip_max.x + 4.0f);
-		draw->AddRect(ImVec2(left, track_top - 1.0f), ImVec2(right, track_bottom + 1.0f), COLOR_CURRENT_CLIP, 0.0f, 0, 2.0f);
+		draw->AddRect(ImVec2(left, track_top - 1.0f), ImVec2(right, track_bottom + 1.0f), COLOR_CURRENT_CLIP, CLIP_ROUNDING, 0, 2.0f);
 	}
 
 	// A clip being carried: a copy of it follows the mouse, and a mark shows where it would be dropped.
@@ -338,7 +448,7 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 		const float ghost_width = larger(8.0f, (float)((double)dragged.duration_ticks() / m_scale.ticks_per_pixel()));
 		const float ghost_left = origin.x + mouse_x - ghost_width / 2.0f;
 		draw->AddRectFilled(ImVec2(ghost_left, track_top), ImVec2(ghost_left + ghost_width, track_bottom),
-			(color_for_media(dragged.media) & 0x00FFFFFF) | IM_COL32(0, 0, 0, 170));
+			(color_for_number(capture_number(model, dragged.media)) & 0x00FFFFFF) | IM_COL32(0, 0, 0, 170));
 		draw->AddRect(ImVec2(ghost_left, track_top), ImVec2(ghost_left + ghost_width, track_bottom), COLOR_CURRENT_CLIP);
 		if (m_drag_to != m_drag_clip) {
 			// The drop mark runs the whole height of the strip, well clear of the blocks, with a glow that

@@ -1,7 +1,8 @@
 #pragma once
 
-// The timeline editor: the clips of the edit timeline laid out left to right as blocks named for
-// their files, with a ruler above them, a mark where each join is, and the playhead. The mouse
+// The timeline editor: the clips of the edit timeline laid out left to right as blocks filled with
+// small pictures of the video, each with its file's name in the corner and its file's colour round
+// it and on the ruler above it, a mark where each join is, and the playhead. The mouse
 // moves around it: left-drag (or click) scrubs, the right button drags to scan forward and back,
 // the wheel zooms about the cursor, and the middle button, Shift and the wheel, or a left-drag on
 // the ruler pans. Ctrl and the left button together pick up a clip and drop it in another place in
@@ -19,6 +20,7 @@
 #include "window_layout.h"
 
 class MediaContainerMgr;
+class ThumbnailStore;
 class TimelineEditor;
 
 // What the user asked for by dropping a clip somewhere else: clip `from` is to become clip `to`
@@ -47,9 +49,13 @@ public:
 	// Shows the whole timeline.
 	void fit() { m_scale.fit(); }
 
+	// Where the pictures on the clips come from. Without one (the default) the clips are plain blocks.
+	void set_thumbnails(ThumbnailStore* thumbnails) { m_thumbnails = thumbnails; }
+
 private:
-	std::string   m_window_name;
-	TimelineScale m_scale;
+	std::string     m_window_name;
+	TimelineScale   m_scale;
+	ThumbnailStore* m_thumbnails;
 
 	// Left button on the ruler: grabbing the timeline to slide it left and right.
 	bool    m_panning;

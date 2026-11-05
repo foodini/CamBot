@@ -27,12 +27,16 @@
 #include "window_layout.h"
 
 class MediaContainerMgr;
+class ThumbnailStore;
 struct ImDrawList;
 
 class SyncView {
 public:
 	// `tiles` is the program's map picture layer (see tile_layer.h), shared with whatever fetches ahead of time.
 	explicit SyncView(TileLayer* tiles);
+
+	// Where the pictures on the footage timeline come from (see TimelineView::set_thumbnails).
+	void set_thumbnails(ThumbnailStore* thumbnails) { m_timeline.set_thumbnails(thumbnails); }
 
 	bool active() const { return m_active; }
 

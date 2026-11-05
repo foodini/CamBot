@@ -132,6 +132,20 @@
 - **Done in the Sync / Reorder view leaves the playhead on the frame that was on screen**, wherever the
   playhead was when the view was opened (Cancel still puts it back there). If the edit has cut that footage, it
   goes to the nearest footage that is left.
+- **Pictures on the timeline.** Each clip on the timeline (and in the Sync / Reorder view's footage
+  timeline) is now filled with small pictures of the video, like other editors' film strips. The first
+  picture sits against the clip's left edge and shows the exact first frame of the clip; each one after
+  it shows the moment of the clip that lies at its own left edge, so zooming changes what they show,
+  and the last is cut off where the clip ends. Apart from the first, a picture is the keyframe at or
+  before that moment, which is quick to get and is kept for next time. They are decoded on a thread
+  of their own (never while an export runs), and until the right one arrives the nearest one of the same
+  file stands in, so zooming blurs for a moment instead of going blank. Each clip has a rounded line in
+  its file's color around it and the part of the ruler above it is tinted with that color; the colors
+  (the Okabe-Ito set) are chosen to be told apart by people who see red and green poorly. In the clip's
+  top left corner is the file's number (its place in recording order, from 1, on a patch of its color)
+  and its name on a dark plate, so footage that has been cut up and shuffled can still be told apart. A
+  clip too narrow for the name shows only the number, and hovering it names the file. The timeline's
+  clips can now be up to 120 pixels tall (drag the divider above it).
 - **Sync / Reorder view: a picture under the map.** The sync map now has an OpenStreetMap street map
   under the path, so the sync can be checked against roads, the shoreline and the landing field. It
   is always on, and darkened (25% to begin with) so the path stands out; the **Dim** slider in the

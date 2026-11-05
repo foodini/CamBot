@@ -786,7 +786,39 @@ static void test_open_errors() {
 	CHECK(decoder.read_frame());
 }
 
+static void test_keyframe_times() {
+	int frames[] = { 50, 40 }, gops[] = { 10, 7 }, delays[] = { 2, 0 };
+	Setup s = make_setup(frames, gops, delays, 2);
+	MediaDecoder decoder;
+	std::string error;
+	CHECK(decoder.open(s.paths, &error));
+	std::vector<int64_t> times;
+	CHECK(decoder.keyframe_times(0, &times));
+	CHECK(times.size() == 5);
+	for (size_t i = 0; i < times.size(); i++)
+		CHECK(times[i] == (int64_t)i * 10 * FT);
+	// The second file's are counted from its own start, not the timeline's.
+	CHECK(decoder.keyframe_times(1, &times));
+	CHECK(times.size() == 6);
+	for (size_t i = 0; i < times.size(); i++)
+		CHECK(times[i] == (int64_t)i * 7 * FT);
+	CHECK(!decoder.keyframe_times(2, &times));
+	CHECK(times.empty());
+	CHECK(!decoder.keyframe_times(-1, &times));
+
+	// Asking leaves the decoder able to carry on: landing on one of the keyframes it was just told of.
+	CHECK(decoder.keyframe_times(1, &times));
+	const int64_t second_file_start = decoder.edit_list().start(1);
+	CHECK(decoder.seek_keyframe(second_file_start + times[3] + FT / 2));
+	CHECK(shown_frame(decoder, s) == 50 + 21);
+	CHECK(is_consistent(decoder, s));
+	CHECK(decoder.keyframe_times(0, &times));
+	CHECK(decoder.seek_keyframe(times[2] + FT / 2));
+	CHECK(shown_frame(decoder, s) == 20);
+}
+
 int main() {
+	test_keyframe_times();
 	test_single_file_sequential();
 	test_multi_file_sequential_no_frames_lost();
 	test_nonzero_start_times();

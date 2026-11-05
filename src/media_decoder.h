@@ -45,6 +45,9 @@ public:
 	MediaDecoder();
 	~MediaDecoder();
 
+	// Whether open() describes the files on the console, as it does by default. Set before open().
+	void set_quiet(bool quiet) { m_quiet = quiet; }
+
 	// Opens the files, in this order, as one source and decodes the first frame. On failure
 	// returns false and leaves a sentence for the user in *error; nothing is left half-open.
 	bool open(const std::vector<std::string>& paths, std::string* error);
@@ -100,6 +103,16 @@ public:
 	// About `count` frames from here, using keyframes when one is in the way.
 	bool seek_by_frames_fast(int64_t count);
 
+	// Lets go of the frames kept for replaying a GOP already decoded (up to a gigabyte of them), for a decoder
+	// that is not going to be played backward over them again. The frame on screen stays.
+	void release_cache();
+
+	// ---- Keyframes ----
+	// The times of file `media`'s keyframes, in ticks from the start of that file, earliest first, as its own index
+	// has them; empty if it has no index. False if the file can't be opened. This opens that file, so whatever was
+	// being read from another has to be sought to again (as with any move to another file).
+	bool keyframe_times(int media, std::vector<int64_t>* local_ticks);
+
 	// ---- Audio, for export ----
 	// Audio is never decoded here, only passed along as compressed packets. While capturing,
 	// every audio packet the decoder reads is queued, with timestamps on the global clock in
@@ -153,6 +166,7 @@ private:
 	AVCodecContext*          m_vctx;
 	int                      m_video_index;
 	int                      m_audio_index;
+	bool                     m_quiet;
 	AVRational               m_file_video_tb;
 	AVRational               m_file_audio_tb;
 	int64_t                  m_video_start;      // Stream start_time, in file ticks.

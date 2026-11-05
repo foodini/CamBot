@@ -173,6 +173,8 @@
     <ClCompile Include="map_tiles.cpp" />
     <ClCompile Include="map_view.cpp" />
     <ClCompile Include="position_smoothing.cpp" />
+    <ClCompile Include="thumbnail_layout.cpp" />
+    <ClCompile Include="thumbnail_store.cpp" />
     <ClCompile Include="tile_fetcher.cpp" />
     <ClCompile Include="tile_layer.cpp" />
     <ClCompile Include="media_container_manager.cpp" />
@@ -248,6 +250,8 @@
     <ClInclude Include="map_tiles.h" />
     <ClInclude Include="map_view.h" />
     <ClInclude Include="position_smoothing.h" />
+    <ClInclude Include="thumbnail_layout.h" />
+    <ClInclude Include="thumbnail_store.h" />
     <ClInclude Include="tile_fetcher.h" />
     <ClInclude Include="tile_layer.h" />
     <ClInclude Include="media_container_manager.h" />

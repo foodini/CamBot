@@ -33,6 +33,7 @@
 #include "telemetry.h"
 #include "timecode.h"
 #include "sync_view.h"
+#include "thumbnail_store.h"
 #include "tile_layer.h"
 #include "position_smoothing.h"
 #include "timeline_editor.h"
@@ -907,6 +908,14 @@ int main()
     TimelineEditor timeline_editor;
     TileLayer tile_layer;
     SyncView sync_view(&tile_layer);
+    // The pictures of the video along the timelines, got from the files on a thread of their own.
+    ThumbnailStore thumbnail_store;
+    {
+        const AVRational tick = media_decoder.time_base();
+        thumbnail_store.open(project_file_mgr.get_video_files(), media_decoder.width(), media_decoder.height(), (double)tick.den / (double)tick.num);
+    }
+    timeline_view.set_thumbnails(&thumbnail_store);
+    sync_view.set_thumbnails(&thumbnail_store);
 
     MapWidget map_widget(.35f, .35f*SCR_WIDTH/SCR_HEIGHT, 0.6f, -0.9840f);
     ClimbWidget climb_widget(.02f, .35f * SCR_WIDTH / SCR_HEIGHT, 0.9625f, -0.9840f);
@@ -1326,6 +1335,7 @@ int main()
 
             // The preview rectangle for whichever view is showing; the picture is drawn into it below.
             LayoutRect shown_preview = layout.preview;
+            thumbnail_store.set_paused(media_container_mgr.recording());   // An export has the machine to itself.
             if (sync_view.active()) {
                 shown_preview = sync_layout.preview;
                 draw_splitter(sync_layout.splitter, &timeline_height);

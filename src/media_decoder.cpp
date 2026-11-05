@@ -64,6 +64,7 @@ MediaDecoder::MediaDecoder() :
 	m_vctx(nullptr),
 	m_video_index(-1),
 	m_audio_index(-1),
+	m_quiet(false),
 	m_video_start(0),
 	m_audio_start(0),
 	m_draining(false),
@@ -229,8 +230,9 @@ bool MediaDecoder::read_file_properties(int index, std::string* error) {
 			*error = string_printf("\"%s\" has an unusable picture size (%dx%d).", name.c_str(), m_width, m_height);
 			return false;
 		}
-		printf("Source: %dx%d, %.3f fps, %s video, pixel format %s, time base %d/%d\n", m_width, m_height, av_q2d(avg_rate),
-			avcodec_get_name(video->codec_id), av_get_pix_fmt_name((AVPixelFormat)video->format), m_global_tb.num, m_global_tb.den);
+		if (!m_quiet)
+			printf("Source: %dx%d, %.3f fps, %s video, pixel format %s, time base %d/%d\n", m_width, m_height, av_q2d(avg_rate),
+				avcodec_get_name(video->codec_id), av_get_pix_fmt_name((AVPixelFormat)video->format), m_global_tb.num, m_global_tb.den);
 	} else {
 		if (video->codec_id != m_video_params->codec_id) {
 			*error = string_printf("\"%s\" uses %s video but the first file uses %s. All the files of one flight have to match.",
@@ -280,8 +282,9 @@ bool MediaDecoder::read_file_properties(int index, std::string* error) {
 	}
 	int64_t ticks = av_rescale_q(duration, m_file_video_tb, m_global_tb);
 	m_media_durations.push_back(ticks);
-	printf("  %s: %.2f s%s (video starts at %.4f s)\n", name.c_str(), ticks_to_seconds(ticks), m_audio_index >= 0 ? "" : " (no sound)",
-		(double)m_video_start * m_file_video_tb.num / m_file_video_tb.den);
+	if (!m_quiet)
+		printf("  %s: %.2f s%s (video starts at %.4f s)\n", name.c_str(), ticks_to_seconds(ticks), m_audio_index >= 0 ? "" : " (no sound)",
+			(double)m_video_start * m_file_video_tb.num / m_file_video_tb.den);
 	return true;
 }
 
@@ -852,6 +855,47 @@ bool MediaDecoder::seek_by_frames_fast(int64_t count) {
 		return seek_keyframe(target);  // A clip boundary is in the way, and the next clip starts where it is cut.
 	}
 	return seek_keyframe(target);
+}
+
+void MediaDecoder::release_cache() {
+	std::vector<CachedFrame>().swap(m_cache);
+	m_cache_bytes = 0;
+}
+
+bool MediaDecoder::keyframe_times(int media, std::vector<int64_t>* local_ticks) {
+	local_ticks->clear();
+	if (!is_open() || media < 0 || media >= media_count())
+		return false;
+	if (media != m_cur_file || m_fmt == nullptr) {
+		std::string error;
+		if (!open_file(media, &error)) {
+			m_last_error = error;
+			return false;
+		}
+	}
+	AVStream* stream = m_fmt->streams[m_video_index];
+	// The index is asked for the keyframe at or before a time, starting from the end of the file and going
+	// back one keyframe at a time (nothing else of it is needed, and it is the call the decoder already makes).
+	std::vector<int64_t> backwards;
+	int64_t at = m_video_start + av_rescale_q(m_media_durations[media], m_global_tb, m_file_video_tb);
+	while (true) {
+		const AVIndexEntry* entry = avformat_index_get_entry_from_timestamp(stream, at, AVSEEK_FLAG_BACKWARD);
+		if (entry == nullptr)
+			break;
+		if (!backwards.empty() && entry->timestamp >= backwards.back())
+			break;   // Nothing earlier.
+		backwards.push_back(entry->timestamp);
+		at = entry->timestamp - 1;
+	}
+	for (size_t i = backwards.size(); i > 0; i--) {
+		int64_t ticks = av_rescale_q(backwards[i - 1] - m_video_start, m_file_video_tb, m_global_tb);
+		if (ticks < 0)
+			ticks = 0;
+		if (!local_ticks->empty() && ticks <= local_ticks->back())
+			continue;
+		local_ticks->push_back(ticks);
+	}
+	return true;
 }
 
 // ---------------------------------------------------------------------------------------------
