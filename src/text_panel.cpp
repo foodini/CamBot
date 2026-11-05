@@ -8,9 +8,11 @@
 
 #include "imgui/imgui.h"
 
+#include "env_config.h"
 #include "media_container_manager.h"
 #include "text_box_geometry.h"
 #include "text_box.h"
+#include "text_fonts.h"
 #include "timeline_editor.h"
 #include "util.h"
 
@@ -21,9 +23,10 @@ const int    TEXT_LINES = 6;
 const int    SPARE_BYTES = 2048;       // How much more than it holds the text field has room for.
 const size_t LABEL_BYTES = 40;         // The most of a box's words shown in the list.
 
-const double NEW_FADE_IN_SECONDS = 0.5;
-const double NEW_DWELL_SECONDS = 4.0;
-const double NEW_FADE_OUT_SECONDS = 0.5;
+const float  CONTROL_LABEL_WIDTH = 82.0f;    // Room left for a control's label at its right.
+const float  SWATCH_WIDTH = 40.0f;
+const float  RECENT_SWATCH_SIZE = 22.0f;
+const float  FRAME_PIXELS = 1080.0f;         // Type sizes and shadow offsets are shown in pixels of a picture this tall.
 
 // The first line of `text`, cut short (with "..." on) if it is long, without cutting a UTF-8 character in two.
 std::string preview_of(const std::string& text) {
@@ -56,15 +59,51 @@ void draw_dashed_line(ImDrawList* draw_list, const ImVec2& a, const ImVec2& b, I
 
 }  // namespace
 
-TextPanel::TextPanel(EditModel* model, MediaContainerMgr* media, TimelineEditor* editor)
-	: m_model(model), m_media(media), m_editor(editor), m_selected(0), m_field_active(false), m_buffer_id(0), m_drag_part(-1), m_drag_start_mouse_x(0.0f),
-	  m_drag_start_mouse_y(0.0f) {}
+TextPanel::TextPanel(EditModel* model, MediaContainerMgr* media, TimelineEditor* editor, EnvConfig* env_config)
+	: m_model(model), m_media(media), m_editor(editor), m_env_config(env_config), m_selected(0), m_field_active(false), m_buffer_id(0),
+	  m_defaults(env_config->text_defaults()), m_defaults_unsaved(false), m_seen_id(0), m_picker(0), m_picker_changed(false),
+	  m_drag_part(-1), m_drag_start_mouse_x(0.0f), m_drag_start_mouse_y(0.0f) {}
 
 int TextPanel::selected_id() const {
 	return (m_selected != 0 && m_model->find_text_box(m_selected) != NULL) ? m_selected : 0;
 }
 
+// Whether two boxes look and time the same, ignoring their words and where they are tied to the video.
+static bool same_look(const TextBox& a, const TextBox& b) {
+	return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h && a.style == b.style && a.fade_in_ticks == b.fade_in_ticks &&
+		a.dwell_ticks == b.dwell_ticks && a.fade_out_ticks == b.fade_out_ticks;
+}
+
+void TextPanel::follow_changes() {
+	const TextBox* box = (m_selected != 0) ? m_model->find_text_box(m_selected) : NULL;
+	if (box == NULL) {
+		m_seen_id = 0;
+	} else {
+		if (box->id == m_seen_id && !same_look(*box, m_seen_box)) {
+			// The box has been changed (by any control, the mouse on the picture or on the timeline, or an undo): that's the look to use next.
+			m_defaults.x = box->x;
+			m_defaults.y = box->y;
+			m_defaults.w = box->w;
+			m_defaults.h = box->h;
+			m_defaults.style = box->style;
+			m_defaults.fade_in_seconds = (float)m_model->ticks_to_seconds(box->fade_in_ticks);
+			m_defaults.dwell_seconds = (float)m_model->ticks_to_seconds(box->dwell_ticks);
+			m_defaults.fade_out_seconds = (float)m_model->ticks_to_seconds(box->fade_out_ticks);
+			m_env_config->text_defaults(m_defaults);
+			m_defaults_unsaved = true;
+		}
+		m_seen_id = box->id;
+		m_seen_box = *box;
+	}
+	// Written to disk once the mouse is up, not at every step of a drag.
+	if (m_defaults_unsaved && !ImGui::IsAnyMouseDown()) {
+		m_env_config->save_user_settings();
+		m_defaults_unsaved = false;
+	}
+}
+
 void TextPanel::draw(bool can_change) {
+	follow_changes();
 	if (!ImGui::CollapsingHeader("Text"))
 		return;
 	if (m_selected != 0 && m_model->find_text_box(m_selected) == NULL)
@@ -74,17 +113,23 @@ void TextPanel::draw(bool can_change) {
 	const bool can_add = can_change && !m_model->edit_list().clips().empty();
 	ImGui::BeginDisabled(!can_add);
 	if (ImGui::Button("Add", full_width)) {
+		// A new box starts out as the last one worked on looked.
 		TextBox box = text_box::default_box();
+		box.x = m_defaults.x;
+		box.y = m_defaults.y;
+		box.w = m_defaults.w;
+		box.h = m_defaults.h;
+		box.style = m_defaults.style;
 		// The box is fully in at the frame being shown, so what is typed is seen at once: the fade in comes before it (or, with
 		// less than that much video before it, is as long as there is).
 		const int64_t now_ticks = m_media->current_ticks();
-		int64_t fade_in_ticks = m_model->seconds_to_ticks(NEW_FADE_IN_SECONDS);
+		int64_t fade_in_ticks = m_model->seconds_to_ticks(m_defaults.fade_in_seconds);
 		if (fade_in_ticks > now_ticks)
 			fade_in_ticks = (now_ticks > 0) ? now_ticks : 0;
 		box.anchor = m_model->edit_list().source_for(now_ticks - fade_in_ticks);
 		box.fade_in_ticks = fade_in_ticks;
-		box.dwell_ticks = m_model->seconds_to_ticks(NEW_DWELL_SECONDS);
-		box.fade_out_ticks = m_model->seconds_to_ticks(NEW_FADE_OUT_SECONDS);
+		box.dwell_ticks = m_model->seconds_to_ticks(m_defaults.dwell_seconds);
+		box.fade_out_ticks = m_model->seconds_to_ticks(m_defaults.fade_out_seconds);
 		const int id = m_editor->add_text_box(m_model, m_media, box);
 		if (id != 0)
 			m_selected = id;
@@ -157,6 +202,174 @@ void TextPanel::draw(bool can_change) {
 		m_editor->remove_text_box(m_model, m_media, m_selected);
 		m_selected = 0;
 	}
+	ImGui::EndDisabled();
+
+	const TextBox* current = (m_selected != 0) ? m_model->find_text_box(m_selected) : NULL;
+	if (current != NULL)
+		draw_properties(*current);
+}
+
+void TextPanel::begin_edit_if_activated() {
+	if (ImGui::IsItemActivated())
+		m_editor->begin_box_edit(*m_model, *m_media);
+}
+
+void TextPanel::end_edit_if_deactivated() {
+	if (ImGui::IsItemDeactivated())
+		m_editor->end_box_edit(*m_model, *m_media);
+}
+
+void TextPanel::set_style_once(int id, const TextStyle& style) {
+	m_editor->begin_box_edit(*m_model, *m_media);
+	m_editor->set_style(m_model, id, style);
+	m_editor->end_box_edit(*m_model, *m_media);
+}
+
+bool TextPanel::color_control(const char* label, int which, float color[3]) {
+	bool changed = false;
+	ImGui::PushID(which);
+	if (ImGui::ColorButton("##swatch", ImVec4(color[0], color[1], color[2], 1.0f), ImGuiColorEditFlags_NoAlpha, ImVec2(SWATCH_WIDTH, ImGui::GetFrameHeight()))) {
+		ImGui::OpenPopup("##picker");
+		m_picker = which;
+		m_picker_changed = false;
+		m_editor->begin_box_edit(*m_model, *m_media);
+	}
+	ImGui::SameLine();
+	ImGui::TextUnformatted(label);
+	if (ImGui::BeginPopup("##picker")) {
+		float rgb[3] = { color[0], color[1], color[2] };
+		if (ImGui::ColorPicker3("##rgb", rgb, ImGuiColorEditFlags_NoSidePreview | ImGuiColorEditFlags_DisplayRGB | ImGuiColorEditFlags_DisplayHex)) {
+			for (int i = 0; i < 3; i++)
+				color[i] = rgb[i];
+			changed = true;
+		}
+		if (!m_defaults.recent_colors.empty()) {
+			ImGui::TextUnformatted("Recent");
+			for (size_t i = 0; i < m_defaults.recent_colors.size(); i++) {
+				ImGui::PushID((int)i);
+				float recent[3];
+				TextSettings::unpack_color(m_defaults.recent_colors[i], recent);
+				if (i > 0)
+					ImGui::SameLine();
+				if (ImGui::ColorButton("##recent", ImVec4(recent[0], recent[1], recent[2], 1.0f), ImGuiColorEditFlags_NoAlpha,
+						ImVec2(RECENT_SWATCH_SIZE, RECENT_SWATCH_SIZE))) {
+					for (int k = 0; k < 3; k++)
+						color[k] = recent[k];
+					changed = true;
+				}
+				ImGui::PopID();
+			}
+		}
+		ImGui::EndPopup();
+		if (changed)
+			m_picker_changed = true;
+	} else if (m_picker == which) {
+		// The picker has closed: the colour it ended on joins the recent ones.
+		m_editor->end_box_edit(*m_model, *m_media);
+		if (m_picker_changed) {
+			m_defaults.note_color_used(TextSettings::pack_color(color));
+			m_env_config->text_defaults(m_defaults);
+			m_defaults_unsaved = true;
+		}
+		m_picker = 0;
+	}
+	ImGui::PopID();
+	return changed;
+}
+
+void TextPanel::draw_properties(const TextBox& box) {
+	const int id = box.id;
+	ImGui::BeginDisabled(m_media->recording());
+	const float control_width = -CONTROL_LABEL_WIDTH;
+
+	// When it shows. Each is in seconds; they run one after another from the frame the box is tied to.
+	ImGui::SeparatorText("Timing");
+	const char* const timing_names[3] = { "Fade in", "Dwell", "Fade out" };
+	const char* const timing_tips[3] = { "How long the text takes to fade in, ending where it is fully shown.",
+		"How long the text stays fully shown.", "How long the text takes to fade out." };
+	int64_t ticks[3] = { box.fade_in_ticks, box.dwell_ticks, box.fade_out_ticks };
+	for (int n = 0; n < 3; n++) {
+		float seconds = (float)m_model->ticks_to_seconds(ticks[n]);
+		ImGui::SetNextItemWidth(control_width);
+		const bool changed = ImGui::DragFloat(timing_names[n], &seconds, 0.02f, 0.0f, 600.0f, "%.2f s", ImGuiSliderFlags_AlwaysClamp);
+		begin_edit_if_activated();
+		if (changed) {
+			ticks[n] = m_model->seconds_to_ticks(seconds);
+			m_editor->set_timing(m_model, id, box.anchor, ticks[0], ticks[1], ticks[2]);
+		}
+		end_edit_if_deactivated();
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("%s", timing_tips[n]);
+	}
+
+	// How it looks.
+	ImGui::SeparatorText("Type");
+	TextStyle style = box.style;
+	ImGui::SetNextItemWidth(control_width);
+	if (ImGui::BeginCombo("Font", text_fonts::font_name(style.font))) {
+		for (int f = 0; f < text_fonts::font_count(); f++) {
+			if (ImGui::Selectable(text_fonts::font_name(f), f == style.font)) {
+				style.font = f;
+				set_style_once(id, style);
+			}
+		}
+		ImGui::EndCombo();
+	}
+	float size_pixels = style.size * FRAME_PIXELS;
+	ImGui::SetNextItemWidth(control_width);
+	const bool size_changed = ImGui::DragFloat("Size", &size_pixels, 0.5f, 6.0f, 400.0f, "%.0f px", ImGuiSliderFlags_AlwaysClamp);
+	begin_edit_if_activated();
+	if (size_changed) {
+		style.size = size_pixels / FRAME_PIXELS;
+		m_editor->set_style(m_model, id, style);
+	}
+	end_edit_if_deactivated();
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("The height of the type in pixels on a picture 1080 tall; it scales with the picture.");
+	if (ImGui::Checkbox("Bold", &style.bold))
+		set_style_once(id, style);
+	ImGui::SameLine();
+	if (ImGui::Checkbox("Italic", &style.italic))
+		set_style_once(id, style);
+	ImGui::SameLine();
+	if (ImGui::Checkbox("Strike", &style.strike))
+		set_style_once(id, style);
+	if (ImGui::RadioButton("Left", &style.align, TEXT_ALIGN_LEFT))
+		set_style_once(id, style);
+	ImGui::SameLine();
+	if (ImGui::RadioButton("Center", &style.align, TEXT_ALIGN_CENTER))
+		set_style_once(id, style);
+	ImGui::SameLine();
+	if (ImGui::RadioButton("Right", &style.align, TEXT_ALIGN_RIGHT))
+		set_style_once(id, style);
+	if (color_control("Colour", PICK_TEXT, style.color))
+		m_editor->set_style(m_model, id, style);
+
+	// The drop shadow: opacity 0 is none.
+	ImGui::SeparatorText("Shadow");
+	float opacity_percent = style.shadow_opacity * 100.0f;
+	ImGui::SetNextItemWidth(control_width);
+	const bool opacity_changed = ImGui::DragFloat("Opacity", &opacity_percent, 0.5f, 0.0f, 100.0f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp);
+	begin_edit_if_activated();
+	if (opacity_changed) {
+		style.shadow_opacity = opacity_percent / 100.0f;
+		m_editor->set_style(m_model, id, style);
+	}
+	end_edit_if_deactivated();
+	float offsets[2] = { style.shadow_dx * FRAME_PIXELS, style.shadow_dy * FRAME_PIXELS };
+	ImGui::SetNextItemWidth(control_width);
+	const bool offset_changed = ImGui::DragFloat2("Offset", offsets, 0.1f, -100.0f, 100.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+	begin_edit_if_activated();
+	if (offset_changed) {
+		style.shadow_dx = offsets[0] / FRAME_PIXELS;
+		style.shadow_dy = offsets[1] / FRAME_PIXELS;
+		m_editor->set_style(m_model, id, style);
+	}
+	end_edit_if_deactivated();
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("How far the shadow is across and down from the text, in pixels on a picture 1080 tall.");
+	if (color_control("Shadow colour", PICK_SHADOW, style.shadow_color))
+		m_editor->set_style(m_model, id, style);
 	ImGui::EndDisabled();
 }
 

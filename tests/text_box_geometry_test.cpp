@@ -16,6 +16,13 @@ static bool near_rect(const Rect& r, float x, float y, float w, float h) {
 int main() {
 	const Rect box(0.1f, 0.75f, 0.8f, 0.15f);
 
+	// Clamping to the frame.
+	CHECK(near_rect(clamp_to_frame(box), 0.1f, 0.75f, 0.8f, 0.15f));
+	CHECK(near_rect(clamp_to_frame(Rect(-0.5f, 0.95f, 0.3f, 0.2f)), 0.0f, 0.8f, 0.3f, 0.2f));
+	CHECK(near_rect(clamp_to_frame(Rect(0.9f, 0.1f, 0.5f, 0.1f)), 0.5f, 0.1f, 0.5f, 0.1f));
+	CHECK(near_rect(clamp_to_frame(Rect(0.2f, 0.2f, 0.0f, -1.0f)), 0.2f, 0.2f, MIN_WIDTH, MIN_HEIGHT));
+	CHECK(near_rect(clamp_to_frame(Rect(0.2f, 0.2f, 3.0f, 3.0f)), 0.0f, 0.0f, 1.0f, 1.0f));
+
 	// Moving.
 	CHECK(near_rect(move(box, 0.0f, -0.25f), 0.1f, 0.5f, 0.8f, 0.15f));
 	CHECK(near_rect(move(box, -0.5f, 0.0f), 0.0f, 0.75f, 0.8f, 0.15f));       // Stops at the left edge,

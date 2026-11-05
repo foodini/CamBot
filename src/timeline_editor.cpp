@@ -212,6 +212,12 @@ void TimelineEditor::set_geometry(EditModel* model, int id, float x, float y, fl
 	box->h = h;
 }
 
+void TimelineEditor::set_style(EditModel* model, int id, const TextStyle& style) {
+	TextBox* box = model->find_text_box(id);
+	if (box != NULL)
+		box->style = style;
+}
+
 void TimelineEditor::set_timing(EditModel* model, int id, const FileTime& anchor, int64_t fade_in_ticks, int64_t dwell_ticks,
 		int64_t fade_out_ticks) {
 	TextBox* box = model->find_text_box(id);

@@ -22,6 +22,9 @@ const float MIN_HEIGHT = 0.03f;
 enum Corner { TOP_LEFT = 0, TOP_RIGHT = 1, BOTTOM_LEFT = 2, BOTTOM_RIGHT = 3 };
 enum Edge { EDGE_LEFT = 4, EDGE_RIGHT = 5, EDGE_TOP = 6, EDGE_BOTTOM = 7 };
 
+// The box brought inside the frame, no smaller than the least size (moved if need be, then made smaller if it's too big).
+Rect clamp_to_frame(const Rect& box);
+
 // The box moved by (dx, dy), as far as the frame allows.
 Rect move(const Rect& start, float dx, float dy);
 

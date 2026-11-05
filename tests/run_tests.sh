@@ -30,6 +30,7 @@ for test in *_test.cpp; do
     if [ "$name" = "map_tiles_test" ]; then extra="../src/map_tiles.cpp ../src/map_view.cpp"; fi
     if [ "$name" = "text_box_test" ]; then extra="../src/edit_model.cpp ../src/text_box.cpp"; fi
     if [ "$name" = "text_layout_test" ]; then extra="../src/text_layout.cpp ../src/text_box.cpp"; fi
+    if [ "$name" = "user_settings_test" ] || [ "$name" = "recent_projects_test" ]; then extra="../src/text_box.cpp ../src/text_box_geometry.cpp"; fi
     if [ "$name" = "text_box_geometry_test" ]; then extra="../src/text_box_geometry.cpp"; fi
     if [ "$name" = "text_lanes_test" ]; then extra="../src/text_lanes.cpp"; fi
     if [ "$name" = "text_fonts_test" ]; then extra="../src/text_fonts.cpp"; fi

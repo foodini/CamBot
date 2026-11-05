@@ -254,8 +254,15 @@
   taller to see more rows). Click a block to select the box and take the playhead to where the box is fully showing (the end of its fade in); hold Ctrl and drag a block to move the box
   in time, or drag either end of a block to make it start earlier or later or stop sooner or later. The box stays tied to
   a frame of the video, so it is re-tied to whichever frame it now starts on; moving an end changes the dwell (and shrinks
-  the fades only if there is no longer room for them). Each drag is one undo step. The font, size, bold, italic, strikethrough, alignment, colour,
-  shadow and timing controls come next.
+  the fades only if there is no longer room for them). Each drag is one undo step.
+  **Looks and timing.** With a box selected, the Text section also has its *Timing* (fade in, dwell and fade out, in
+  seconds), *Type* (font from Arial, Segoe UI, Verdana, Times New Roman, Georgia, Courier New and Impact; size in pixels on
+  a picture 1080 tall; bold, italic, strikethrough; left, center or right alignment; colour) and *Shadow* (opacity, with 0
+  for none; how far across and down; colour). A colour swatch opens a picker with the red, green and blue values and a hex
+  field, and below it the ten colours most lately used, for the text and the shadow alike. Each change is an undo step
+  (a drag of a slider is one). Whatever you last changed on any box (its place and size in the picture, its type and
+  colours, its shadow and its times) is what the next new box starts out as, and is remembered for the next run (in the
+  user settings, with the recent colours).
 - **Tests.** `tests/run_tests.sh` (run it with `wsl ./tests/run_tests.sh`) builds and runs
   the unit tests: climb filters, map zoom, flight statistics, altitude references, user
   settings, the source timeline and file ordering, project reading, and the multi-file

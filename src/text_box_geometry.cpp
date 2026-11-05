@@ -14,6 +14,15 @@ float clamp(float value, float low, float high) {
 
 }  // namespace
 
+Rect clamp_to_frame(const Rect& box) {
+	Rect result;
+	result.w = clamp(box.w, MIN_WIDTH, 1.0f);
+	result.h = clamp(box.h, MIN_HEIGHT, 1.0f);
+	result.x = clamp(box.x, 0.0f, 1.0f - result.w);
+	result.y = clamp(box.y, 0.0f, 1.0f - result.h);
+	return result;
+}
+
 Rect move(const Rect& start, float dx, float dy) {
 	Rect moved = start;
 	moved.x = clamp(start.x + dx, 0.0f, 1.0f - start.w);

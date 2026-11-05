@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
 #include <direct.h>
@@ -21,6 +22,8 @@
 #include "climb_filter.h"
 #include "recent_projects.h"
 #include "map_zoom.h"
+#include "text_box.h"
+#include "text_box_geometry.h"
 
 // How the map's course trace is drawn (see map_widget_1_course.vert): the most recent
 // recent_seconds of trace are drawn recent_width_px wide, everything older old_width_px wide,
@@ -57,9 +60,64 @@ struct WindowSettings {
 	int  timeline_height;
 };
 
+// What a new text box (see text_box.h) starts out as: how the last one the user worked on looked, so a look they settle on
+// carries over from box to box and project to project. It is the box's place and size in the frame, its type, its colours,
+// its shadow, and how long it fades in, holds and fades out (in seconds, as the lengths in ticks belong to a project). Also
+// the colours lately used for text and shadows, most recent first, as 0xRRGGBB.
+struct TextSettings {
+	static const int MAX_RECENT_COLORS = 10;
+
+	TextSettings() : x(0.1f), y(0.75f), w(0.8f), h(0.15f), style(), fade_in_seconds(0.5f), dwell_seconds(4.0f), fade_out_seconds(0.5f) {}
+
+	float                x;
+	float                y;
+	float                w;
+	float                h;
+	TextStyle            style;
+	float                fade_in_seconds;
+	float                dwell_seconds;
+	float                fade_out_seconds;
+	std::vector<int>     recent_colors;
+
+	// Brings a colour to the front of the recent colours (and drops the oldest if there are too many).
+	void note_color_used(int rgb) {
+		for (size_t i = 0; i < recent_colors.size(); i++) {
+			if (recent_colors[i] == rgb) {
+				recent_colors.erase(recent_colors.begin() + i);
+				break;
+			}
+		}
+		recent_colors.insert(recent_colors.begin(), rgb);
+		if ((int)recent_colors.size() > MAX_RECENT_COLORS)
+			recent_colors.resize(MAX_RECENT_COLORS);
+	}
+	// Red, green and blue (0 to 1) as 0xRRGGBB, and back.
+	static int pack_color(const float color[3]) {
+		int packed = 0;
+		for (int i = 0; i < 3; i++) {
+			float channel = color[i] < 0.0f ? 0.0f : (color[i] > 1.0f ? 1.0f : color[i]);
+			packed = (packed << 8) | (int)(channel * 255.0f + 0.5f);
+		}
+		return packed;
+	}
+	static void unpack_color(int rgb, float color[3]) {
+		color[0] = (float)((rgb >> 16) & 0xFF) / 255.0f;
+		color[1] = (float)((rgb >> 8) & 0xFF) / 255.0f;
+		color[2] = (float)(rgb & 0xFF) / 255.0f;
+	}
+	// The box held inside the frame.
+	void clamp_box() {
+		const text_box_geometry::Rect box = text_box_geometry::clamp_to_frame(text_box_geometry::Rect(x, y, w, h));
+		x = box.x;
+		y = box.y;
+		w = box.w;
+		h = box.h;
+	}
+};
+
 class UserSettings {
 public:
-	UserSettings() : climb_filter(), climb_color_range(800.0f), map_dim(0.25f), map_trace(), map_zoom(), summary(), window() {
+	UserSettings() : climb_filter(), climb_color_range(800.0f), map_dim(0.25f), map_trace(), map_zoom(), summary(), window(), text_defaults() {
 		load();
 	}
 
@@ -70,6 +128,7 @@ public:
 	MapZoomSettings     map_zoom;
 	SummarySettings     summary;
 	WindowSettings      window;
+	TextSettings        text_defaults;
 	// The project to open when CamBot starts (empty after the user closes it deliberately), and the
 	// ones opened lately, most recent first. Paths are UTF-8.
 	std::string         last_project;
@@ -99,6 +158,14 @@ public:
 			mkdir(dir.c_str(), 0755);
 		return dir + "/user_settings.txt";
 #endif
+	}
+
+	// The rest of a line after its colon, without the line end.
+	static std::string text_string(const char* after_colon) {
+		std::string text = after_colon;
+		while (!text.empty() && (text[text.size() - 1] == '\n' || text[text.size() - 1] == '\r'))
+			text.erase(text.size() - 1);
+		return text;
 	}
 
 	void load() {
@@ -142,10 +209,30 @@ public:
 			else if (strcmp(key, "last_project") == 0)       { last_project = text; }
 			else if (strcmp(key, "recent_project") == 0)     { recent_projects.append(text); }
 			else if (strcmp(key, "window_timeline_h") == 0)  { if (value >= 60.0f && value <= 8000.0f)   window.timeline_height = (int)value; }
+			else if (strcmp(key, "text_x") == 0)             { text_defaults.x = value; }
+			else if (strcmp(key, "text_y") == 0)             { text_defaults.y = value; }
+			else if (strcmp(key, "text_w") == 0)             { text_defaults.w = value; }
+			else if (strcmp(key, "text_h") == 0)             { text_defaults.h = value; }
+			else if (strcmp(key, "text_font") == 0)          { if (value >= 0.0f && value < 1000.0f)   text_defaults.style.font = (int)value; }
+			else if (strcmp(key, "text_size") == 0)          { if (value >= 0.005f && value <= 0.5f)   text_defaults.style.size = value; }
+			else if (strcmp(key, "text_bold") == 0)          { text_defaults.style.bold = (value != 0.0f); }
+			else if (strcmp(key, "text_italic") == 0)        { text_defaults.style.italic = (value != 0.0f); }
+			else if (strcmp(key, "text_strike") == 0)        { text_defaults.style.strike = (value != 0.0f); }
+			else if (strcmp(key, "text_align") == 0)         { if (value >= 0.0f && value <= 2.0f)     text_defaults.style.align = (int)value; }
+			else if (strcmp(key, "text_color") == 0)         { TextSettings::unpack_color((int)strtol(text_string(colon + 1).c_str(), nullptr, 16), text_defaults.style.color); }
+			else if (strcmp(key, "text_shadow_color") == 0)  { TextSettings::unpack_color((int)strtol(text_string(colon + 1).c_str(), nullptr, 16), text_defaults.style.shadow_color); }
+			else if (strcmp(key, "text_shadow_opacity") == 0) { if (value >= 0.0f && value <= 1.0f)    text_defaults.style.shadow_opacity = value; }
+			else if (strcmp(key, "text_shadow_dx") == 0)     { if (value >= -0.2f && value <= 0.2f)    text_defaults.style.shadow_dx = value; }
+			else if (strcmp(key, "text_shadow_dy") == 0)     { if (value >= -0.2f && value <= 0.2f)    text_defaults.style.shadow_dy = value; }
+			else if (strcmp(key, "text_fade_in_s") == 0)     { if (value >= 0.0f && value <= 600.0f)   text_defaults.fade_in_seconds = value; }
+			else if (strcmp(key, "text_dwell_s") == 0)       { if (value >= 0.0f && value <= 3600.0f)  text_defaults.dwell_seconds = value; }
+			else if (strcmp(key, "text_fade_out_s") == 0)    { if (value >= 0.0f && value <= 600.0f)   text_defaults.fade_out_seconds = value; }
+			else if (strcmp(key, "text_recent_color") == 0)  { if ((int)text_defaults.recent_colors.size() < TextSettings::MAX_RECENT_COLORS) text_defaults.recent_colors.push_back((int)strtol(text_string(colon + 1).c_str(), nullptr, 16) & 0xFFFFFF); }
 		}
 		fclose(fd);
 		if (map_zoom.max_width_km < map_zoom.min_width_km)
 			map_zoom.max_width_km = map_zoom.min_width_km;
+		text_defaults.clamp_box();
 	}
 
 	bool save() const {
@@ -170,6 +257,26 @@ public:
 		fprintf(fd, "window_maximized:%d\n", window.maximized ? 1 : 0);
 		fprintf(fd, "window_panel_w:%d\n", window.panel_width);
 		fprintf(fd, "window_timeline_h:%d\n", window.timeline_height);
+		fprintf(fd, "text_x:%f\n", text_defaults.x);
+		fprintf(fd, "text_y:%f\n", text_defaults.y);
+		fprintf(fd, "text_w:%f\n", text_defaults.w);
+		fprintf(fd, "text_h:%f\n", text_defaults.h);
+		fprintf(fd, "text_font:%d\n", text_defaults.style.font);
+		fprintf(fd, "text_size:%f\n", text_defaults.style.size);
+		fprintf(fd, "text_bold:%d\n", text_defaults.style.bold ? 1 : 0);
+		fprintf(fd, "text_italic:%d\n", text_defaults.style.italic ? 1 : 0);
+		fprintf(fd, "text_strike:%d\n", text_defaults.style.strike ? 1 : 0);
+		fprintf(fd, "text_align:%d\n", text_defaults.style.align);
+		fprintf(fd, "text_color:%06x\n", TextSettings::pack_color(text_defaults.style.color));
+		fprintf(fd, "text_shadow_color:%06x\n", TextSettings::pack_color(text_defaults.style.shadow_color));
+		fprintf(fd, "text_shadow_opacity:%f\n", text_defaults.style.shadow_opacity);
+		fprintf(fd, "text_shadow_dx:%f\n", text_defaults.style.shadow_dx);
+		fprintf(fd, "text_shadow_dy:%f\n", text_defaults.style.shadow_dy);
+		fprintf(fd, "text_fade_in_s:%f\n", text_defaults.fade_in_seconds);
+		fprintf(fd, "text_dwell_s:%f\n", text_defaults.dwell_seconds);
+		fprintf(fd, "text_fade_out_s:%f\n", text_defaults.fade_out_seconds);
+		for (size_t i = 0; i < text_defaults.recent_colors.size(); i++)
+			fprintf(fd, "text_recent_color:%06x\n", text_defaults.recent_colors[i]);
 		fprintf(fd, "last_project:%s\n", last_project.c_str());
 		for (int i = 0; i < recent_projects.count(); i++)
 			fprintf(fd, "recent_project:%s\n", recent_projects.path(i).c_str());

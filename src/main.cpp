@@ -914,7 +914,7 @@ int main()
     // The text laid over the video: drawn into the canvas after the telemetry's text (so it is in the preview, the
     // export and the overlay screenshot), and edited in the left panel.
     TextRenderer text_renderer;
-    TextPanel text_panel(&edit_model, &media_container_mgr, &timeline_editor);
+    TextPanel text_panel(&edit_model, &media_container_mgr, &timeline_editor, &env_config);
     TileLayer tile_layer;
     SyncView sync_view(&tile_layer);
     // The pictures of the video along the timelines, got from the files on a thread of their own.

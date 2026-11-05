@@ -55,6 +55,8 @@ public:
 	void set_text(EditModel* model, int id, const std::string& text);
 	// Where the box is, as fractions of the frame (see text_box.h).
 	void set_geometry(EditModel* model, int id, float x, float y, float w, float h);
+	// How the words look (see TextStyle).
+	void set_style(EditModel* model, int id, const TextStyle& style);
 	// When it shows: the frame it begins on, and the lengths of its fade in, dwell and fade out.
 	void set_timing(EditModel* model, int id, const FileTime& anchor, int64_t fade_in_ticks, int64_t dwell_ticks, int64_t fade_out_ticks);
 	void end_box_edit(const EditModel& model, const MediaContainerMgr& media);

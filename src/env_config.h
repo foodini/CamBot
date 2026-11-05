@@ -58,6 +58,8 @@ public:
 	// Flight summary duration and XC toggle. Same deal: set freely, then save_user_settings() on release.
 	void summary_settings(const SummarySettings& settings) { m_user_settings.summary = settings; }
 	void save_user_settings() const                        { m_user_settings.save(); }
+	// What a new text box starts out as (see user_settings.h). Set freely; call save_user_settings() when the user lets go.
+	void text_defaults(const TextSettings& settings)       { m_user_settings.text_defaults = settings; }
 	// Which project is open: it is the one to open at the next start, and goes to the top of the recent
 	// list. And the other way: the user closed it on purpose, so the next start should not open it.
 	// Both save the user settings.
@@ -95,6 +97,7 @@ public:
 	float                   map_dim()                const { return m_user_settings.map_dim; }
 	const MapTraceSettings& map_trace_settings()     const { return m_user_settings.map_trace; }
 	const SummarySettings&  summary_settings()       const { return m_user_settings.summary; }
+	const TextSettings&     text_defaults()          const { return m_user_settings.text_defaults; }
 	const AltitudeReferences& altitude_references()  const { return m_altitude_refs; }
 	// Where the first and last frames of the video fall in telemetry, as sample indices clamped
 	// to the recording -- the moments the altitude references describe.
