@@ -65,6 +65,10 @@ namespace text_box {
 // 1 through the fade in, 1 for the dwell, and falling back to 0 through the fade out. (A fade of no length is a cut.)
 float alpha_at(const TextBox& box, int64_t ticks_from_start);
 
+// Makes the box show for `total` ticks (at least 0) in all, keeping its fades as they are and giving the rest to the dwell. If
+// that is too short for both fades, the dwell is 0 and the fades are cut down in proportion.
+void set_total_ticks(TextBox* box, int64_t total);
+
 // What a new text box looks like to begin with: white, with a black shadow, centered, in the lower part of the frame.
 TextBox default_box();
 

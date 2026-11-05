@@ -248,7 +248,13 @@
   each corner: drag a corner (or anywhere close to it) to reshape the box (the opposite corner stays
   put), drag an edge to move just that side, or drag inside it to move it. It can't leave the picture or be squeezed smaller than a few percent of it, and a whole
   drag is one undo step. The two sections of the left panel, Source Material and Text, now start
-  closed. The timeline track and the font, size, bold, italic, strikethrough, alignment, colour,
+  closed.
+  **On the timeline,** text boxes have a track of their own below the clips: each box is a block as long as it shows (darker
+  where it fades in and out) with the start of its words in it, on separate rows where boxes overlap (make the timeline
+  taller to see more rows). Click a block to select the box and take the playhead to where the box is fully showing (the end of its fade in); hold Ctrl and drag a block to move the box
+  in time, or drag either end of a block to make it start earlier or later or stop sooner or later. The box stays tied to
+  a frame of the video, so it is re-tied to whichever frame it now starts on; moving an end changes the dwell (and shrinks
+  the fades only if there is no longer room for them). Each drag is one undo step. The font, size, bold, italic, strikethrough, alignment, colour,
   shadow and timing controls come next.
 - **Tests.** `tests/run_tests.sh` (run it with `wsl ./tests/run_tests.sh`) builds and runs
   the unit tests: climb filters, map zoom, flight statistics, altitude references, user

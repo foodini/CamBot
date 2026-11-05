@@ -150,7 +150,29 @@ static void test_span() {
 	CHECK(end == 1200);
 }
 
+static void test_set_total_ticks() {
+	TextBox box = timed_box(100, 300, 200);
+	text_box::set_total_ticks(&box, 1000);          // Longer: the dwell takes it up.
+	CHECK(box.fade_in_ticks == 100 && box.dwell_ticks == 700 && box.fade_out_ticks == 200 && box.total_ticks() == 1000);
+	text_box::set_total_ticks(&box, 300);           // Exactly the fades.
+	CHECK(box.fade_in_ticks == 100 && box.dwell_ticks == 0 && box.fade_out_ticks == 200);
+	text_box::set_total_ticks(&box, 150);           // Too short for them: cut down in proportion.
+	CHECK(box.fade_in_ticks == 50 && box.fade_out_ticks == 100 && box.dwell_ticks == 0 && box.total_ticks() == 150);
+	text_box::set_total_ticks(&box, 0);
+	CHECK(box.total_ticks() == 0);
+	text_box::set_total_ticks(&box, -5);
+	CHECK(box.total_ticks() == 0);
+
+	box = timed_box(0, 100, 0);                     // No fades at all.
+	text_box::set_total_ticks(&box, 40);
+	CHECK(box.dwell_ticks == 40 && box.total_ticks() == 40);
+	box = timed_box(0, 100, 50);                    // One fade.
+	text_box::set_total_ticks(&box, 20);
+	CHECK(box.fade_in_ticks == 0 && box.fade_out_ticks == 20 && box.dwell_ticks == 0);
+}
+
 int main() {
+	test_set_total_ticks();
 	test_alpha();
 	test_defaults();
 	test_list();

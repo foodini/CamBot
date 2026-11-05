@@ -13,6 +13,7 @@
 #include "thumbnail_layout.h"
 #include "thumbnail_store.h"
 #include "timeline_edit.h"
+#include "text_lanes.h"
 #include "timeline_editor.h"
 
 namespace {
@@ -24,6 +25,11 @@ const float  MIN_TRACK_HEIGHT = 24.0f;
 const float  MAX_TRACK_HEIGHT = 120.0f;
 const float  CLIP_ROUNDING = 6.0f;             // The corners of a clip.
 const float  CLIP_BORDER_WIDTH = 2.0f;
+const float  LANE_GAP = 3.0f;                  // Between the clips and the first row of text boxes, and between rows.
+const float  LANE_PADDING = 3.0f;              // Inside a text box's block, round its words.
+const float  TEXT_EDGE_GRAB = 8.0f;            // How near an end of a text box's block the mouse must be to take hold of the end.
+const float  TEXT_ROUNDING = 4.0f;
+const float  PREFERRED_TRACK_HEIGHT = 56.0f;   // The least the clips get when a new row of text boxes makes the timeline grow.
 const float  RULER_TINT_FACTOR = 0.5f;         // The file's color on the ruler is darkened, so the times on it stay easy to read.
 const int    MAX_PICTURES_PER_CLIP = 80;
 const double FRAME_PIXELS_AT_MAX_ZOOM = 32.0;  // Zoomed in as far as it goes, one frame is this wide.
@@ -39,6 +45,12 @@ const ImU32 COLOR_CLIP_BORDER = IM_COL32(12, 12, 15, 255);
 const ImU32 COLOR_CLIP_TEXT = IM_COL32(240, 240, 245, 255);
 const ImU32 COLOR_CLIP_BACKDROP = IM_COL32(30, 30, 36, 255);       // Behind the pictures, where one hasn't arrived.
 const ImU32 COLOR_NAME_PLATE = IM_COL32(0, 0, 0, 150);             // Under a file's name, so it can be read over any picture.
+const ImU32 COLOR_TEXT_BLOCK = IM_COL32(58, 64, 92, 255);
+const ImU32 COLOR_TEXT_BORDER = IM_COL32(150, 160, 205, 255);
+const ImU32 COLOR_TEXT_SELECTED = IM_COL32(255, 255, 255, 255);
+const ImU32 COLOR_TEXT_WORDS = IM_COL32(235, 238, 250, 255);
+const ImU32 COLOR_TEXT_FADE = IM_COL32(0, 0, 0, 80);               // Darkens the stretches where the words fade in and out.
+const ImU32 COLOR_TEXT_GRAB = IM_COL32(255, 255, 255, 90);         // Shows the ends and the body that Ctrl and the mouse can take.
 const ImU32 COLOR_JOIN = IM_COL32(235, 200, 70, 255);
 const ImU32 COLOR_PLAYHEAD = IM_COL32(240, 70, 70, 255);
 const ImU32 COLOR_CURRENT_CLIP = IM_COL32(245, 245, 250, 255);   // Outlines the clip the playhead is in.
@@ -100,6 +112,30 @@ ImU32 darkened(ImU32 color, float factor) {
 	return IM_COL32(red, green, blue, 255);
 }
 
+// Which part of a text box's block the mouse is on, from its left and right ends in pixels: one of the ends if within a few
+// pixels of it (less on a block too narrow to spare them), otherwise the body.
+int text_part_at(float x, float left, float right) {
+	const float grab = (right - left) / 3.0f < TEXT_EDGE_GRAB ? (right - left) / 3.0f : TEXT_EDGE_GRAB;
+	if (x < left + grab)
+		return text_lanes::LEFT_END;
+	if (x > right - grab)
+		return text_lanes::RIGHT_END;
+	return text_lanes::BODY;
+}
+
+// The first line of `text`, or the second (line 1) if `line` is 1; empty if there isn't one.
+std::string line_of(const std::string& text, int line) {
+	size_t begin = 0;
+	for (int n = 0; n < line; n++) {
+		begin = text.find('\n', begin);
+		if (begin == std::string::npos)
+			return std::string();
+		begin++;
+	}
+	const size_t end = text.find('\n', begin);
+	return text.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+}
+
 float larger(float a, float b) { return a > b ? a : b; }
 float smaller(float a, float b) { return a < b ? a : b; }
 
@@ -107,11 +143,14 @@ float smaller(float a, float b) { return a < b ? a : b; }
 
 TimelineView::TimelineView(const char* window_name) :
 	m_window_name(window_name), m_thumbnails(nullptr), m_panning(false), m_scrubbing(false), m_scrub_ticks(-1), m_drag_clip(-1), m_drag_to(-1),
+	m_text_drag_id(0), m_text_drag_part(0), m_text_drag_original(), m_text_drag_span(), m_text_drag_origin_x(0.0f),
+	m_previous_lane_count(0), m_height_request(0.0f),
 	m_scanning(false), m_scan_origin_x(0.0f), m_scan_accumulator(0.0f), m_last_playhead(-1), m_follow(true)
 {
 }
 
-void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainerMgr& media, TimelineEditor* editor, ReorderRequest* reorder) {
+void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainerMgr& media, TimelineEditor* editor, ReorderRequest* reorder,
+		int* selected_text) {
 	if (rect.w < 1.0f || rect.h < 1.0f)
 		return;
 	ImGui::SetNextWindowPos(ImVec2(rect.x, rect.y));
@@ -157,7 +196,9 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 	}
 
 	// A reminder of the mouse, if there's room for it.
-	const char* hint = "Scroll to zoom.  Drag the ruler, middle-drag or Shift+scroll to pan.  Right-drag to scan.  Ctrl+drag a clip to move it.";
+	const char* hint = editor != nullptr
+		? "Scroll to zoom.  Drag the ruler, middle-drag or Shift+scroll to pan.  Right-drag to scan.  Ctrl+drag a clip to move it, or a text box (or its ends) to retime it."
+		: "Scroll to zoom.  Drag the ruler, middle-drag or Shift+scroll to pan.  Right-drag to scan.  Ctrl+drag a clip to move it.";
 	ImGui::SameLine(0.0f, 16.0f);
 	if (ImGui::CalcTextSize(hint).x < ImGui::GetContentRegionAvail().x)
 		ImGui::TextDisabled("%s", hint);
@@ -170,6 +211,64 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 	}
 	m_scale.set_extent(clips.total_ticks(), (double)media.frame_ticks() / FRAME_PIXELS_AT_MAX_ZOOM);
 	m_scale.set_width(available.x);
+
+	// The text track: the text boxes as blocks on rows below the clips (only in the editor's own timeline, and not while the
+	// footage is shown whole in the sync view). Worked out here, before the mouse is dealt with, as the mouse needs to know where they are.
+	const bool show_text = editor != nullptr && selected_text != nullptr && !model.in_source_view();
+	std::vector<int> text_ids;
+	std::vector<text_lanes::Span> text_spans;
+	std::vector<int> text_lane_of;
+	int lane_count = 0;
+	if (show_text) {
+		const std::vector<TextBox>& boxes = model.text_boxes();
+		for (size_t i = 0; i < boxes.size(); i++) {
+			text_lanes::Span span;
+			model.text_box_span(boxes[i], &span.start, &span.end);
+			text_ids.push_back(boxes[i].id);
+			text_spans.push_back(span);
+		}
+		text_lane_of = text_lanes::assign(text_spans, &lane_count);
+	}
+	const float ruler_bottom = origin.y + RULER_HEIGHT;
+	const float track_top = ruler_bottom + TRACK_GAP;
+	const float lane_height = 2.0f * ImGui::GetTextLineHeight() + 2.0f * LANE_PADDING;
+	// The rows take what they need of the height, short of leaving the clips less than their least; any that don't fit are cut off
+	// (the user makes the timeline taller to see them).
+	float text_area = (float)lane_count * (lane_height + LANE_GAP);
+	const float text_room = larger(0.0f, available.y - RULER_HEIGHT - TRACK_GAP - TRACK_BOTTOM_MARGIN - MIN_TRACK_HEIGHT);
+	text_area = smaller(text_area, text_room);
+	float track_height = available.y - RULER_HEIGHT - TRACK_GAP - TRACK_BOTTOM_MARGIN - text_area;
+	track_height = larger(MIN_TRACK_HEIGHT, smaller(MAX_TRACK_HEIGHT, track_height));
+	const float track_bottom = track_top + track_height;
+	const float text_top = track_bottom + LANE_GAP;
+	// A row of text boxes that is new, and doesn't fit, is a reason to make the timeline taller: otherwise it would appear below
+	// the bottom of the window with nothing to show it is there.
+	if (show_text) {
+		if (lane_count > m_previous_lane_count) {
+			const float wanted = (origin.y - rect.y) + RULER_HEIGHT + TRACK_GAP + PREFERRED_TRACK_HEIGHT + TRACK_BOTTOM_MARGIN +
+				(float)lane_count * (lane_height + LANE_GAP) + ImGui::GetStyle().WindowPadding.y;
+			if (wanted > rect.h)
+				m_height_request = wanted;
+		}
+		m_previous_lane_count = lane_count;
+	}
+	// The block under the mouse, as an index into text_ids (or -1), and which part of it. A block's ends are where they really
+	// are, which may be far off the strip when zoomed in.
+	int text_under_mouse = -1;
+	int text_part_under_mouse = text_lanes::BODY;
+	if (show_text) {
+		const ImVec2 mouse = ImGui::GetIO().MousePos;
+		for (int i = (int)text_ids.size() - 1; i >= 0 && text_under_mouse < 0; i--) {
+			const float top = text_top + (float)text_lane_of[i] * (lane_height + LANE_GAP);
+			const float left = origin.x + m_scale.tick_to_x((double)text_spans[i].start);
+			const float right = origin.x + m_scale.tick_to_x((double)text_spans[i].end);
+			if (mouse.x >= left && mouse.x <= right && mouse.y >= top && mouse.y <= top + lane_height &&
+					top + lane_height <= origin.y + available.y) {
+				text_under_mouse = i;
+				text_part_under_mouse = text_part_at(mouse.x, left, right);
+			}
+		}
+	}
 
 	// One surface over the whole strip takes the mouse; what it means depends on the button.
 	ImGui::InvisibleButton("##timeline_surface", available,
@@ -203,6 +302,16 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 			if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && io.MousePos.y - origin.y < RULER_HEIGHT) {
 				// Pressed on the ruler: that slides the timeline instead of moving the playhead.
 				m_panning = true;
+			} else if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && io.KeyCtrl && text_under_mouse >= 0) {
+				// Ctrl and the button on a text box: take hold of it (or an end of it) to change when it shows.
+				m_text_drag_id = text_ids[text_under_mouse];
+				m_text_drag_part = text_part_under_mouse;
+				m_text_drag_span = text_spans[text_under_mouse];
+				m_text_drag_original = *model.find_text_box(m_text_drag_id);
+				m_text_drag_origin_x = io.MousePos.x;
+				*selected_text = m_text_drag_id;
+				editor->begin_box_edit(model, media);
+				EnvConfig::instance->pause();
 			} else if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && io.KeyCtrl) {
 				// Ctrl and the button on a clip: pick it up, if there is somewhere else for it to go.
 				const double ticks = m_scale.x_to_ticks(mouse_x);
@@ -212,10 +321,17 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 					EnvConfig::instance->pause();
 				}
 			} else if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-				m_scrubbing = true;
-				m_follow = true;
-				m_scrub_ticks = -1;
-				EnvConfig::instance->pause();
+				if (text_under_mouse >= 0) {
+					// A click on a text box selects it and takes the playhead to where it shows in full.
+					*selected_text = text_ids[text_under_mouse];
+					editor->go_to_text_box(model, &media, *selected_text);
+					m_follow = true;
+				} else {
+					m_scrubbing = true;
+					m_follow = true;
+					m_scrub_ticks = -1;
+					EnvConfig::instance->pause();
+				}
 			} else if (ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
 				m_scanning = true;
 				m_follow = true;
@@ -239,6 +355,27 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 	if (exporting) {
 		m_panning = false;
 		m_drag_clip = -1;
+	}
+	// A text box being dragged: it takes the shape the mouse's movement since the pick-up gives it, worked from the box as it was
+	// then, and letting go ends the one undo step that began there.
+	if (m_text_drag_id != 0) {
+		TextBox* dragged = (show_text && !exporting) ? model.find_text_box(m_text_drag_id) : nullptr;
+		if (dragged != nullptr && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+			const int64_t delta = (int64_t)llround((double)(io.MousePos.x - m_text_drag_origin_x) * m_scale.ticks_per_pixel());
+			const text_lanes::Span span = text_lanes::dragged(m_text_drag_span, m_text_drag_part, delta, clips.total_ticks(), media.frame_ticks());
+			TextBox updated = m_text_drag_original;
+			if (span.start != m_text_drag_span.start)
+				updated.anchor = clips.source_for(span.start);     // (An end that stays put keeps its anchor as it was.)
+			text_box::set_total_ticks(&updated, span.length());
+			editor->set_timing(&model, m_text_drag_id, updated.anchor, updated.fade_in_ticks, updated.dwell_ticks, updated.fade_out_ticks);
+			ImGui::SetMouseCursor(m_text_drag_part == text_lanes::BODY ? ImGuiMouseCursor_ResizeAll : ImGuiMouseCursor_ResizeEW);
+		} else {
+			if (editor != nullptr)
+				editor->end_box_edit(model, media);
+			m_text_drag_id = 0;
+		}
+	} else if (text_under_mouse >= 0 && hovered && io.KeyCtrl && !m_scrubbing && !m_scanning && m_drag_clip < 0 && !exporting) {
+		ImGui::SetMouseCursor(text_part_under_mouse == text_lanes::BODY ? ImGuiMouseCursor_ResizeAll : ImGuiMouseCursor_ResizeEW);
 	}
 	// A clip being carried: where it would land follows the mouse, and letting go drops it.
 	if (m_drag_clip >= 0) {
@@ -308,7 +445,6 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 
 	// The ruler, tinted with the color of the file under each stretch of it, so footage cut up and shuffled about
 	// can be told by color alone.
-	const float ruler_bottom = origin.y + RULER_HEIGHT;
 	for (int i = 0; i < clips.count(); i++) {
 		const double tint_start = (double)clips.start(i);
 		const double tint_end = tint_start + (double)clips.clip(i).duration_ticks();
@@ -336,10 +472,6 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 	draw->AddLine(ImVec2(strip_min.x, ruler_bottom), ImVec2(strip_max.x, ruler_bottom), COLOR_RULER_LINE);
 
 	// The clips, one block each, with a mark at every join.
-	const float track_top = ruler_bottom + TRACK_GAP;
-	float track_height = available.y - RULER_HEIGHT - TRACK_GAP - TRACK_BOTTOM_MARGIN;
-	track_height = larger(MIN_TRACK_HEIGHT, smaller(MAX_TRACK_HEIGHT, track_height));
-	const float track_bottom = track_top + track_height;
 	// The pictures are as wide as the track is tall, the video's shape. (A video upside down in the preview is upside down here.)
 	const float picture_aspect = m_thumbnails != nullptr ? m_thumbnails->aspect() : 16.0f / 9.0f;
 	const double picture_width = (double)(track_height * picture_aspect);
@@ -432,6 +564,55 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 	if (m_thumbnails != nullptr)
 		m_thumbnails->end_frame();
 
+	// The text track.
+	for (size_t i = 0; i < text_ids.size(); i++) {
+		const float top = text_top + (float)text_lane_of[i] * (lane_height + LANE_GAP);
+		if (top + lane_height > strip_max.y)
+			continue;                      // Cut off for want of room.
+		const TextBox* box = model.find_text_box(text_ids[i]);
+		if (box == nullptr)
+			continue;
+		const float true_left = origin.x + m_scale.tick_to_x((double)text_spans[i].start);
+		const float true_right = origin.x + m_scale.tick_to_x((double)text_spans[i].end);
+		if (true_right < strip_min.x || true_left > strip_max.x)
+			continue;
+		const float left = larger(true_left, strip_min.x - 4.0f);
+		const float right = smaller(true_right, strip_max.x + 4.0f);
+		const float bottom = top + lane_height;
+		const bool selected = text_ids[i] == *selected_text;
+		draw->AddRectFilled(ImVec2(left, top), ImVec2(right, bottom), COLOR_TEXT_BLOCK, TEXT_ROUNDING);
+		// Darker where the words are fading in and out.
+		const float fade_in_width = (float)((double)box->fade_in_ticks / m_scale.ticks_per_pixel());
+		const float fade_out_width = (float)((double)box->fade_out_ticks / m_scale.ticks_per_pixel());
+		if (fade_in_width >= 1.0f)
+			draw->AddRectFilled(ImVec2(left, top), ImVec2(smaller(true_left + fade_in_width, right), bottom), COLOR_TEXT_FADE, TEXT_ROUNDING, ImDrawFlags_RoundCornersLeft);
+		if (fade_out_width >= 1.0f)
+			draw->AddRectFilled(ImVec2(larger(true_right - fade_out_width, left), top), ImVec2(right, bottom), COLOR_TEXT_FADE, TEXT_ROUNDING, ImDrawFlags_RoundCornersRight);
+		// The start of the words, two lines of them at most, held in view while any of the block is.
+		const float words_left = larger(true_left, strip_min.x) + LANE_PADDING + 1.0f;
+		const float words_right = smaller(true_right, strip_max.x) - LANE_PADDING;
+		if (words_right > words_left) {
+			draw->PushClipRect(ImVec2(words_left, top), ImVec2(words_right, bottom), true);
+			const float line_height = ImGui::GetTextLineHeight();
+			for (int line = 0; line < 2; line++) {
+				const std::string words = line_of(box->text, line);
+				draw->AddText(ImVec2(words_left, top + LANE_PADDING + (float)line * line_height), COLOR_TEXT_WORDS, words.c_str());
+			}
+			draw->PopClipRect();
+		}
+		draw->AddRect(ImVec2(left, top), ImVec2(right, bottom), selected ? COLOR_TEXT_SELECTED : COLOR_TEXT_BORDER, TEXT_ROUNDING, 0, selected ? 2.0f : 1.0f);
+		// With Ctrl down over a block, the places the mouse would take hold of light up: the two ends, or all of it.
+		if (io.KeyCtrl && (int)i == text_under_mouse && m_text_drag_id == 0 && !m_scrubbing && !m_scanning && m_drag_clip < 0) {
+			const float grab = smaller(TEXT_EDGE_GRAB, (true_right - true_left) / 3.0f);
+			if (text_part_under_mouse == text_lanes::LEFT_END)
+				draw->AddRectFilled(ImVec2(left, top), ImVec2(left + grab, bottom), COLOR_TEXT_GRAB, TEXT_ROUNDING, ImDrawFlags_RoundCornersLeft);
+			else if (text_part_under_mouse == text_lanes::RIGHT_END)
+				draw->AddRectFilled(ImVec2(right - grab, top), ImVec2(right, bottom), COLOR_TEXT_GRAB, TEXT_ROUNDING, ImDrawFlags_RoundCornersRight);
+			else
+				draw->AddRectFilled(ImVec2(left + grab, top), ImVec2(right - grab, bottom), COLOR_TEXT_GRAB);
+		}
+	}
+
 	// The clip the playhead is in, which the edit buttons and keys act on.
 	const int current = timeline_edit::current_clip(clips, playhead);
 	if (current >= 0) {
@@ -476,7 +657,7 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 	// The playhead on top of it all.
 	const float playhead_x = origin.x + m_scale.tick_to_x((double)playhead);
 	if (playhead_x >= strip_min.x - 6.0f && playhead_x <= strip_max.x + 6.0f) {
-		draw->AddLine(ImVec2(playhead_x, origin.y), ImVec2(playhead_x, track_bottom + 2.0f), COLOR_PLAYHEAD, 2.0f);
+		draw->AddLine(ImVec2(playhead_x, origin.y), ImVec2(playhead_x, (text_area > 0.0f ? text_top + text_area : track_bottom) + 2.0f), COLOR_PLAYHEAD, 2.0f);
 		draw->AddTriangleFilled(ImVec2(playhead_x - 6.0f, origin.y), ImVec2(playhead_x + 6.0f, origin.y), ImVec2(playhead_x, origin.y + 9.0f),
 			COLOR_PLAYHEAD);
 	}

@@ -41,6 +41,20 @@ float alpha_at(const TextBox& box, int64_t ticks_from_start) {
 	return 1.0f;
 }
 
+void set_total_ticks(TextBox* box, int64_t total) {
+	if (total < 0)
+		total = 0;
+	const int64_t fades = box->fade_in_ticks + box->fade_out_ticks;
+	if (total >= fades) {
+		box->dwell_ticks = total - fades;
+		return;
+	}
+	// Fade in gets its share, rounded down, and the fade out whatever is left.
+	box->fade_in_ticks = (int64_t)((double)total * (double)box->fade_in_ticks / (double)fades);
+	box->fade_out_ticks = total - box->fade_in_ticks;
+	box->dwell_ticks = 0;
+}
+
 TextBox default_box() {
 	TextBox box;
 	box.text = "Lorem Ipsum";

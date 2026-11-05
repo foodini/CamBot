@@ -6,7 +6,10 @@
 // moves around it: left-drag (or click) scrubs, the right button drags to scan forward and back,
 // the wheel zooms about the cursor, and the middle button, Shift and the wheel, or a left-drag on
 // the ruler pans. Ctrl and the left button together pick up a clip and drop it in another place in
-// the order. The buttons along its top cut the clips at the playhead (see timeline_editor.h); a
+// the order. Below the clips, when the project has text boxes (see text_box.h), is the text track: each box a block as long
+// as it shows, with the start of its words in it, on rows of their own where boxes overlap. A click on a box selects it;
+// Ctrl and the left button on its body move it in time, and on either end of it change when it starts or stops (the box
+// stays tied to a frame of the video: see text_lanes.h). The buttons along its top cut the clips at the playhead (see timeline_editor.h); a
 // timeline with no editor, such as the one in the sync view, has no such buttons.
 //
 // Drawn with ImGui, so it is the window's own, never part of the exported picture. The arithmetic
@@ -16,6 +19,8 @@
 #include <string>
 
 #include "edit_model.h"
+#include "text_box.h"
+#include "text_lanes.h"
 #include "timeline_scale.h"
 #include "window_layout.h"
 
@@ -44,10 +49,18 @@ public:
 	// where the playhead is, and what is moved when the user moves it. The buttons above the
 	// timeline (Split, Trim Left and so on) are carried out by `editor`, on `model` and `media`; with
 	// no editor (null) they are not shown. When the user drops a dragged clip, `reorder` is set.
-	void draw(const LayoutRect& rect, EditModel& model, MediaContainerMgr& media, TimelineEditor* editor, ReorderRequest* reorder);
+	// The text track is shown only with an editor, and `selected_text` (the id of the selected text box, or 0 for
+	// none) is where it reads which box is selected and tells of a click on another.
+	void draw(const LayoutRect& rect, EditModel& model, MediaContainerMgr& media, TimelineEditor* editor, ReorderRequest* reorder,
+		int* selected_text = nullptr);
 
 	// Shows the whole timeline.
 	void fit() { m_scale.fit(); }
+
+	// When a new row of text boxes has appeared on the text track and the timeline is too short to show it, this is how tall the
+	// timeline should be to (0 otherwise). Asking clears it. The caller makes the timeline that tall (the layout holds it to what
+	// the window allows).
+	float take_height_request() { const float wanted = m_height_request; m_height_request = 0.0f; return wanted; }
 
 	// Where the pictures on the clips come from. Without one (the default) the clips are plain blocks.
 	void set_thumbnails(ThumbnailStore* thumbnails) { m_thumbnails = thumbnails; }
@@ -69,6 +82,18 @@ private:
 	// order, where it would go if dropped now being m_drag_to.
 	int     m_drag_clip;
 	int     m_drag_to;
+
+	// Ctrl and the left button on a text box: dragging it (m_text_drag_id, 0 when not) by its body or one end (a
+	// text_lanes::Part). It began as m_text_drag_original, showing m_text_drag_span, with the mouse at m_text_drag_origin_x.
+	int              m_text_drag_id;
+	int              m_text_drag_part;
+	TextBox          m_text_drag_original;
+	text_lanes::Span m_text_drag_span;
+	float            m_text_drag_origin_x;
+
+	// The number of rows of text boxes last time, to notice a new one, and the height the timeline was found to need then.
+	int     m_previous_lane_count;
+	float   m_height_request;
 
 	// Right button: scanning at a rate set by how far the mouse is from where it was pressed.
 	bool    m_scanning;

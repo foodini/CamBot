@@ -116,8 +116,14 @@ void TextPanel::draw(bool can_change) {
 		char when[32];
 		ffsw::make_time(when, (float)m_model->ticks_to_seconds(starts[order[n]]), false);
 		const std::string label = std::string(when) + "  " + preview_of(box.text) + "##" + std::to_string(box.id);
-		if (ImGui::Selectable(label.c_str(), box.id == m_selected))
-			m_selected = (box.id == m_selected) ? 0 : box.id;     // Clicking the selected one again lets go of it.
+		if (ImGui::Selectable(label.c_str(), box.id == m_selected)) {
+			if (box.id == m_selected) {
+				m_selected = 0;                // Clicking the selected one again lets go of it.
+			} else {
+				m_selected = box.id;
+				m_editor->go_to_text_box(*m_model, m_media, box.id);     // And the picture shows it.
+			}
+		}
 	}
 	ImGui::EndChild();
 
@@ -160,6 +166,14 @@ void TextPanel::draw_on_preview(const LayoutRect& preview, bool can_change) {
 		m_drag_part = -1;
 		return;
 	}
+	// Only while the box is on the picture: there is nothing to handle otherwise, and the rectangle would be in the way of the
+	// ordinary editing. (A drag in progress can't be cut short, as the playhead doesn't move during one.)
+	int64_t shows_from = 0;
+	int64_t shows_until = 0;
+	m_model->text_box_span(*box, &shows_from, &shows_until);
+	const int64_t now_ticks = m_media->current_ticks();
+	if (m_drag_part < 0 && (now_ticks < shows_from || now_ticks >= shows_until))
+		return;
 
 	const float HANDLE_SIZE = 12.0f;                       // How big the corner squares are drawn, in pixels.
 	const ImVec2 top_left(preview.x + box->x * preview.w, preview.y + box->y * preview.h);

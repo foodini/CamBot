@@ -1365,7 +1365,12 @@ int main()
                 draw_panel_splitter(layout.panel_splitter, layout.widest_panel, &panel_width);
                 draw_splitter(layout.splitter, &timeline_height);
                 ReorderRequest reorder;
-                timeline_view.draw(layout.timeline, edit_model, media_container_mgr, &timeline_editor, &reorder);
+                int selected_text = text_panel.selected_id();
+                timeline_view.draw(layout.timeline, edit_model, media_container_mgr, &timeline_editor, &reorder, &selected_text);
+                text_panel.select(selected_text);
+                const float taller_timeline = timeline_view.take_height_request();   // A new row of text boxes needs room.
+                if (taller_timeline > timeline_height)
+                    timeline_height = taller_timeline;
                 if (reorder.requested)
                     timeline_editor.move_clip(&edit_model, &media_container_mgr, reorder.from, reorder.to);
                 draw_transport_bar(layout.transport, media_container_mgr, &pending_raw_screenshot_path, &pending_overlay_screenshot_path);

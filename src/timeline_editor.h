@@ -44,6 +44,10 @@ public:
 	// add_text_box gives the id the box was given, or 0 if it couldn't be added.
 	int  add_text_box(EditModel* model, MediaContainerMgr* media, const TextBox& box);
 	bool remove_text_box(EditModel* model, MediaContainerMgr* media, int id);
+	// Moves the playhead to where the box starts to show in full (the end of its fade in), on the exact frame. Not an edit, so it
+	// is not undone.
+	void go_to_text_box(const EditModel& model, MediaContainerMgr* media, int id);
+
 	// Typing in a text box, or dragging it about the picture, is one undo step however many changes it takes: call
 	// begin_box_edit() when the typing field is entered or the drag starts, set_text() / set_geometry() for each change (the
 	// picture follows at once), and end_box_edit() when the field is left or the drag ends.
@@ -51,6 +55,8 @@ public:
 	void set_text(EditModel* model, int id, const std::string& text);
 	// Where the box is, as fractions of the frame (see text_box.h).
 	void set_geometry(EditModel* model, int id, float x, float y, float w, float h);
+	// When it shows: the frame it begins on, and the lengths of its fade in, dwell and fade out.
+	void set_timing(EditModel* model, int id, const FileTime& anchor, int64_t fade_in_ticks, int64_t dwell_ticks, int64_t fade_out_ticks);
 	void end_box_edit(const EditModel& model, const MediaContainerMgr& media);
 
 private:

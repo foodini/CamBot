@@ -176,6 +176,7 @@
     <ClCompile Include="text_box.cpp" />
     <ClCompile Include="text_box_geometry.cpp" />
     <ClCompile Include="text_fonts.cpp" />
+    <ClCompile Include="text_lanes.cpp" />
     <ClCompile Include="text_layout.cpp" />
     <ClCompile Include="text_panel.cpp" />
     <ClCompile Include="text_renderer.cpp" />
@@ -260,6 +261,7 @@
     <ClInclude Include="text_box.h" />
     <ClInclude Include="text_box_geometry.h" />
     <ClInclude Include="text_fonts.h" />
+    <ClInclude Include="text_lanes.h" />
     <ClInclude Include="text_layout.h" />
     <ClInclude Include="text_panel.h" />
     <ClInclude Include="text_renderer.h" />

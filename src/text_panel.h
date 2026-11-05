@@ -31,6 +31,8 @@ public:
 	// The text box selected in the list, or 0 if none (or if it has since been removed). The Delete key
 	// removes this one in place of the clip, if there is one.
 	int selected_id() const;
+	// Selects a text box (0 for none), as when one is clicked on the timeline.
+	void select(int id) { m_selected = id; }
 
 private:
 	EditModel*        m_model;

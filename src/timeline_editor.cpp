@@ -143,6 +143,24 @@ bool TimelineEditor::redo(EditModel* model, MediaContainerMgr* media) {
 	return true;
 }
 
+void TimelineEditor::go_to_text_box(const EditModel& model, MediaContainerMgr* media, int id) {
+	const TextBox* box = model.find_text_box(id);
+	if (box == NULL || media->recording())
+		return;
+	int64_t start = 0;
+	int64_t end = 0;
+	model.text_box_span(*box, &start, &end);
+	int64_t target = start + box->fade_in_ticks;
+	const int64_t last_frame = model.edit_list().total_ticks() - media->frame_ticks();
+	if (target > last_frame)
+		target = last_frame;
+	if (target < 0)
+		target = 0;
+	EnvConfig::instance->pause();
+	media->seek_to_keyframe_near(target);     // Near first and then exact, as scrubbing does, so a far jump is quick.
+	media->advance_to(target);
+}
+
 void TimelineEditor::commit_box_edit(const EditModel& model, const MediaContainerMgr& media) {
 	(void)media;
 	if (!m_box_edit_pending)
@@ -192,6 +210,17 @@ void TimelineEditor::set_geometry(EditModel* model, int id, float x, float y, fl
 	box->y = y;
 	box->w = w;
 	box->h = h;
+}
+
+void TimelineEditor::set_timing(EditModel* model, int id, const FileTime& anchor, int64_t fade_in_ticks, int64_t dwell_ticks,
+		int64_t fade_out_ticks) {
+	TextBox* box = model->find_text_box(id);
+	if (box == NULL)
+		return;
+	box->anchor = anchor;
+	box->fade_in_ticks = fade_in_ticks;
+	box->dwell_ticks = dwell_ticks;
+	box->fade_out_ticks = fade_out_ticks;
 }
 
 void TimelineEditor::end_box_edit(const EditModel& model, const MediaContainerMgr& media) {

@@ -31,6 +31,7 @@ for test in *_test.cpp; do
     if [ "$name" = "text_box_test" ]; then extra="../src/edit_model.cpp ../src/text_box.cpp"; fi
     if [ "$name" = "text_layout_test" ]; then extra="../src/text_layout.cpp ../src/text_box.cpp"; fi
     if [ "$name" = "text_box_geometry_test" ]; then extra="../src/text_box_geometry.cpp"; fi
+    if [ "$name" = "text_lanes_test" ]; then extra="../src/text_lanes.cpp"; fi
     if [ "$name" = "text_fonts_test" ]; then extra="../src/text_fonts.cpp"; fi
     if [ "$name" = "thumbnail_layout_test" ]; then extra="../src/thumbnail_layout.cpp"; fi
     if [ "$name" = "timeline_scale_test" ]; then extra="../src/timeline_scale.cpp ../src/scan_gesture.cpp"; fi
