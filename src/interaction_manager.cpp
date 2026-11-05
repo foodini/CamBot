@@ -86,9 +86,15 @@ void InteractionMgr::tick(GLFWwindow* window) {
 	int right_mouse_button = imgui_wants_mouse ? GLFW_RELEASE : glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT);
 	update_mouse_button_state(right_mouse_button == GLFW_PRESS, m_mouse_right_button_down, m_mouse_right_button_up, m_mouse_right_button_held);
 
-	// Dispatch to whatever bound each key, now that this frame's down/up/held state is final.
+	// Dispatch to whatever bound each key, now that this frame's down/up/held state is final. While ImGui has the keyboard
+	// (someone typing in a text field, say) the keys are its and not the shortcuts', so nothing is dispatched; the state
+	// above keeps following the keys, so nothing is stuck when the typing ends. Escape is let through always: it cancels an export.
+	const ImGuiIO& imgui_io = ImGui::GetIO();
+	const bool imgui_has_keyboard = imgui_io.WantTextInput || imgui_io.WantCaptureKeyboard;
 	for (auto& entry : m_key_bindings) {
 		int key = entry.first;
+		if (imgui_has_keyboard && key != GLFW_KEY_ESCAPE)
+			continue;
 		KeyBinding& binding = entry.second;
 		if (binding.on_down && key_down(key))
 			binding.on_down();

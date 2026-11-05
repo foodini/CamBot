@@ -81,7 +81,158 @@ bool read_file_time(const Json::Value& object, size_t media_count, FileTime* tim
 	return true;
 }
 
-// Reads the parts of the file that describe the library, the clips and the sync (version 3).
+// Reads three numbers, 0 to 1, from a list of three in an object (a color).
+bool read_color(const Json::Value& object, const char* key, float color[3], std::string* error) {
+	if (!object.isMember(key))
+		return true;
+	const Json::Value& list = object[key];
+	if (!list.isArray() || list.size() != 3) {
+		set_error(error, std::string("The project file's text \"") + key + "\" should be three numbers.");
+		return false;
+	}
+	float values[3];
+	for (Json::ArrayIndex i = 0; i < 3; i++) {
+		if (!list[i].isNumeric()) {
+			set_error(error, std::string("The project file's text \"") + key + "\" should be three numbers.");
+			return false;
+		}
+		double value = list[i].asDouble();
+		values[i] = (float)(value < 0.0 ? 0.0 : (value > 1.0 ? 1.0 : value));
+	}
+	for (int i = 0; i < 3; i++)
+		color[i] = values[i];
+	return true;
+}
+
+Json::Value color_to_json(const float color[3]) {
+	Json::Value list(Json::arrayValue);
+	for (int i = 0; i < 3; i++)
+		list.append((double)color[i]);
+	return list;
+}
+
+bool read_text_style(const Json::Value& object, TextStyle* style, std::string* error) {
+	if (!object.isObject()) {
+		set_error(error, "The project file's text \"style\" is not in the expected form.");
+		return false;
+	}
+	int64_t whole = 0;
+	if (object.isMember("font")) {
+		if (!read_whole(object, "font", 0, &whole, error))
+			return false;
+		style->font = (int)whole;
+	}
+	if (object.isMember("align")) {
+		if (!read_whole(object, "align", 0, &whole, error))
+			return false;
+		if (whole > TEXT_ALIGN_RIGHT) {
+			set_error(error, "The project file has a text \"align\" that is out of range.");
+			return false;
+		}
+		style->align = (int)whole;
+	}
+	if (!read_number(object, "size", &style->size, error))
+		return false;
+	if (!(style->size > 0.0f && style->size <= 1.0f)) {
+		set_error(error, "The project file has a text \"size\" that is out of range.");
+		return false;
+	}
+	const char* flag_names[3] = { "bold", "italic", "strike" };
+	bool* flags[3] = { &style->bold, &style->italic, &style->strike };
+	for (int i = 0; i < 3; i++) {
+		if (!object.isMember(flag_names[i]))
+			continue;
+		if (!object[flag_names[i]].isBool()) {
+			set_error(error, std::string("The project file's text \"") + flag_names[i] + "\" should be true or false.");
+			return false;
+		}
+		*flags[i] = object[flag_names[i]].asBool();
+	}
+	if (!read_color(object, "color", style->color, error))
+		return false;
+	if (object.isMember("shadow")) {
+		const Json::Value& shadow = object["shadow"];
+		if (!shadow.isObject()) {
+			set_error(error, "The project file's text \"shadow\" is not in the expected form.");
+			return false;
+		}
+		if (!read_number(shadow, "dx", &style->shadow_dx, error) || !read_number(shadow, "dy", &style->shadow_dy, error) ||
+			!read_number(shadow, "opacity", &style->shadow_opacity, error) || !read_color(shadow, "color", style->shadow_color, error))
+			return false;
+		if (style->shadow_opacity < 0.0f)
+			style->shadow_opacity = 0.0f;
+		if (style->shadow_opacity > 1.0f)
+			style->shadow_opacity = 1.0f;
+	}
+	return true;
+}
+
+bool read_text_boxes(const Json::Value& list, size_t media_count, std::vector<TextBox>* boxes, std::string* error) {
+	if (!list.isArray()) {
+		set_error(error, "The project file's \"text_boxes\" should be a list.");
+		return false;
+	}
+	for (Json::ArrayIndex i = 0; i < list.size(); i++) {
+		const Json::Value& entry = list[i];
+		TextBox box;
+		int64_t id = 0;
+		if (!read_whole(entry, "id", 0, &id, error) || !read_file_time(entry, media_count, &box.anchor, error) ||
+			!read_whole(entry, "fade_in", 0, &box.fade_in_ticks, error) || !read_whole(entry, "dwell", 0, &box.dwell_ticks, error) ||
+			!read_whole(entry, "fade_out", 0, &box.fade_out_ticks, error))
+			return false;
+		box.id = (int)id;
+		if (!read_string(entry, "text", &box.text, error) || !read_number(entry, "x", &box.x, error) ||
+			!read_number(entry, "y", &box.y, error) || !read_number(entry, "w", &box.w, error) || !read_number(entry, "h", &box.h, error))
+			return false;
+		if (!(box.w > 0.0f && box.h > 0.0f)) {
+			set_error(error, "The project file has a text box with no width or height.");
+			return false;
+		}
+		if (entry.isMember("style") && !read_text_style(entry["style"], &box.style, error))
+			return false;
+		for (size_t other = 0; other < boxes->size(); other++) {
+			if ((*boxes)[other].id == box.id) {
+				set_error(error, "The project file has two text boxes with the same \"id\".");
+				return false;
+			}
+		}
+		boxes->push_back(box);
+	}
+	return true;
+}
+
+Json::Value text_box_to_json(const TextBox& box) {
+	Json::Value entry(Json::objectValue);
+	entry["id"] = box.id;
+	entry["media"] = box.anchor.media;
+	entry["local"] = Json::Value((Json::Int64)box.anchor.local_ticks);
+	entry["fade_in"] = Json::Value((Json::Int64)box.fade_in_ticks);
+	entry["dwell"] = Json::Value((Json::Int64)box.dwell_ticks);
+	entry["fade_out"] = Json::Value((Json::Int64)box.fade_out_ticks);
+	entry["text"] = box.text;
+	entry["x"] = (double)box.x;
+	entry["y"] = (double)box.y;
+	entry["w"] = (double)box.w;
+	entry["h"] = (double)box.h;
+	Json::Value style(Json::objectValue);
+	style["font"] = box.style.font;
+	style["size"] = (double)box.style.size;
+	style["bold"] = box.style.bold;
+	style["italic"] = box.style.italic;
+	style["strike"] = box.style.strike;
+	style["align"] = box.style.align;
+	style["color"] = color_to_json(box.style.color);
+	Json::Value shadow(Json::objectValue);
+	shadow["dx"] = (double)box.style.shadow_dx;
+	shadow["dy"] = (double)box.style.shadow_dy;
+	shadow["color"] = color_to_json(box.style.shadow_color);
+	shadow["opacity"] = (double)box.style.shadow_opacity;
+	style["shadow"] = shadow;
+	entry["style"] = style;
+	return entry;
+}
+
+// Reads the parts of the file that describe the library, the clips and the sync (versions 3 and up).
 bool read_editing_state(const Json::Value& root, ProjectData* result, std::string* error) {
 	const size_t media_count = result->video_files.size();
 
@@ -174,6 +325,15 @@ bool read_editing_state(const Json::Value& root, ProjectData* result, std::strin
 	if (root.isMember("launch_mark")) {
 		if (!read_file_time(root["launch_mark"], media_count, &result->launch_mark, error))
 			return false;
+	}
+
+	if (root.isMember("text_boxes")) {
+		if (!read_text_boxes(root["text_boxes"], media_count, &result->text_boxes, error))
+			return false;
+		if (!result->text_boxes.empty() && result->time_base_num == 0) {
+			set_error(error, "The project file has text boxes but no \"time_base\" to measure them in.");
+			return false;
+		}
 	}
 	return true;
 }
@@ -318,6 +478,13 @@ std::string to_json(const ProjectData& project) {
 		launch["media"] = project.launch_mark.media;
 		launch["local"] = Json::Value((Json::Int64)project.launch_mark.local_ticks);
 		root["launch_mark"] = launch;
+	}
+
+	if (!project.text_boxes.empty()) {
+		Json::Value boxes(Json::arrayValue);
+		for (size_t i = 0; i < project.text_boxes.size(); i++)
+			boxes.append(text_box_to_json(project.text_boxes[i]));
+		root["text_boxes"] = boxes;
 	}
 
 	root["telemetry_file"] = project.telemetry_file;

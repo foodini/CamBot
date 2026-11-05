@@ -199,6 +199,24 @@ static void test_history() {
 	CHECK(!history.can_undo() && !history.can_redo());
 }
 
+static void test_history_text_boxes() {
+	// The text boxes are part of what an undo step keeps.
+	EditState before = state(10, false, 1000);
+	EditState after = before;
+	TextBox box = text_box::default_box();
+	box.id = 1;
+	box.text = "typed";
+	after.text_boxes.push_back(box);
+
+	EditHistory history;
+	history.record(before);
+	EditState restored;
+	CHECK(history.undo(after, &restored));
+	CHECK(restored.text_boxes.empty());
+	CHECK(history.redo(before, &restored));
+	CHECK(restored.text_boxes.size() == 1 && restored.text_boxes[0] == box);
+}
+
 static void test_history_limit() {
 	EditHistory history;
 	for (int i = 0; i < EditHistory::MAX_STEPS + 50; i++)
@@ -315,6 +333,7 @@ int main() {
 	test_remove();
 	test_results_make_valid_lists();
 	test_history();
+	test_history_text_boxes();
 	test_history_limit();
 	test_move_clip();
 	test_drop_index();

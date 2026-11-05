@@ -9,6 +9,7 @@ namespace {
 EditState current_state(const EditModel& model, const MediaContainerMgr& media) {
 	EditState state;
 	state.clips = model.edit_list().clips();
+	state.text_boxes = model.text_boxes();
 	state.edit_started = model.edit_started();
 	state.playhead_ticks = media.current_ticks();
 	return state;
@@ -33,7 +34,7 @@ bool TimelineEditor::can_remove(const EditModel& model, const MediaContainerMgr&
 }
 
 bool TimelineEditor::can_undo(const MediaContainerMgr& media) const {
-	return m_history.can_undo() && !media.recording();
+	return (m_history.can_undo() || m_box_edit_pending) && !media.recording();
 }
 
 bool TimelineEditor::can_redo(const MediaContainerMgr& media) const {
@@ -42,13 +43,16 @@ bool TimelineEditor::can_redo(const MediaContainerMgr& media) const {
 
 bool TimelineEditor::apply_state(const EditState& state, EditModel* model, MediaContainerMgr* media) {
 	const std::vector<Clip> old_clips = model->edit_list().clips();
+	const std::vector<TextBox> old_text_boxes = model->text_boxes();
 	const bool old_started = model->edit_started();
 	if (!model->set_clips(state.clips))
 		return false;
 	model->set_edit_started(state.edit_started);
+	model->set_text_boxes(state.text_boxes);
 	if (!media->set_clips(state.clips, state.playhead_ticks)) {
 		model->set_clips(old_clips);    // The decoder said no (the model's check should have caught it); put things back.
 		model->set_edit_started(old_started);
+		model->set_text_boxes(old_text_boxes);
 		return false;
 	}
 	return true;
@@ -57,6 +61,7 @@ bool TimelineEditor::apply_state(const EditState& state, EditModel* model, Media
 bool TimelineEditor::edit(Operation operation, EditModel* model, MediaContainerMgr* media) {
 	if (media->recording())
 		return false;
+	commit_box_edit(*model, *media);
 	const EditList& list = model->edit_list();
 	const int64_t playhead = media->current_ticks();
 	const int64_t frame = media->frame_ticks();
@@ -71,7 +76,7 @@ bool TimelineEditor::edit(Operation operation, EditModel* model, MediaContainerM
 		return false;
 
 	EditState before = current_state(*model, *media);
-	EditState after;
+	EditState after = before;           // The text boxes stay as they are.
 	after.clips = result.clips;
 	after.edit_started = true;          // The first edit by hand; from here on sync changes are warned about.
 	after.playhead_ticks = result.playhead_ticks;
@@ -90,11 +95,12 @@ bool TimelineEditor::remove_clip(EditModel* model, MediaContainerMgr* media) { r
 bool TimelineEditor::move_clip(EditModel* model, MediaContainerMgr* media, int from, int to) {
 	if (media->recording())
 		return false;
+	commit_box_edit(*model, *media);
 	const timeline_edit::Result result = timeline_edit::move_clip(model->edit_list(), from, to, media->current_ticks());
 	if (!result.ok)
 		return false;
 	EditState before = current_state(*model, *media);
-	EditState after;
+	EditState after = before;
 	after.clips = result.clips;
 	after.edit_started = true;
 	after.playhead_ticks = result.playhead_ticks;
@@ -108,6 +114,7 @@ bool TimelineEditor::move_clip(EditModel* model, MediaContainerMgr* media, int f
 bool TimelineEditor::undo(EditModel* model, MediaContainerMgr* media) {
 	if (media->recording())
 		return false;
+	commit_box_edit(*model, *media);
 	EditState restored;
 	if (!m_history.undo(current_state(*model, *media), &restored))
 		return false;
@@ -124,6 +131,7 @@ bool TimelineEditor::undo(EditModel* model, MediaContainerMgr* media) {
 bool TimelineEditor::redo(EditModel* model, MediaContainerMgr* media) {
 	if (media->recording())
 		return false;
+	commit_box_edit(*model, *media);
 	EditState restored;
 	if (!m_history.redo(current_state(*model, *media), &restored))
 		return false;
@@ -133,4 +141,59 @@ bool TimelineEditor::redo(EditModel* model, MediaContainerMgr* media) {
 		return false;
 	}
 	return true;
+}
+
+void TimelineEditor::commit_box_edit(const EditModel& model, const MediaContainerMgr& media) {
+	(void)media;
+	if (!m_box_edit_pending)
+		return;
+	m_box_edit_pending = false;
+	if (model.text_boxes() != m_box_edit_before.text_boxes)
+		m_history.record(m_box_edit_before);
+}
+
+int TimelineEditor::add_text_box(EditModel* model, MediaContainerMgr* media, const TextBox& box) {
+	if (media->recording())
+		return 0;
+	commit_box_edit(*model, *media);
+	const EditState before = current_state(*model, *media);
+	const int id = model->add_text_box(box);
+	m_history.record(before);
+	return id;
+}
+
+bool TimelineEditor::remove_text_box(EditModel* model, MediaContainerMgr* media, int id) {
+	if (media->recording() || model->find_text_box(id) == NULL)
+		return false;
+	commit_box_edit(*model, *media);
+	const EditState before = current_state(*model, *media);
+	model->remove_text_box(id);
+	m_history.record(before);
+	return true;
+}
+
+void TimelineEditor::begin_box_edit(const EditModel& model, const MediaContainerMgr& media) {
+	commit_box_edit(model, media);
+	m_box_edit_before = current_state(model, media);
+	m_box_edit_pending = true;
+}
+
+void TimelineEditor::set_text(EditModel* model, int id, const std::string& text) {
+	TextBox* box = model->find_text_box(id);
+	if (box != NULL)
+		box->text = text;
+}
+
+void TimelineEditor::set_geometry(EditModel* model, int id, float x, float y, float w, float h) {
+	TextBox* box = model->find_text_box(id);
+	if (box == NULL)
+		return;
+	box->x = x;
+	box->y = y;
+	box->w = w;
+	box->h = h;
+}
+
+void TimelineEditor::end_box_edit(const EditModel& model, const MediaContainerMgr& media) {
+	commit_box_edit(model, media);
 }

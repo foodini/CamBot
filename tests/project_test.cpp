@@ -153,6 +153,59 @@ static void test_time_base_change() {
 	CHECK(model.edit_list().clip(0).out_ticks == 180000);
 }
 
+// Text boxes ride along with the rest of the editing state, and their times follow a change of time base.
+static void test_text_boxes_round_trip() {
+	std::vector<int64_t> durations;
+	durations.push_back(30000 * 20);
+	durations.push_back(30000 * 10);
+	ProjectData project = make_project(2);
+	project.time_base_num = 1;
+	project.time_base_den = 30000;
+	TextBox box = text_box::default_box();
+	box.id = 7;
+	box.anchor = FileTime(1, 30000 * 3);
+	box.fade_in_ticks = 15000;
+	box.dwell_ticks = 30000 * 4;
+	box.fade_out_ticks = 15000;
+	box.text = "Fort Funston\nsecond line";
+	box.style.bold = true;
+	box.style.align = TEXT_ALIGN_RIGHT;
+	project.text_boxes.push_back(box);
+	ProjectData other = project;
+	CHECK(project == other);
+	other.text_boxes[0].style.shadow_opacity = 0.5f;
+	CHECK(project != other);
+
+	EditModel model;
+	std::string error;
+	CHECK(project_io::apply_to_model(project, durations, 1, 30000, &model, &error));
+	CHECK(model.text_boxes().size() == 1);
+	CHECK(model.text_boxes()[0] == box);
+	// The next one added gets an id nobody has.
+	const int added = model.add_text_box(text_box::default_box());
+	CHECK(added == 8);
+	CHECK(model.remove_text_box(added));
+	ProjectData written;
+	project_io::fill_from_model(model, 1, 30000, &written);
+	CHECK(written.text_boxes == project.text_boxes);
+
+	// In a project saved with another time base, the anchor and the durations are converted.
+	EditModel converted;
+	CHECK(project_io::apply_to_model(project, durations, 1, 90000, &converted, &error));
+	CHECK(converted.text_boxes().size() == 1);
+	CHECK(converted.text_boxes()[0].anchor == FileTime(1, 90000 * 3));
+	CHECK(converted.text_boxes()[0].fade_in_ticks == 45000);
+	CHECK(converted.text_boxes()[0].dwell_ticks == 90000 * 4);
+	CHECK(converted.text_boxes()[0].text == box.text);
+
+	// A box on a file that isn't there is left out rather than refused.
+	ProjectData stray = project;
+	stray.text_boxes[0].anchor.media = 5;
+	EditModel without;
+	CHECK(project_io::apply_to_model(stray, durations, 1, 30000, &without, &error));
+	CHECK(without.text_boxes().empty());
+}
+
 static void test_paths() {
 	CHECK(fileio::base_name("C:\\a\\b\\c.mp4") == "c.mp4");
 	CHECK(fileio::base_name("/a/b/c.mp4") == "c.mp4");
@@ -212,6 +265,7 @@ int main(int argc, char** argv) {
 	test_version2_migration();
 	test_bad_projects_are_refused();
 	test_time_base_change();
+	test_text_boxes_round_trip();
 	test_paths();
 	test_file_io(dir);
 	if (g_failures == 0)

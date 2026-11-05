@@ -33,6 +33,9 @@
 #include "telemetry.h"
 #include "timecode.h"
 #include "sync_view.h"
+#include "text_box.h"
+#include "text_panel.h"
+#include "text_renderer.h"
 #include "thumbnail_store.h"
 #include "tile_layer.h"
 #include "position_smoothing.h"
@@ -573,8 +576,9 @@ static void draw_altitude_window(bool* open, bool* resync, bool exporting) {
 // the buttons to change that. Returns true when the "Load Telemetry..." button was clicked; the
 // caller does the loading, as it means restarting. `open_sync_view` is set when the "Sync / Reorder..."
 // button was clicked. `can_change` is false while an export runs, as that needs everything left as it is.
+// Below Source Material is the Text section (see text_panel.h).
 static bool draw_left_panel(const LayoutRect& rect, const EditModel& edit_model,
-    const ProjectFileManager& project_file_mgr, bool can_change, bool* open_sync_view) {
+    const ProjectFileManager& project_file_mgr, TextPanel* text_panel, bool can_change, bool* open_sync_view) {
     bool load_telemetry = false;
     if (rect.w < 1.0f || rect.h < 1.0f)
         return false;
@@ -583,7 +587,7 @@ static bool draw_left_panel(const LayoutRect& rect, const EditModel& edit_model,
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus;
     if (ImGui::Begin("Panel", nullptr, flags)) {
-        if (ImGui::CollapsingHeader("Source Material", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (ImGui::CollapsingHeader("Source Material")) {
             ImGui::TextUnformatted("Video (in the order recorded)");
             const std::vector<int>& order = edit_model.capture().order();
             for (int i = 0; i < (int)order.size(); i++) {
@@ -623,6 +627,7 @@ static bool draw_left_panel(const LayoutRect& rect, const EditModel& edit_model,
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
                 ImGui::SetTooltip("Line the telemetry up with the video, and put the video files in order.\nShows all of the footage; your edit comes back afterward.");
         }
+        text_panel->draw(can_change);
     }
     ImGui::End();
     return load_telemetry;
@@ -906,6 +911,10 @@ int main()
     DateTimeWidget date_time_widget(.29f, .2023f, 1.0f-.29f-.015f, .7864f);
     TimelineView timeline_view;
     TimelineEditor timeline_editor;
+    // The text laid over the video: drawn into the canvas after the telemetry's text (so it is in the preview, the
+    // export and the overlay screenshot), and edited in the left panel.
+    TextRenderer text_renderer;
+    TextPanel text_panel(&edit_model, &media_container_mgr, &timeline_editor);
     TileLayer tile_layer;
     SyncView sync_view(&tile_layer);
     // The pictures of the video along the timelines, got from the files on a thread of their own.
@@ -1004,9 +1013,15 @@ int main()
         },
         nullptr,
         nullptr);
+    // Delete removes the text box selected in the Text section if there is one, and otherwise the clip at the playhead.
     interaction_mgr->bind_key(GLFW_KEY_DELETE,
-        [&timeline_editor, &edit_model, &media_container_mgr, &sync_view]() {
-            if (!ImGui::GetIO().WantTextInput && !sync_view.active())
+        [&timeline_editor, &edit_model, &media_container_mgr, &sync_view, &text_panel]() {
+            if (ImGui::GetIO().WantTextInput || sync_view.active())
+                return;
+            const int text_id = text_panel.selected_id();
+            if (text_id != 0)
+                timeline_editor.remove_text_box(&edit_model, &media_container_mgr, text_id);
+            else
                 timeline_editor.remove_clip(&edit_model, &media_container_mgr);
         },
         nullptr,
@@ -1345,7 +1360,7 @@ int main()
                 if (outcome == SyncView::CANCEL || (outcome == SyncView::DONE && sync_view.confirm_done(edit_model)))
                     sync_view.leave(outcome == SyncView::DONE, &edit_model, &media_container_mgr);
             } else {
-                if (draw_left_panel(layout.left_panel, edit_model, project_file_mgr, !media_container_mgr.recording(), &open_sync_view_requested))
+                if (draw_left_panel(layout.left_panel, edit_model, project_file_mgr, &text_panel, !media_container_mgr.recording(), &open_sync_view_requested))
                     load_telemetry_requested = true;
                 draw_panel_splitter(layout.panel_splitter, layout.widest_panel, &panel_width);
                 draw_splitter(layout.splitter, &timeline_height);
@@ -1354,6 +1369,7 @@ int main()
                 if (reorder.requested)
                     timeline_editor.move_clip(&edit_model, &media_container_mgr, reorder.from, reorder.to);
                 draw_transport_bar(layout.transport, media_container_mgr, &pending_raw_screenshot_path, &pending_overlay_screenshot_path);
+                text_panel.draw_on_preview(layout.preview, !media_container_mgr.recording());
             }
             // The preview is the canvas, shown from ImGui's background list rather than in a window of
             // its own, so ImGui doesn't count the mouse as being over a window of its own when it is
@@ -1510,6 +1526,20 @@ int main()
             flight_summary_overlay.render();
         }
         font_manager.render();
+        // The text boxes showing at this frame, faded by where in their lives the frame is. Not in the Sync / Reorder
+        // view, which shows the footage whole, with none of the edit's text.
+        if (!edit_model.in_source_view() && !edit_model.text_boxes().empty()) {
+            const std::vector<TextBox>& text_boxes = edit_model.text_boxes();
+            const int64_t now_ticks = media_container_mgr.current_ticks();
+            text_renderer.begin(SCR_WIDTH, SCR_HEIGHT);
+            for (size_t i = 0; i < text_boxes.size(); i++) {
+                int64_t start_ticks = 0;
+                int64_t end_ticks = 0;
+                edit_model.text_box_span(text_boxes[i], &start_ticks, &end_ticks);
+                text_renderer.draw(text_boxes[i], text_box::alpha_at(text_boxes[i], now_ticks - start_ticks));
+            }
+            text_renderer.end();
+        }
         save_frame_as_png(canvas, pending_overlay_screenshot_path);
         pending_overlay_screenshot_path.clear();
 

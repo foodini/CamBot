@@ -234,6 +234,22 @@
   jumping ahead, and stepping forward past the cached frames and back no longer skips.
 - **10-bit video** (e.g. HEVC from newer cameras) is shown by converting to 8-bit. A proper
   high-bit-depth path comes with the output-resolution work.
+- **Text on the video (first piece).** The left panel has a new Text section. *Add* puts a
+  text box ("Lorem Ipsum") on the picture, that is fully in at the frame being shown (it fades in over the half
+  second before, so what you type is seen at once), holds for four seconds and fades out over half a second. Type what it should say in the field
+  below the list, and *Delete Box* (or the Delete key, while a box is selected in the list) removes
+  it. A text box belongs to a frame of the footage, so it stays with that part of the video when
+  clips are cut or moved. The text is white with a black shadow, centered in the lower part of the
+  picture, drawn in Arial and wrapped to the width of its box; it is on the preview, in exports and
+  in the overlay screenshot, but not in the Sync / Reorder view. Any language Windows' fonts cover
+  can be typed. Adding, removing and typing are undone with Ctrl+Z (a stretch of typing is one
+  step). Text boxes are saved in the project file (format version 4; older projects still open).
+  The box selected in the list is drawn on the preview as a dashed rectangle with a square handle at
+  each corner: drag a corner (or anywhere close to it) to reshape the box (the opposite corner stays
+  put), drag an edge to move just that side, or drag inside it to move it. It can't leave the picture or be squeezed smaller than a few percent of it, and a whole
+  drag is one undo step. The two sections of the left panel, Source Material and Text, now start
+  closed. The timeline track and the font, size, bold, italic, strikethrough, alignment, colour,
+  shadow and timing controls come next.
 - **Tests.** `tests/run_tests.sh` (run it with `wsl ./tests/run_tests.sh`) builds and runs
   the unit tests: climb filters, map zoom, flight statistics, altitude references, user
   settings, the source timeline and file ordering, project reading, and the multi-file

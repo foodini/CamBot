@@ -24,15 +24,8 @@
 #include <string>
 #include <vector>
 
-// A moment in one media file, counted from the start of that file.
-struct FileTime {
-	int     media;
-	int64_t local_ticks;
-	FileTime() : media(0), local_ticks(0) {}
-	FileTime(int media_index, int64_t ticks) : media(media_index), local_ticks(ticks) {}
-	bool operator==(const FileTime& other) const { return media == other.media && local_ticks == other.local_ticks; }
-	bool operator!=(const FileTime& other) const { return !(*this == other); }
-};
+#include "file_time.h"
+#include "text_box.h"
 
 // A piece of one media file: from in_ticks up to (not including) out_ticks, counted from the
 // start of the file.
@@ -176,6 +169,22 @@ public:
 	void                    set_offset(double offset);
 	void                    add_to_offset(double delta);
 
+	// ---- Text boxes ----
+	// The text laid over the video (see text_box.h). Each belongs to a frame of the footage, so it goes where
+	// its footage goes; how long it shows is its own.
+	const std::vector<TextBox>& text_boxes() const { return m_text_boxes; }
+	// Replaces all of them (as when reading a project or undoing).
+	void                    set_text_boxes(const std::vector<TextBox>& boxes);
+	// Adds a box, giving it an id no other has; returns the id.
+	int                     add_text_box(const TextBox& box);
+	bool                    remove_text_box(int id);
+	// The box with this id, or null.
+	TextBox*                find_text_box(int id);
+	const TextBox*          find_text_box(int id) const;
+	// Where on the edit timeline the box shows: from its first frame to one past its last. The first frame is
+	// where its anchor is if the edit uses that frame, or the nearest footage the edit does use if not.
+	void                    text_box_span(const TextBox& box, int64_t* start_ticks, int64_t* end_ticks) const;
+
 	// ---- Launch ----
 	const FileTime&         launch_mark() const { return m_launch_mark; }
 	void                    set_launch_mark(const FileTime& mark) { m_launch_mark = mark; }
@@ -218,6 +227,8 @@ private:
 	bool                     m_stashed_edit_started;
 	std::vector<SyncAnchor>  m_anchors;
 	FileTime                 m_launch_mark;
+	std::vector<TextBox>     m_text_boxes;
+	int                      m_next_text_id;
 
 	// The anchors on the flight clock, earliest first, for fast lookup.
 	struct ResolvedAnchor { double flight_seconds; double offset; };

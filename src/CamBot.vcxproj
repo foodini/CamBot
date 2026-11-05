@@ -173,6 +173,12 @@
     <ClCompile Include="map_tiles.cpp" />
     <ClCompile Include="map_view.cpp" />
     <ClCompile Include="position_smoothing.cpp" />
+    <ClCompile Include="text_box.cpp" />
+    <ClCompile Include="text_box_geometry.cpp" />
+    <ClCompile Include="text_fonts.cpp" />
+    <ClCompile Include="text_layout.cpp" />
+    <ClCompile Include="text_panel.cpp" />
+    <ClCompile Include="text_renderer.cpp" />
     <ClCompile Include="thumbnail_layout.cpp" />
     <ClCompile Include="thumbnail_store.cpp" />
     <ClCompile Include="tile_fetcher.cpp" />
@@ -250,6 +256,13 @@
     <ClInclude Include="map_tiles.h" />
     <ClInclude Include="map_view.h" />
     <ClInclude Include="position_smoothing.h" />
+    <ClInclude Include="file_time.h" />
+    <ClInclude Include="text_box.h" />
+    <ClInclude Include="text_box_geometry.h" />
+    <ClInclude Include="text_fonts.h" />
+    <ClInclude Include="text_layout.h" />
+    <ClInclude Include="text_panel.h" />
+    <ClInclude Include="text_renderer.h" />
     <ClInclude Include="thumbnail_layout.h" />
     <ClInclude Include="thumbnail_store.h" />
     <ClInclude Include="tile_fetcher.h" />

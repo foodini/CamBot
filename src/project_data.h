@@ -2,8 +2,9 @@
 
 // Everything a CamBot project file stores, as plain data, plus reading and writing it.
 //
-// Project files are JSON (format "cambot-project", version 3). The editing parts of a project
-// (the library, the capture order, the clips, the sync anchors) are described in edit_model.h;
+// Project files are JSON (format "cambot-project", version 4; versions 2 and 3 are still read). The editing
+// parts of a project (the library, the capture order, the clips, the sync anchors, the text boxes) are described
+// in edit_model.h and text_box.h;
 // times in them are ticks, the video time base of the first video file, which is stored beside
 // them so the project still reads right if that file is ever replaced by one with another time
 // base.
@@ -24,6 +25,7 @@ struct ProjectData {
 	bool                     edit_started;    // The user has changed the clips by hand.
 	std::vector<SyncAnchor>  sync_anchors;    // What ties the footage to the telemetry; see edit_model.h.
 	FileTime                 launch_mark;     // Where the user marked launch. media < 0: not marked yet.
+	std::vector<TextBox>     text_boxes;      // The text laid over the video; see text_box.h.
 	std::string              telemetry_file;
 	float                    window_start_elapsed_s;
 	float                    rotation_rad;
@@ -44,7 +46,8 @@ struct ProjectData {
 	bool operator==(const ProjectData& other) const {
 		return video_files == other.video_files && time_base_num == other.time_base_num && time_base_den == other.time_base_den &&
 			capture_order == other.capture_order && clips == other.clips && edit_started == other.edit_started &&
-			sync_anchors == other.sync_anchors && launch_mark == other.launch_mark && telemetry_file == other.telemetry_file &&
+			sync_anchors == other.sync_anchors && launch_mark == other.launch_mark && text_boxes == other.text_boxes &&
+			telemetry_file == other.telemetry_file &&
 			window_start_elapsed_s == other.window_start_elapsed_s && rotation_rad == other.rotation_rad &&
 			altitude_refs == other.altitude_refs && has_version2_sync == other.has_version2_sync &&
 			version2_offset_s == other.version2_offset_s && version2_launch_s == other.version2_launch_s;
@@ -54,7 +57,7 @@ struct ProjectData {
 
 namespace project_io {
 
-const int CURRENT_VERSION = 3;
+const int CURRENT_VERSION = 4;
 
 bool parse_json(const std::string& text, ProjectData* project, std::string* error);
 std::string to_json(const ProjectData& project);

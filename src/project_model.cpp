@@ -78,6 +78,19 @@ bool apply_to_model(const ProjectData& project, const std::vector<int64_t>& medi
 		model->set_launch_mark(FileTime(model->capture().order()[0], 0));
 	}
 
+	std::vector<TextBox> text_boxes;
+	for (size_t i = 0; i < project.text_boxes.size(); i++) {
+		TextBox box = project.text_boxes[i];
+		if (box.anchor.media < 0 || box.anchor.media >= model->media_count())
+			continue;
+		box.anchor.local_ticks = rescale_ticks(box.anchor.local_ticks, from_num, from_den, tb_num, tb_den);
+		box.fade_in_ticks = rescale_ticks(box.fade_in_ticks, from_num, from_den, tb_num, tb_den);
+		box.dwell_ticks = rescale_ticks(box.dwell_ticks, from_num, from_den, tb_num, tb_den);
+		box.fade_out_ticks = rescale_ticks(box.fade_out_ticks, from_num, from_den, tb_num, tb_den);
+		text_boxes.push_back(box);
+	}
+	model->set_text_boxes(text_boxes);
+
 	if (project.has_version2_sync) {
 		model->set_offset((double)project.version2_offset_s);
 		model->set_launch_flight_seconds((double)project.version2_launch_s);
@@ -103,6 +116,7 @@ void fill_from_model(const EditModel& model, int tb_num, int tb_den, ProjectData
 			project->sync_anchors.push_back(anchors[i]);
 	}
 	project->launch_mark = model.launch_mark();
+	project->text_boxes = model.text_boxes();
 	project->has_version2_sync = false;
 	project->version2_offset_s = 0.0f;
 	project->version2_launch_s = 0.0f;

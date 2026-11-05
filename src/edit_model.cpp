@@ -115,7 +115,8 @@ FileTime CaptureSequence::file_time_for(int64_t flight_ticks) const {
 // EditModel
 // ---------------------------------------------------------------------------------------------
 
-EditModel::EditModel() : m_seconds_per_tick(1.0 / 90000.0), m_edit_started(false), m_in_source_view(false), m_stashed_edit_started(false) {
+EditModel::EditModel() : m_seconds_per_tick(1.0 / 90000.0), m_edit_started(false), m_in_source_view(false), m_stashed_edit_started(false),
+	m_text_boxes(), m_next_text_id(1) {
 }
 
 int64_t EditModel::seconds_to_ticks(double seconds) const {
@@ -138,7 +139,57 @@ void EditModel::set_media(const std::vector<std::string>& paths, const std::vect
 	m_edit_started = false;
 	m_anchors.clear();
 	m_launch_mark = FileTime();
+	m_text_boxes.clear();
+	m_next_text_id = 1;
 	rebuild_sync();
+}
+
+void EditModel::set_text_boxes(const std::vector<TextBox>& boxes) {
+	m_text_boxes = boxes;
+	m_next_text_id = 1;
+	for (size_t i = 0; i < m_text_boxes.size(); i++) {
+		if (m_text_boxes[i].id >= m_next_text_id)
+			m_next_text_id = m_text_boxes[i].id + 1;
+	}
+}
+
+int EditModel::add_text_box(const TextBox& box) {
+	TextBox added = box;
+	added.id = m_next_text_id++;
+	m_text_boxes.push_back(added);
+	return added.id;
+}
+
+bool EditModel::remove_text_box(int id) {
+	for (size_t i = 0; i < m_text_boxes.size(); i++) {
+		if (m_text_boxes[i].id == id) {
+			m_text_boxes.erase(m_text_boxes.begin() + i);
+			return true;
+		}
+	}
+	return false;
+}
+
+TextBox* EditModel::find_text_box(int id) {
+	for (size_t i = 0; i < m_text_boxes.size(); i++) {
+		if (m_text_boxes[i].id == id)
+			return &m_text_boxes[i];
+	}
+	return nullptr;
+}
+
+const TextBox* EditModel::find_text_box(int id) const {
+	for (size_t i = 0; i < m_text_boxes.size(); i++) {
+		if (m_text_boxes[i].id == id)
+			return &m_text_boxes[i];
+	}
+	return nullptr;
+}
+
+void EditModel::text_box_span(const TextBox& box, int64_t* start_ticks, int64_t* end_ticks) const {
+	const int64_t start = timeline_ticks_nearest(box.anchor);
+	*start_ticks = start;
+	*end_ticks = start + box.total_ticks();
 }
 
 bool EditModel::set_capture_order(const std::vector<int>& order) {
