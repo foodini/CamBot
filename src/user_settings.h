@@ -59,12 +59,13 @@ struct WindowSettings {
 
 class UserSettings {
 public:
-	UserSettings() : climb_filter(), climb_color_range(800.0f), map_trace(), map_zoom(), summary(), window() {
+	UserSettings() : climb_filter(), climb_color_range(800.0f), map_dim(0.25f), map_trace(), map_zoom(), summary(), window() {
 		load();
 	}
 
 	ClimbFilterSettings climb_filter;
 	float               climb_color_range;   // +/- ft/min spanned by the map course colors and the climb indicator
+	float               map_dim;             // How much the sync view darkens the map's picture, 0 (not at all) to 0.9, so the path shows on it
 	MapTraceSettings    map_trace;
 	MapZoomSettings     map_zoom;
 	SummarySettings     summary;
@@ -125,6 +126,7 @@ public:
 			else if (strcmp(key, "climb_window_s") == 0)     { if (value >= 0.2f && value <= 20.0f)    climb_filter.window_seconds = value; }
 			else if (strcmp(key, "climb_tau_s") == 0)        { if (value >= 0.1f && value <= 10.0f)    climb_filter.time_constant_seconds = value; }
 			else if (strcmp(key, "climb_color_range") == 0)  { if (value >= 50.0f && value <= 5000.0f) climb_color_range = value; }
+			else if (strcmp(key, "map_dim") == 0)            { if (value >= 0.0f && value <= 0.9f)     map_dim = value; }
 			else if (strcmp(key, "trace_recent_px") == 0)    { if (value >= 1.0f && value <= 32.0f)    map_trace.recent_width_px = value; }
 			else if (strcmp(key, "trace_old_px") == 0)       { if (value >= 1.0f && value <= 32.0f)    map_trace.old_width_px = value; }
 			else if (strcmp(key, "trace_recent_s") == 0)     { if (value >= 5.0f && value <= 3600.0f)  map_trace.recent_seconds = value; }
@@ -154,6 +156,7 @@ public:
 		fprintf(fd, "climb_window_s:%f\n", climb_filter.window_seconds);
 		fprintf(fd, "climb_tau_s:%f\n", climb_filter.time_constant_seconds);
 		fprintf(fd, "climb_color_range:%f\n", climb_color_range);
+		fprintf(fd, "map_dim:%f\n", map_dim);
 		fprintf(fd, "trace_recent_px:%f\n", map_trace.recent_width_px);
 		fprintf(fd, "trace_old_px:%f\n", map_trace.old_width_px);
 		fprintf(fd, "trace_recent_s:%f\n", map_trace.recent_seconds);

@@ -6,9 +6,13 @@
 
 #include "imgui/imgui.h"
 
+#include <stdint.h>
+
 #include "env_config.h"
 #include "file_io.h"
+#include "map_tiles.h"
 #include "media_container_manager.h"
+#include "scan_gesture.h"
 #include "telemetry.h"
 #include "timeline_edit.h"
 #include "timeline_scale.h"
@@ -176,8 +180,9 @@ int64_t timeline_ticks_for(const EditModel& model, const FileTime& moment) {
 
 }  // namespace
 
-SyncView::SyncView() : m_active(false), m_timeline("SyncTimeline"), m_follow(false), m_last_sample(0.0), m_ahead_x(0.0f), m_ahead_y(0.0f), m_trace_position_version(0), m_trace_climb_version(0), m_fit_pending(true),
-		m_map_pressed(false), m_map_dragging(false), m_press_x(0.0f), m_press_y(0.0f), m_drag_x(0.0f), m_drag_y(0.0f),
+SyncView::SyncView(TileLayer* tiles) : m_active(false), m_timeline("SyncTimeline"), m_tiles(tiles), m_quads(), m_style(map_tiles::STYLE_STREET), m_style_fallback(false),
+		m_refresh_note_until(0.0), m_refresh_note_count(0), m_follow(false), m_last_sample(0.0), m_ahead_x(0.0f), m_ahead_y(0.0f), m_trace_position_version(0), m_trace_climb_version(0), m_fit_pending(true),
+		m_map_pressed(false), m_map_dragging(false), m_scanning(false), m_scan_origin_x(0.0f), m_scan_accumulator(0.0f), m_press_x(0.0f), m_press_y(0.0f), m_drag_x(0.0f), m_drag_y(0.0f),
 		m_gesture(GESTURE_PAN), m_slide_sample(0.0), m_cycle_valid(false), m_cycle_x(0.0f), m_cycle_y(0.0f), m_cycle_reference(0.0),
 		m_cycle_index(0), m_cycle_count(0), m_change_time(0.0), m_change_was_nudge(false), m_slide_group(false), m_slide_group_started(false),
 		m_entry_playhead(0) {
@@ -209,8 +214,12 @@ bool SyncView::enter(EditModel* model, MediaContainerMgr* media) {
 	m_ahead_x = 0.0f;
 	m_ahead_y = 0.0f;
 	m_fit_pending = true;
+	m_style = map_tiles::STYLE_STREET;
+	m_style_fallback = false;
+	m_refresh_note_until = 0.0;
 	m_map_pressed = false;
 	m_map_dragging = false;
+	m_scanning = false;
 	m_gesture = GESTURE_PAN;
 	m_cycle_valid = false;
 	m_undo.clear();
@@ -228,16 +237,22 @@ void SyncView::leave(bool keep_changes, EditModel* model, MediaContainerMgr* med
 	if (!m_active)
 		return;
 	EnvConfig::instance->pause();
+	// Done leaves the playhead on the frame that is on screen now (in the files, whatever the order they have now).
+	const FileTime on_screen = model->edit_list().source_for(media->current_ticks());
 	if (!keep_changes) {
 		model->set_capture_order(m_entry_order);
 		model->set_anchors(m_entry_anchors);
 		model->set_launch_mark(m_entry_launch_mark);
 	}
 	model->end_source_view();
-	// The edit was not touched in here, so where the playhead was is still a place on it.
-	media->set_clips(model->edit_list().clips(), m_entry_playhead);
+	// The edit was not touched in here. Cancel puts the playhead where it was; Done leaves it on the frame
+	// that was on screen (or, if the edit has cut that footage, the nearest footage that is left).
+	const int64_t playhead = keep_changes ? model->timeline_ticks_nearest(on_screen) : m_entry_playhead;
+	media->set_clips(model->edit_list().clips(), playhead);
 	m_undo.clear();
 	m_redo.clear();
+	// Tiles still waiting to be fetched aren't wanted any more.
+	m_tiles->stop_requests();
 	m_active = false;
 }
 
@@ -616,13 +631,54 @@ void SyncView::draw_map_contents(const LayoutRect& rect, EditModel& model, Media
 		m_map_dragging = false;
 		m_gesture = GESTURE_PAN;
 	}
+	// The right button scans the sync, like the right button on the timeline does the video: hold it down
+	// anywhere on the map and drag sideways, and the further from where it went down the faster the
+	// telemetry runs against the video (dragging right takes the frame on screen later along the path), a
+	// sample at a time. The whole drag is one step of undo.
+	if (hovered && have_trace && !m_map_pressed && !m_scanning && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+		m_scanning = true;
+		m_scan_origin_x = io.MousePos.x;
+		m_scan_accumulator = 0.0f;
+		m_slide_group = true;
+		m_slide_group_started = false;
+		EnvConfig::instance->pause();
+	}
+	if (m_scanning) {
+		if (ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
+			const float drag = scan_gesture::drag_for_pixels(io.MousePos.x - m_scan_origin_x);
+			m_scan_accumulator += scan_gesture::rate_for_offset(drag, (float)TELEMETRY_FREQUENCY) * io.DeltaTime;
+			// One sample a frame at the most, in either direction.
+			const float sample_seconds = 1.0f / (float)TELEMETRY_FREQUENCY;
+			bool moved = false;
+			if (m_scan_accumulator >= 1.0f) {
+				m_scan_accumulator = 0.0f;
+				model.add_to_offset(-sample_seconds);
+				moved = true;
+			} else if (m_scan_accumulator <= -1.0f) {
+				m_scan_accumulator = 0.0f;
+				model.add_to_offset(sample_seconds);
+				moved = true;
+			}
+			if (moved) {
+				// The path under the frame on screen is what is being worked on: keep it in sight.
+				m_follow = true;
+				m_fit_pending = false;
+				record_change(model, false);
+			}
+		} else {
+			m_scanning = false;
+			m_slide_group = false;
+		}
+	}
 	if (hovered && io.MouseWheel != 0.0f) {
 		m_map.zoom_about(mouse_x, mouse_y, ZOOM_LEVELS_PER_NOTCH * timeline_zoom::notches((double)io.MouseWheel));
 		m_fit_pending = false;
 		m_cycle_valid = false;
 	}
 
-	// The path, with a dark edge under the colors.
+	// The picture under the path, and the path.
+	if (have_trace)
+		draw_tiles(draw, rect);
 	if (have_trace) {
 		MapPolyline line;
 		m_trace.build_polyline(0, m_trace.count() - 1, m_map, PATH_SPACING, PATH_MARGIN, &line);
@@ -704,9 +760,33 @@ void SyncView::draw_map_contents(const LayoutRect& rect, EditModel& model, Media
 		draw_label(draw, rect.x + 6.0f, rect.y + rect.h - 2.0f * ImGui::GetTextLineHeight() - 24.0f,
 			"The frame on screen is outside the telemetry's recording.");
 	if (have_trace) {
-		const char* hint = "Wheel to zoom, drag to move the map";
+		// What the picture under the map is, and what is wrong with it if anything.
+		float note_y = next_y + ImGui::GetTextLineHeight() + 8.0f;
+		if (m_style_fallback) {
+			draw_label(draw, rect.x + 6.0f, note_y, "The street map isn't answering, so this is satellite imagery (United States only). Click Street to try again.");
+			note_y += ImGui::GetTextLineHeight() + 8.0f;
+		}
+		if (m_quads.empty() && m_tiles->failing(m_style)) {
+			const char* unavailable = "Map tiles unavailable";
+			const ImVec2 size = ImGui::CalcTextSize(unavailable);
+			draw_label(draw, rect.x + (rect.w - size.x) * 0.5f, rect.y + rect.h * 0.5f - size.y, unavailable);
+		}
+		if (ImGui::GetTime() < m_refresh_note_until) {
+			char note[96];
+			if (m_refresh_note_count > 0)
+				snprintf(note, sizeof(note), "Asking the map server about %d tile%s that may have changed...", m_refresh_note_count, m_refresh_note_count == 1 ? "" : "s");
+			else
+				snprintf(note, sizeof(note), "The map tiles in view were all fetched within the last week.");
+			draw_label(draw, rect.x + 6.0f, note_y, note);
+		}
+
+		// The credit the map's source asks for sits in the corner; the hint is above it.
+		const char* credit = map_tiles::source(m_style).credit;
+		const ImVec2 credit_size = ImGui::CalcTextSize(credit);
+		draw_label(draw, rect.x + rect.w - credit_size.x - 14.0f, rect.y + rect.h - credit_size.y - 12.0f, credit);
+		const char* hint = "Wheel to zoom, drag to move the map, right-drag to move the sync";
 		const ImVec2 size = ImGui::CalcTextSize(hint);
-		draw_label(draw, rect.x + rect.w - size.x - 14.0f, rect.y + rect.h - size.y - 12.0f, hint);
+		draw_label(draw, rect.x + rect.w - size.x - 14.0f, rect.y + rect.h - credit_size.y - size.y - 24.0f, hint);
 	}
 
 	// Buttons in the top right corner.
@@ -739,6 +819,27 @@ void SyncView::draw_map_contents(const LayoutRect& rect, EditModel& model, Media
 	}
 }
 
+void SyncView::draw_tiles(ImDrawList* draw, const LayoutRect& rect) {
+	m_tiles->update(m_style, m_map, &m_quads);
+	// No street map from the web, and none in the cache for this part of the world: show the satellite pictures
+	// instead, and say so (the label, in draw_map_contents). That isn't remembered past this visit to the view.
+	if (m_style == map_tiles::STYLE_STREET && m_quads.empty() && m_tiles->failing(map_tiles::STYLE_STREET)) {
+		printf("Map tiles: the street map is not answering and there is none cached here; showing satellite imagery\n");
+		m_style = map_tiles::STYLE_SATELLITE;
+		m_style_fallback = true;
+		m_tiles->update(m_style, m_map, &m_quads);
+	}
+	for (size_t i = 0; i < m_quads.size(); i++) {
+		const TileQuad& q = m_quads[i];
+		draw->AddImage((ImTextureID)(uintptr_t)q.texture, ImVec2(rect.x + q.x0, rect.y + q.y0), ImVec2(rect.x + q.x1, rect.y + q.y1),
+			ImVec2(q.u0, q.v0), ImVec2(q.u1, q.v1));
+	}
+	// A dark veil over the picture, so the path stands out on it.
+	const float dim = EnvConfig::instance->map_dim();
+	if (dim > 0.0f)
+		draw->AddRectFilled(ImVec2(rect.x, rect.y), ImVec2(rect.x + rect.w, rect.y + rect.h), IM_COL32(0, 0, 0, (int)(dim * 255.0f + 0.5f)));
+}
+
 void SyncView::draw_strip(const LayoutRect& rect, EditModel& model, const MediaContainerMgr& media) {
 	if (rect.w < 1.0f || rect.h < 1.0f)
 		return;
@@ -755,6 +856,33 @@ void SyncView::draw_strip(const LayoutRect& rect, EditModel& model, const MediaC
 		ImGui::Spacing();
 		ImGui::TextDisabled("Starts at");
 		ImGui::TextUnformatted(format_seconds(model.launch_flight_seconds()).c_str());
+
+		// The picture under the map.
+		ImGui::Spacing();
+		ImGui::Separator();
+		ImGui::Spacing();
+		ImGui::TextDisabled("Map");
+		if (ImGui::Button(map_tiles::source(m_style).name, ImVec2(width, 0.0f))) {
+			m_style = m_style == map_tiles::STYLE_STREET ? map_tiles::STYLE_SATELLITE : map_tiles::STYLE_STREET;
+			m_style_fallback = false;
+			m_tiles->retry(m_style);
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Switch between the street map and satellite imagery (the satellite pictures cover the United States only)");
+		int dim_percent = (int)(EnvConfig::instance->map_dim() * 100.0f + 0.5f);
+		ImGui::SetNextItemWidth(width);
+		if (ImGui::SliderInt("##dim", &dim_percent, 0, 90, "Dim %d%%"))
+			EnvConfig::instance->map_dim((float)dim_percent / 100.0f);
+		if (ImGui::IsItemDeactivatedAfterEdit())
+			EnvConfig::instance->save_user_settings();
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("How much the map picture is darkened, so the path shows on it");
+		if (ImGui::Button("Refresh\nMap", ImVec2(width, 40.0f))) {
+			m_refresh_note_count = m_tiles->refresh_visible(m_style, m_map);
+			m_refresh_note_until = ImGui::GetTime() + 5.0;
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Ask the map server whether the tiles now in view that were fetched over a week ago have changed.\nThe map is otherwise kept for months, to go easy on the free servers.");
 	}
 	ImGui::End();
 }

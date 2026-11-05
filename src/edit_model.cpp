@@ -265,6 +265,37 @@ double EditModel::flight_seconds(const FileTime& time) const {
 	return ticks_to_seconds(m_capture.flight_ticks(time));
 }
 
+int64_t EditModel::timeline_ticks_nearest(const FileTime& moment) const {
+	const int64_t at = m_capture.flight_ticks(moment);
+	int best = -1;
+	int64_t best_distance = 0;
+	bool before_best = false;
+	for (int i = 0; i < m_edit_list.count(); i++) {
+		const Clip& clip = m_edit_list.clip(i);
+		const int64_t first = m_capture.flight_ticks(FileTime(clip.media, clip.in_ticks));
+		const int64_t last = m_capture.flight_ticks(FileTime(clip.media, clip.out_ticks));
+		int64_t distance = 0;
+		bool before = false;
+		if (at < first) {
+			distance = first - at;
+			before = true;
+		} else if (at >= last) {
+			distance = at - last + 1;
+		}
+		if (best < 0 || distance < best_distance) {
+			best = i;
+			best_distance = distance;
+			before_best = before;
+		}
+	}
+	if (best < 0)
+		return 0;
+	const Clip& clip = m_edit_list.clip(best);
+	if (best_distance == 0)
+		return m_edit_list.timeline_for(best, moment.local_ticks);
+	return m_edit_list.timeline_for(best, before_best ? clip.in_ticks : clip.out_ticks);
+}
+
 FileTime EditModel::file_time_for_flight_seconds(double flight_seconds_value) const {
 	return m_capture.file_time_for(seconds_to_ticks(flight_seconds_value));
 }

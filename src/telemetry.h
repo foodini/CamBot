@@ -119,8 +119,8 @@ public:
 	*/
 
 	// The time offset between the footage's clock (the flight clock, see edit_model.h) and the
-	// telemetry device's clock (they aren't hardware-synced, so this has to be set by eye -- see
-	// TelemetryScrubWidget). Positive means the telemetry device started recording later than the
+	// telemetry device's clock (they aren't hardware-synced, so this has to be set by eye, in the
+	// sync view). Positive means the telemetry device started recording later than the
 	// camera did. The sync itself lives in the EditModel, as sync points; with one sync point this
 	// is a plain constant, and these forward to the model's single-offset view of it.
 	float offset() const                  { return (float)m_model->offset(); }
@@ -180,7 +180,7 @@ public:
 	float elapsed_at(float flight_elapsed) const;
 	// [0..1] across telemetry's own duration, clamped so an offset that pushes "now" outside the
 	// telemetry recording still yields a sane, renderable position instead of needing a special case
-	// downstream (e.g. in TelemetryScrubWidget's shader).
+	// downstream (e.g. in a shader that draws the telemetry's span).
 	float parametric_at(float flight_elapsed) const;
 	int32_t index_at(float flight_elapsed) const;
 	const TelemetrySlice& slice_at(float flight_elapsed) const { return (*this)[index_at(flight_elapsed)]; }
@@ -228,7 +228,4 @@ private:
 	void                         recompute_climb_rates();
 	void                         estimate_alt_noise();
 
-	// Per-key auto-repeat state for the held offset-nudge keys -- see ffsw::held_repeat_due().
-	int                          m_advance_offset_repeat_bucket;
-	int                          m_rewind_offset_repeat_bucket;
 };

@@ -20,15 +20,19 @@
 #include <vector>
 
 #include "edit_model.h"
+#include "map_tiles.h"
 #include "map_view.h"
+#include "tile_layer.h"
 #include "timeline_view.h"
 #include "window_layout.h"
 
 class MediaContainerMgr;
+struct ImDrawList;
 
 class SyncView {
 public:
-	SyncView();
+	// `tiles` is the program's map picture layer (see tile_layer.h), shared with whatever fetches ahead of time.
+	explicit SyncView(TileLayer* tiles);
 
 	bool active() const { return m_active; }
 
@@ -59,6 +63,9 @@ private:
 	void draw_header(const LayoutRect& rect, Outcome* outcome);
 	void draw_map_pane(const LayoutRect& rect, EditModel& model, MediaContainerMgr& media, bool has_telemetry);
 	void draw_map_contents(const LayoutRect& rect, EditModel& model, MediaContainerMgr& media, bool has_telemetry);
+	// The map's picture: brings the tiles up to date for what the pane shows and draws them, darkened.
+	// If the street map can't be had at all, switches to the satellite pictures and says so.
+	void draw_tiles(ImDrawList* draw, const LayoutRect& rect);
 	// The strip between the map and the video: the buttons that apply to both.
 	void draw_strip(const LayoutRect& rect, EditModel& model, const MediaContainerMgr& media);
 	// Adds the samples the telemetry has read since the last time to the trace the map draws.
@@ -96,6 +103,14 @@ private:
 
 	TimelineView m_timeline;
 
+	// The picture under the map.
+	TileLayer*                m_tiles;
+	std::vector<TileQuad>     m_quads;          // What the tiles layer said to draw on the last frame.
+	int                       m_style;          // map_tiles::Style: street map or satellite.
+	bool                      m_style_fallback; // The street map wasn't answering, so the satellite pictures were put up instead.
+	double                    m_refresh_note_until;   // ImGui::GetTime() until which to say what Refresh Map did...
+	int                       m_refresh_note_count;   // ... how many tiles it asked about.
+
 	// The map: the path of the whole flight (every sample of the telemetry file, not only what the edit
 	// uses), and what part of the world the pane shows.
 	MapTrace    m_trace;
@@ -109,6 +124,9 @@ private:
 	bool        m_fit_pending;    // Show the whole path, until the user moves the map or the telemetry is all read.
 	bool        m_map_pressed;    // The left button went down on the map and is still down.
 	bool        m_map_dragging;   // ... and has moved far enough that it is moving the map, not clicking on it.
+	bool        m_scanning;       // The right button went down on the map and is still down: the further from where it went down, the faster the sync moves.
+	float       m_scan_origin_x;
+	float       m_scan_accumulator;   // Samples still owed to the sync (a fraction of one).
 	float       m_press_x;
 	float       m_press_y;
 	float       m_drag_x;         // Where the mouse was on the last frame of a drag.

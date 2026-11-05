@@ -185,6 +185,9 @@ public:
 	// ---- Mapping between the clocks ----
 	double                  flight_seconds(const FileTime& time) const;
 	FileTime                file_time_for_flight_seconds(double flight_seconds) const;
+	// The place on the edit timeline of a moment in a file: where that moment is if the edit uses it, otherwise the
+	// closest footage it does use, going by the flight clock (0 if the edit is empty).
+	int64_t                 timeline_ticks_nearest(const FileTime& moment) const;
 	// The flight time of a timeline time, which is what looks up telemetry.
 	double                  flight_seconds_for_timeline(int64_t timeline_ticks) const;
 	double                  telemetry_seconds_for_timeline(int64_t timeline_ticks) const;

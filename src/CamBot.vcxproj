@@ -170,8 +170,11 @@
     <ClCompile Include="interaction_manager.cpp" />
     <ClCompile Include="lines.cpp" />
     <ClCompile Include="file_io.cpp" />
+    <ClCompile Include="map_tiles.cpp" />
     <ClCompile Include="map_view.cpp" />
     <ClCompile Include="position_smoothing.cpp" />
+    <ClCompile Include="tile_fetcher.cpp" />
+    <ClCompile Include="tile_layer.cpp" />
     <ClCompile Include="media_container_manager.cpp" />
     <ClCompile Include="media_decoder.cpp" />
     <ClCompile Include="font_manager.cpp" />
@@ -232,8 +235,6 @@
     <None Include="map_widget_2_arrow.vert" />
     <None Include="mask_shader.frag" />
     <None Include="mask_shader.vert" />
-    <None Include="media_scrub_widget.vert" />
-    <None Include="telemetry_scrub_widget.frag" />
     <None Include="text.frag" />
     <None Include="text.vert" />
   </ItemGroup>
@@ -244,8 +245,11 @@
     <ClInclude Include="interaction_manager.h" />
     <ClInclude Include="lines.h" />
     <ClInclude Include="file_io.h" />
+    <ClInclude Include="map_tiles.h" />
     <ClInclude Include="map_view.h" />
     <ClInclude Include="position_smoothing.h" />
+    <ClInclude Include="tile_fetcher.h" />
+    <ClInclude Include="tile_layer.h" />
     <ClInclude Include="media_container_manager.h" />
     <ClInclude Include="media_decoder.h" />
     <ClInclude Include="media_order.h" />

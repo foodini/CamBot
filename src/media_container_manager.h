@@ -97,7 +97,6 @@ private:
 	MediaDecoder*      m_decoder;
 	uint32_t           m_height;
 	uint32_t           m_width;
-	uint32_t           m_ui_height;
 	float              m_rotation_angle;
 	// Per-key auto-repeat state for the held-frame-step keys -- see ffsw::held_repeat_due().
 	int                m_rewind_step_repeat_bucket;

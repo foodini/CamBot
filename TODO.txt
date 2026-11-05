@@ -19,3 +19,5 @@
 * "Export Done" or "Export Cancelled" should probably be a popup requiring confirmation.
 * When moused over the timeline, show a small preview frame of that location. (Where?)
 * Slightly darken "future" flight track vs past.
+* The first frame of exported video should default to duration 0:00:00 if the user hasn't
+  set a launch point. It's fine for the first frame to be negative, just probably not positive.

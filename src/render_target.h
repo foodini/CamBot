@@ -1,7 +1,7 @@
 #pragma once
 
-// An off-screen picture to draw into: the frame as it is made (the video, the telemetry drawn
-// over it, and for now the scrub bars under it) before anything is shown. Drawing there instead
+// An off-screen picture to draw into: the frame as it is made (the video, and the telemetry drawn
+// over it) before anything is shown. Drawing there instead
 // of straight into the window means the frame that gets exported, and saved as a screenshot, is
 // no longer tied to the size or the state of the window.
 //

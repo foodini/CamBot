@@ -11,6 +11,7 @@
 
 #include <stdint.h>
 #include <string>
+#include <vector>
 
 namespace fileio {
 
@@ -30,6 +31,19 @@ bool delete_file(const std::string& path);
 // When the file was last written, as a number that is only good for comparing with other values
 // from this function (a bigger number is later). 0 if the file doesn't exist.
 int64_t modified_time(const std::string& path);
+
+// Makes the folder, and any of the folders above it that are missing. True if it is there afterwards.
+bool make_directories(const std::string& path);
+
+// A file found by list_files.
+struct FileEntry {
+	std::string path;       // The directory that was searched + what is under it.
+	int64_t     bytes;
+	int64_t     modified;   // As modified_time() gives it.
+};
+
+// Adds every file under `directory`, in its folders too, to *files. (Nothing is added if there is no such folder.)
+void list_files(const std::string& directory, std::vector<FileEntry>* files);
 
 // Copies one file over another (the destination is replaced if it exists).
 bool copy_file(const std::string& from, const std::string& to, std::string* error);

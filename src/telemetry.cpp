@@ -158,9 +158,7 @@ TelemetryMgr::TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* wi
 	m_alt_applied_start_index(-1),
 	m_alt_applied_end_index(-1),
 	m_alt_version(0),
-	m_position_version(0),
-	m_advance_offset_repeat_bucket(-1),
-	m_rewind_offset_repeat_bucket(-1)
+	m_position_version(0)
 {
 	if (TelemetryMgr::instance != nullptr) {
 		throw "Cannot create second TelemetryMgr";
@@ -170,30 +168,6 @@ TelemetryMgr::TelemetryMgr(const std::string& path, std::vector<WidgetBase*>* wi
 	m_thread_running = true;
 	m_parse_thread = std::thread(&TelemetryMgr::parse_telemetry_file, this, path, widgets);
 	//parse_telemetry_file(path, widgets);
-
-	// UP/DOWN nudge the video/telemetry sync offset by one telemetry sample at a time -- the
-	// finest adjustment that means anything, same idea as the frame-step keys for video. Bound
-	// here (rather than in main()) because the keys act on the sync, which this class answers for. UP
-	// "advances" telemetry: elapsed_at(flight_elapsed) = flight_elapsed - offset, so moving
-	// telemetry's sample forward relative to the video means decreasing the offset; DOWN
-	// "rewinds" it by increasing the offset the same amount. See ffsw::held_repeat_due() for the
-	// ~10/s auto-repeat while held.
-	// constexpr (not just const) so the lambdas below can use it without capturing it.
-	static constexpr float SAMPLE_SECONDS = 1.0f / TELEMETRY_FREQUENCY;
-	InteractionMgr::instance()->bind_key(GLFW_KEY_UP,
-		[this]() { if (has_telemetry()) m_model->add_to_offset(-SAMPLE_SECONDS); },
-		nullptr,
-		[this](float held_seconds) {
-			if (has_telemetry() && ffsw::held_repeat_due(held_seconds, 0.25f, 0.1f, m_advance_offset_repeat_bucket))
-				m_model->add_to_offset(-SAMPLE_SECONDS);
-		});
-	InteractionMgr::instance()->bind_key(GLFW_KEY_DOWN,
-		[this]() { if (has_telemetry()) m_model->add_to_offset(SAMPLE_SECONDS); },
-		nullptr,
-		[this](float held_seconds) {
-			if (has_telemetry() && ffsw::held_repeat_due(held_seconds, 0.25f, 0.1f, m_rewind_offset_repeat_bucket))
-				m_model->add_to_offset(SAMPLE_SECONDS);
-		});
 }
 
 TelemetryMgr::~TelemetryMgr() {

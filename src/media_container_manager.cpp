@@ -171,8 +171,8 @@ void MediaContainerMgr::render() {
     // same assumption WidgetBase::render_border() already makes.
     const EnvConfig* env_config = EnvConfig::instance;
     float viewport_width = env_config->screen_width();
-    float viewport_height = env_config->screen_height(); // includes the UI_HEIGHT strip below the video
-    float video_rect_height = viewport_height - env_config->ui_height();
+    float viewport_height = env_config->screen_height();
+    float video_rect_height = viewport_height;   // The video fills the canvas.
     // NDC x and y don't cover equal pixel counts here (the viewport isn't square in pixels), so
     // a plain rotation matrix applied to NDC coordinates would shear the image. This is the
     // correction factor the shader divides/multiplies by to undo that mismatch before/after
@@ -213,17 +213,10 @@ void MediaContainerMgr::render() {
     glGenerateMipmap(GL_TEXTURE_2D);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 
-    // The GL viewport (see main.cpp's glViewport call) spans the video display area AND
-    // the UI strip below it, so the hardware only clips this quad's rotated corners at the
-    // actual window edges -- which is why the sides and top (which coincide with those
-    // edges) were already trimmed correctly, but the bottom (which doesn't -- there's UI
-    // strip left below it) wasn't: a rotated corner could poke down past the video rect's
-    // real bottom edge and into the UI strip's screen space, showing up as a stray diagonal.
-    // Scissoring to exactly the video rect (same rectangle glReadPixels() captures for
-    // screenshots/export, just in GL's bottom-left-origin convention) makes the bottom edge
-    // a hard clip too, consistent with the other three.
+    // The rotated video's corners are clipped to the canvas (which is exactly the video rect: the
+    // rectangle glReadPixels() captures for screenshots and export).
     glEnable(GL_SCISSOR_TEST);
-    glScissor(0, (int)env_config->ui_height(), (int)viewport_width, (int)video_rect_height);
+    glScissor(0, 0, (int)viewport_width, (int)video_rect_height);
 
     // render the tristrip
     glBindVertexArray(m_VAO);

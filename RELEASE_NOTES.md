@@ -120,6 +120,42 @@
   They don't move the video, so you can stop on another frame and flip between two syncs to compare
   them. The history starts empty each time the view is opened, and Cancel still puts everything back as
   it was on entry.
+- **The sync is set only in the Sync / Reorder view.** The telemetry scrub bar and the grey strip (134 pixels)
+  under the video are gone: the picture CamBot draws, shows and exports is now just the 1920 x 1080 video with
+  its overlays, which are in the same places on it as before, and the preview is a little bigger. The
+  Up/Down nudge keys now work only in the Sync / Reorder view, so the sync can't be changed by accident
+  anywhere else. In that view, **right-dragging on the map** moves the sync the way right-dragging the old
+  bar did, and the way it moves the video on the timeline: hold the right button anywhere on the map and
+  drag sideways, and the further from where you pressed, the faster the path runs under the frame on
+  screen (to the right takes the frame later along it), a telemetry sample at a time. The whole drag
+  is one undo step, and the map keeps the arrow in sight.
+- **Done in the Sync / Reorder view leaves the playhead on the frame that was on screen**, wherever the
+  playhead was when the view was opened (Cancel still puts it back there). If the edit has cut that footage, it
+  goes to the nearest footage that is left.
+- **Sync / Reorder view: a picture under the map.** The sync map now has an OpenStreetMap street map
+  under the path, so the sync can be checked against roads, the shoreline and the landing field. It
+  is always on, and darkened (25% to begin with) so the path stands out; the **Dim** slider in the
+  strip between the map and the video changes that, and is remembered. The **Street / Satellite**
+  button switches to USGS satellite imagery (United States only; at the deeper zoom levels CamBot first tries the USGS ready-made tiles, and when two
+  of them turn out not to exist it asks the USGS NAIP imagery service, 0.3 to 0.6 meters a pixel, to draw each
+  one instead for the rest of the run; the console says how long each tile waited, took to start answering and took in all, since those pictures can take half a minute), which is also what the map falls
+  back to, with a note saying so, if the street map can't be reached and none of it is stored for
+  the part of the world in view. (Click Street to try again.) "Map tiles unavailable" shows if
+  neither can be had. The credit each source asks for is in the lower right corner. The tiles come
+  over HTTPS from background threads, only for what is on
+  screen (two requests at a time; OpenStreetMap never gets more, but when the USGS is slow to answer
+  some, each one that has been out for over a second and a half lets one more go out, up to six, so a few
+  slow pictures don't hold up the rest), and while one is on its way the same place from a lower zoom level is stretched in its
+  place. CamBot identifies itself to the tile server as `CamBot (https://github.com/foodini/cambot)`.
+  Every tile is kept in `%LOCALAPPDATA%\CamBot\map_tiles` (up to 200 MB; the oldest go first) and
+  used as it is for six months, so editing a flight a few days or weeks old costs the free servers
+  nothing; **Refresh Map** asks them whether the tiles now in view that are over a week old have
+  changed. A server that fails to answer is left alone for longer and longer. Each tile request and
+  answer is printed in the console window. As soon as the telemetry has been read, before the view is
+  opened, CamBot starts fetching the (at most ten) street map tiles around where the flight starts: the
+  zoom 18 tiles covering the walk to launch (up to the first sample faster than 6 knots, with 60 m
+  added all round) and one wider tile at each of the zoom levels 17 to 14, so they are there when
+  the view opens. (Note: the Windows build links WinHTTP, which is part of Windows; no new libraries.)
 - **Sync / Reorder view: the map.** The left half is now a map of the whole flight (everything in the
   telemetry file, not only what your edit uses). The path is a bright line with a dark edge, in the
   same climb colors as the video's map (dark blue in strong sink to red in strong climb, over the same

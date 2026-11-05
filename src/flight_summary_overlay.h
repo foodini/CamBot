@@ -98,7 +98,7 @@ private:
 		FontManager* font_mgr = env_config->font_mgr;
 		const float screen_w = env_config->screen_width();
 		const float screen_h = env_config->screen_height();
-		const float video_h = screen_h - env_config->ui_height();
+		const float video_h = screen_h;   // The picture is the whole canvas.
 		const float font_px = (float)font_mgr->font_size();
 
 		// Lines: the title, a blank line, then the rows.

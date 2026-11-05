@@ -33,6 +33,8 @@
 #include "telemetry.h"
 #include "timecode.h"
 #include "sync_view.h"
+#include "tile_layer.h"
+#include "position_smoothing.h"
 #include "timeline_editor.h"
 #include "timeline_view.h"
 #include "util.h"
@@ -49,7 +51,6 @@ void processInput(GLFWwindow* window);
 // settings
 const unsigned int SCR_WIDTH = 1920;
 const unsigned int SCR_HEIGHT = 1080;
-const unsigned int UI_HEIGHT = 134;        // Divisible by FOUR, RIGHT?
 const unsigned int MENU_HEIGHT = 19;       // What the ImGui main menu bar measures with the default font and style
                                             // (FontSize 13 + FramePadding.y 3 * 2). Only the first frame goes by
                                             // it; after that the layout uses the height ImGui reports.
@@ -81,6 +82,33 @@ static bool confirm_leaving_project(EnvConfig& env_config, ProjectFileManager& p
     if (answer == ffsw::ANSWER_NO)
         return true;
     return answer == ffsw::ANSWER_YES && env_config.save_project();
+}
+
+// Fetches, ahead of the sync view needing them, the map tiles around where the flight starts: the few of
+// them the map will show when it is zoomed in on the walk to the launch (to the first sample faster than
+// BRISK_KNOTS), and the wider ones for zooming out. Street map only. See map_tiles::launch_tiles.
+static void start_map_prefetch(const TelemetryMgr& telemetry, TileLayer* tiles) {
+    const float BRISK_KNOTS = 6.0f;
+    const int DETAIL_ZOOM = 18;
+    const double PAD_METERS = 60.0;
+    const int DETAIL_TILES = 6;
+    const int TOTAL_TILES = 10;
+    std::vector<map_tiles::TrackSample> samples;
+    for (uint32_t i = 0; i < telemetry.size(); i++) {
+        const TelemetrySlice& slice = telemetry[i];
+        map_tiles::TrackSample sample;
+        sample.latitude = (double)slice.m_gps_lat;
+        sample.longitude = (double)slice.m_gps_lon;
+        sample.speed_kts = slice.m_speed_kts;
+        sample.has_fix = position_smoothing::has_fix(sample.latitude, sample.longitude);
+        samples.push_back(sample);
+        if (sample.has_fix && sample.speed_kts > BRISK_KNOTS)
+            break;   // Nothing after the first brisk sample matters.
+    }
+    map_tiles::LaunchArea area;
+    if (!map_tiles::find_launch_area(samples, BRISK_KNOTS, &area))
+        return;
+    tiles->prefetch(map_tiles::STYLE_STREET, map_tiles::launch_tiles(area, DETAIL_ZOOM, PAD_METERS, DETAIL_TILES, TOTAL_TILES));
 }
 
 static bool exit_confirmed(GLFWwindow* window, EnvConfig& env_config, ProjectFileManager& project_file_mgr) {
@@ -143,7 +171,7 @@ static void draw_shortcuts_window(bool* open) {
         const Row rows[] = {
             { "Space", "Play / pause" },
             { "Left / Right", "Step one frame back / forward (hold to repeat)" },
-            { "Up / Down", "Nudge the telemetry sync one sample (hold to repeat)" },
+            { "Up / Down", "In the Sync / Reorder view: nudge the telemetry sync one sample (hold to repeat)" },
             { rotate_flip_key, "Rotate the video 180 degrees" },
             { rotate_left_key + " / " + rotate_right_key, "Rotate the video a little left / right (hold to repeat)" },
             { "Ctrl+S", "Save the project" },
@@ -192,7 +220,7 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 
 }
 
-// Captures the (0, UI_HEIGHT, SCR_WIDTH, SCR_HEIGHT) rectangle -- in pixel space, exactly the
+// Captures the whole canvas, (0, 0, SCR_WIDTH, SCR_HEIGHT) in pixel space -- exactly the
 // rectangle the video is rendered into (see `extents` in main(), and the existing recording
 // capture below, both of which read this same rectangle) -- from the picture the frame is being
 // drawn into, and writes it out as a PNG at `path`. No-op if `path` is empty, so callers can
@@ -204,7 +232,7 @@ static void save_frame_as_png(const RenderTarget& canvas, const std::string& pat
     if (path.empty())
         return;
     std::vector<uint8_t> buf((size_t)SCR_WIDTH * SCR_HEIGHT * 3);
-    canvas.read_rgb(0, UI_HEIGHT, SCR_WIDTH, SCR_HEIGHT, buf.data());
+    canvas.read_rgb(0, 0, SCR_WIDTH, SCR_HEIGHT, buf.data());
     // The first row read is the bottom of the image; PNG (and stb_image_write) expect the
     // first row to be the top, so flip on the way out rather than changing how we read.
     stbi_flip_vertically_on_write(1);
@@ -803,10 +831,9 @@ int main()
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 330");
 
-    float bottom = (float)(1.0 - 2.0 * SCR_HEIGHT / (SCR_HEIGHT + UI_HEIGHT));
     glm::vec3 extents[4];  //bl, br, tl, tr
-    extents[0] = glm::vec3(-1.0, bottom, 0.0);
-    extents[1] = glm::vec3(1.0, bottom, 0.0);
+    extents[0] = glm::vec3(-1.0, -1.0, 0.0);
+    extents[1] = glm::vec3(1.0, -1.0, 0.0);
     extents[2] = glm::vec3(-1.0, 1.0, 0.0);
     extents[3] = glm::vec3(1.0, 1.0, 0.0);
 
@@ -855,10 +882,9 @@ int main()
 
     // The frame is drawn into this picture and then copied to the window, rather than drawn into
     // the window directly: exports and screenshots read the picture, so they don't depend on what
-    // the window is doing. It is the whole canvas the widgets are laid out on (the video, and the
-    // strip under it that holds the scrub bars).
+    // the window is doing. It is the whole canvas the widgets are laid out on (the video, 1920 x 1080).
     RenderTarget canvas;
-    if (!canvas.create(SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT)) {
+    if (!canvas.create(SCR_WIDTH, SCR_HEIGHT)) {
         ffsw::message_box("CamBot - Cannot Start", "The graphics driver could not make the off-screen picture CamBot draws each frame into.");
         shut_down_gui();
         return 1;
@@ -868,22 +894,25 @@ int main()
     // Restore whatever rotation was saved with this project (see EnvConfig::save_project()
     // and the "Save Project" menu item below for where it's written back out).
     media_container_mgr.rotation_angle(project_file_mgr.get_rotation_angle());
-    FontManager font_manager("c:\\Windows\\Fonts\\courbd.ttf", 48, SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT);
+    FontManager font_manager("c:\\Windows\\Fonts\\courbd.ttf", 48, SCR_WIDTH, SCR_HEIGHT);
     //TODO(P1) Hand the telemetry_mgr, instead of its vector, into the env_config.
-    EnvConfig env_config(&media_container_mgr, &font_manager, &project_file_mgr, &edit_model, (float)SCR_WIDTH, (float)SCR_HEIGHT + (float)UI_HEIGHT, (float)UI_HEIGHT);
+    EnvConfig env_config(&media_container_mgr, &font_manager, &project_file_mgr, &edit_model, (float)SCR_WIDTH, (float)SCR_HEIGHT);
     env_config.note_project_opened(project_file_mgr.get_project_file_path());
 
-    DateTimeWidget date_time_widget(.29f, .18f, 1.0f-.29f-.015f, 1.0f-.18f-.01f);
+    // The overlay widgets are placed in coordinates of the canvas, -1 to 1 across and up (so 2 / 1920 and 2 / 1080 a pixel).
+    // Their places were first worked out on a canvas 1214 pixels tall, with a 134 pixel strip below the video; the numbers
+    // here are those converted to this one, so each lands on the same pixels of the video as before.
+    DateTimeWidget date_time_widget(.29f, .2023f, 1.0f-.29f-.015f, .7864f);
     TimelineView timeline_view;
     TimelineEditor timeline_editor;
-    SyncView sync_view;
-    TelemetryScrubWidget telemetry_scrub_widget(1.96f, 0.04f, -.98f, -.885f);
+    TileLayer tile_layer;
+    SyncView sync_view(&tile_layer);
 
-    MapWidget map_widget(.35f, .35f*SCR_WIDTH/(SCR_HEIGHT+UI_HEIGHT), 0.6f, -0.765f);
-    ClimbWidget climb_widget(.02f, .35f * SCR_WIDTH / (SCR_HEIGHT + UI_HEIGHT), 0.9625f, -0.765f);
+    MapWidget map_widget(.35f, .35f*SCR_WIDTH/SCR_HEIGHT, 0.6f, -0.9840f);
+    ClimbWidget climb_widget(.02f, .35f * SCR_WIDTH / SCR_HEIGHT, 0.9625f, -0.9840f);
     // The flight summary's last line sits at the graph's bottom edge, so both are the same distance off the bottom of the video.
-    const float GRAPH_BOTTOM_NDC = -1.0f + .24f;
-    GraphWidget graph_widget(.5f, .3f, -0.99f, GRAPH_BOTTOM_NDC);
+    const float GRAPH_BOTTOM_NDC = -1.0f + .0216f;
+    GraphWidget graph_widget(.5f, .3372f, -0.99f, GRAPH_BOTTOM_NDC);
     FlightSummaryOverlay flight_summary_overlay(GRAPH_BOTTOM_NDC);
     //TODO(P0): This is dumb. Have each widget know whether it needs a poly call. The TelemetryMgr can call all widgets and
     //construct the list of the ones that need data.
@@ -892,12 +921,11 @@ int main()
     polygonalized_widgets.push_back(&graph_widget);
 
     // Every widget drawn over the video, generically -- used by the click-to-pause check below
-    // so a click on any of them (map, date/time, climb rate, either scrubber) doesn't also toggle
+    // so a click on any of them (map, date/time, climb rate, graph) doesn't also toggle
     // pause. The distance-flown text is intentionally NOT in here: it isn't a tracked widget, so
     // a click there falls through and does pause/unpause the video.
     std::vector<WidgetBase*> all_widgets;
     all_widgets.push_back(&date_time_widget);
-    all_widgets.push_back(&telemetry_scrub_widget);
     all_widgets.push_back(&map_widget);
     all_widgets.push_back(&climb_widget);
     all_widgets.push_back(&graph_widget);
@@ -911,6 +939,34 @@ int main()
         []() { paused = !paused; },
         nullptr,
         nullptr);
+    // Up / Down nudge the telemetry sync by one sample, the finest adjustment that means anything (the same
+    // idea as the frame-step keys for the video), but only in the Sync / Reorder view, so the sync can't be
+    // changed by accident anywhere else. Up "advances" the telemetry: elapsed_at(flight_elapsed) is
+    // flight_elapsed - offset, so moving the telemetry forward against the video means a smaller offset, and
+    // Down the opposite. Held, they repeat about ten times a second (see ffsw::held_repeat_due()).
+    const float NUDGE_SECONDS = 1.0f / (float)TELEMETRY_FREQUENCY;
+    int nudge_forward_bucket = -1;
+    int nudge_back_bucket = -1;
+    interaction_mgr->bind_key(GLFW_KEY_UP,
+        [&sync_view, &telemetry_mgr, &edit_model, NUDGE_SECONDS]() {
+            if (sync_view.active() && telemetry_mgr.has_telemetry())
+                edit_model.add_to_offset(-NUDGE_SECONDS);
+        },
+        nullptr,
+        [&sync_view, &telemetry_mgr, &edit_model, &nudge_forward_bucket, NUDGE_SECONDS](float held_seconds) {
+            if (sync_view.active() && telemetry_mgr.has_telemetry() && ffsw::held_repeat_due(held_seconds, 0.25f, 0.1f, nudge_forward_bucket))
+                edit_model.add_to_offset(-NUDGE_SECONDS);
+        });
+    interaction_mgr->bind_key(GLFW_KEY_DOWN,
+        [&sync_view, &telemetry_mgr, &edit_model, NUDGE_SECONDS]() {
+            if (sync_view.active() && telemetry_mgr.has_telemetry())
+                edit_model.add_to_offset(NUDGE_SECONDS);
+        },
+        nullptr,
+        [&sync_view, &telemetry_mgr, &edit_model, &nudge_back_bucket, NUDGE_SECONDS](float held_seconds) {
+            if (sync_view.active() && telemetry_mgr.has_telemetry() && ffsw::held_repeat_due(held_seconds, 0.25f, 0.1f, nudge_back_bucket))
+                edit_model.add_to_offset(NUDGE_SECONDS);
+        });
     // The edit keys. They are named by the character they make, so they follow the user's keyboard
     // layout (see the note on S below), and they stand aside while a text box has the keyboard.
     // Ctrl+S saves the project, and S by itself splits the clip at the playhead.
@@ -1029,7 +1085,7 @@ int main()
 
     // Where the parts of the window go, worked out afresh each frame from the window's size (see
     // window_layout.h). The preview shows the whole canvas, scaled to fit with its shape kept.
-    const float canvas_aspect = (float)SCR_WIDTH / (float)(SCR_HEIGHT + UI_HEIGHT);
+    const float canvas_aspect = (float)SCR_WIDTH / (float)SCR_HEIGHT;
     float menu_height = (float)MENU_HEIGHT;
     float timeline_height = (float)window_state.timeline_height;   // What the user asked for; the layout may hold it to less.
     float panel_width = (float)window_state.panel_width;          // Likewise: the least the left panel should be.
@@ -1038,9 +1094,18 @@ int main()
 
     // render loop
     // -----------
+    bool map_prefetch_started = false;
     while (!switching_project && !exit_confirmed(window, env_config, project_file_mgr))
     {
         telemetry_mgr.tick();
+        // As soon as the telemetry is read, the map tiles around the launch start coming in, so they are
+        // there by the time the sync view is opened.
+        if (!map_prefetch_started && telemetry_mgr.parsing_done()) {
+            map_prefetch_started = true;
+            start_map_prefetch(telemetry_mgr, &tile_layer);
+        }
+        if (!sync_view.active())
+            tile_layer.service();
         // A flight without a telemetry file shows just the video: none of the telemetry widgets are
         // drawn or listened to, and the menu items about telemetry are greyed out.
         const bool has_telemetry = telemetry_mgr.has_telemetry();
@@ -1081,9 +1146,6 @@ int main()
         interaction_mgr->tick(window);
         //TODO(P1) Find a way for these things to get their updates automatically, so I don't have to remember
         //         to do it for each widget that receives input.
-        // (Not in the sync view, where the map is how the sync is set; a stray click on the strip must not change it.)
-        if (has_telemetry && !sync_view.active())
-            telemetry_scrub_widget.handle_input();
 
         // Notice the instant an export stops -- normal completion at end-of-video and an
         // Escape-cancel (handled above, inside interaction_mgr->tick()) both just drop
@@ -1369,7 +1431,7 @@ int main()
         if (interaction_mgr->mouse_button_down()) {
             float mouse_x = interaction_mgr->mouse_x_pos();
             float mouse_y = interaction_mgr->mouse_y_pos();
-            bool in_video_rect = mouse_x >= -1.0f && mouse_x <= 1.0f && mouse_y >= bottom && mouse_y <= 1.0f;
+            bool in_video_rect = mouse_x >= -1.0f && mouse_x <= 1.0f && mouse_y >= -1.0f && mouse_y <= 1.0f;
             if (in_video_rect) {
                 bool on_a_widget = false;
                 for (WidgetBase* widget : all_widgets) {
@@ -1400,7 +1462,7 @@ int main()
             font_manager.add_string(
                 StringAndProperties(
                     ffsw::format("%6.2fkm", env_config.telemetry_distance_flown()),
-                    0, glm::vec2(-.99, .99), glm::vec3(1.0, 1.0, 1.0), 1.0, 2.0,
+                    0, glm::vec2(-.99, 1.0f - 6.0f * 2.0f / (float)SCR_HEIGHT), glm::vec3(1.0, 1.0, 1.0), 1.0, 2.0,
                     StringAndProperties::V_ALIGN::V_TOP, StringAndProperties::H_ALIGN::H_LEFT));
         }
 
@@ -1423,7 +1485,7 @@ int main()
         // below for recording. ImGui's own render pass sets its own full-window viewport and
         // restores this one afterward, so it must be reset here, every frame.
         canvas.bind();
-        glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT + UI_HEIGHT);
+        glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
         glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
@@ -1432,7 +1494,6 @@ int main()
         pending_raw_screenshot_path.clear();
         if (has_telemetry) {
             date_time_widget.render();
-            telemetry_scrub_widget.render();
             map_widget.render();
             climb_widget.render();
             graph_widget.render();
@@ -1448,7 +1509,7 @@ int main()
         // do_present, since every frame has to make it into the encoded video; export_frame_buf
         // is allocated once, outside the loop, rather than every frame.
         if (media_container_mgr.recording()) {
-            canvas.read_rgb(0, UI_HEIGHT, SCR_WIDTH, SCR_HEIGHT, export_frame_buf);
+            canvas.read_rgb(0, 0, SCR_WIDTH, SCR_HEIGHT, export_frame_buf);
             media_container_mgr.output_video_frame(export_frame_buf);
         }
 

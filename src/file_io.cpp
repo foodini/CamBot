@@ -15,6 +15,7 @@
 #include <windows.h>
 #include <share.h>
 #else
+#include <dirent.h>
 #include <sys/stat.h>
 #endif
 
@@ -57,6 +58,16 @@ void remove_file(const std::string& path) {
 	_wremove(to_wide(path).c_str());
 #else
 	remove(path.c_str());
+#endif
+}
+
+bool is_directory(const std::string& path) {
+#ifdef _WIN32
+	const DWORD attributes = GetFileAttributesW(to_wide(path).c_str());
+	return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+#else
+	struct stat info;
+	return stat(path.c_str(), &info) == 0 && S_ISDIR(info.st_mode);
 #endif
 }
 
@@ -175,6 +186,76 @@ int64_t modified_time(const std::string& path) {
 	if (stat(path.c_str(), &info) != 0)
 		return 0;
 	return (int64_t)info.st_mtim.tv_sec * 1000000000LL + (int64_t)info.st_mtim.tv_nsec;
+#endif
+}
+
+bool make_directories(const std::string& path) {
+	if (path.empty())
+		return false;
+	// Make the folder above first, then this one.
+	const std::string parent = directory_of(path);
+	if (!parent.empty() && parent.size() > 2 && !is_directory(parent))
+		make_directories(parent);
+#ifdef _WIN32
+	CreateDirectoryW(to_wide(path).c_str(), NULL);
+#else
+	mkdir(path.c_str(), 0755);
+#endif
+	return is_directory(path);
+}
+
+void list_files(const std::string& directory, std::vector<FileEntry>* files) {
+#ifdef _WIN32
+	WIN32_FIND_DATAW found;
+	HANDLE find = FindFirstFileW(to_wide(join(directory, "*")).c_str(), &found);
+	if (find == INVALID_HANDLE_VALUE)
+		return;
+	do {
+		const std::wstring wide_name = found.cFileName;
+		if (wide_name == L"." || wide_name == L"..")
+			continue;
+		const int count = WideCharToMultiByte(CP_UTF8, 0, wide_name.c_str(), (int)wide_name.size(), NULL, 0, NULL, NULL);
+		std::string name(count, '\0');
+		WideCharToMultiByte(CP_UTF8, 0, wide_name.c_str(), (int)wide_name.size(), &name[0], count, NULL, NULL);
+		const std::string path = join(directory, name);
+		if ((found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+			list_files(path, files);
+		} else {
+			FileEntry entry;
+			entry.path = path;
+			entry.bytes = ((int64_t)found.nFileSizeHigh << 32) | (int64_t)found.nFileSizeLow;
+			ULARGE_INTEGER time;
+			time.LowPart = found.ftLastWriteTime.dwLowDateTime;
+			time.HighPart = found.ftLastWriteTime.dwHighDateTime;
+			entry.modified = (int64_t)time.QuadPart;
+			files->push_back(entry);
+		}
+	} while (FindNextFileW(find, &found) != 0);
+	FindClose(find);
+#else
+	DIR* dir = opendir(directory.c_str());
+	if (dir == NULL)
+		return;
+	struct dirent* item;
+	while ((item = readdir(dir)) != NULL) {
+		const std::string name = item->d_name;
+		if (name == "." || name == "..")
+			continue;
+		const std::string path = join(directory, name);
+		struct stat info;
+		if (stat(path.c_str(), &info) != 0)
+			continue;
+		if (S_ISDIR(info.st_mode)) {
+			list_files(path, files);
+		} else {
+			FileEntry entry;
+			entry.path = path;
+			entry.bytes = (int64_t)info.st_size;
+			entry.modified = (int64_t)info.st_mtim.tv_sec * 1000000000LL + (int64_t)info.st_mtim.tv_nsec;
+			files->push_back(entry);
+		}
+	}
+	closedir(dir);
 #endif
 }
 

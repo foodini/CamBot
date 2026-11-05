@@ -7,7 +7,7 @@
 
 EnvConfig* EnvConfig::instance = nullptr;
 
-EnvConfig::EnvConfig(MediaContainerMgr* mcm, FontManager* fm, ProjectFileManager* pfm, EditModel* model, float screen_width, float screen_height, float ui_height) :
+EnvConfig::EnvConfig(MediaContainerMgr* mcm, FontManager* fm, ProjectFileManager* pfm, EditModel* model, float screen_width, float screen_height) :
 	media_mgr(mcm),
 	font_mgr(fm),
 	project_file_mgr(pfm),
@@ -16,7 +16,6 @@ EnvConfig::EnvConfig(MediaContainerMgr* mcm, FontManager* fm, ProjectFileManager
 	m_user_settings(),
 	m_screen_width(screen_width),
 	m_screen_height(screen_height),
-	m_ui_height(ui_height),
 	m_screen_to_pixel_space_projection(glm::mat4(1.0f)),
 	m_pixel_to_screen_space_projection(glm::mat4(1.0f))
 {
@@ -172,7 +171,7 @@ float EnvConfig::telemetry_distance_flown() const {
 
 // The project file's idea of the state is only a copy: the live values belong to their owners
 // (the edit model owns the clips, the sync and the launch mark, telemetry owns the window start,
-// the media manager owns the rotation, and so on), and the keys and scrub bars change them
+// the media manager owns the rotation, and so on), and the keys and the sync view change them
 // directly. So the copy is refreshed from them whenever it's needed.
 void EnvConfig::push_state_to_project() {
 	ProjectData* data = project_file_mgr->mutable_data();
