@@ -333,6 +333,7 @@ void GraphWidget::polygonalize(TelemetrySlice& slice, uint32_t index, uint32_t n
 		}
 		m_alt_max = slice.m_alt[1];
 		m_alt_min = slice.m_alt[1];
+		m_alt_outline_lines.set_metric(1.0f, 1.0f);
 
 		m_next_index = 0.0f;
 	}
@@ -349,12 +350,15 @@ void GraphWidget::polygonalize(TelemetrySlice& slice, uint32_t index, uint32_t n
 			}
 		}
 
-		m_alt_body_vect.push_back(m_next_index);
+		// x is the sample's own index, not m_next_index: m_next_index moves on by the stride, which is under 1 when
+		// there are fewer samples than columns to draw, and then x drifted behind the index (a short window came out
+		// squeezed to the left, and render_pilot_position()'s absolute index landed too far right).
+		m_alt_body_vect.push_back((float)index);
 		m_alt_body_vect.push_back(slice.m_alt[1]);
-		m_alt_body_vect.push_back(m_next_index);
+		m_alt_body_vect.push_back((float)index);
 		m_alt_body_vect.push_back(m_below_min_alt);
 
-		glm::vec2 xy(m_next_index, slice.m_alt[1]);
+		glm::vec2 xy((float)index, slice.m_alt[1]);
 		std::vector<float> sup;
 		m_alt_outline_lines.add_segment(xy, sup);
 
@@ -482,20 +486,35 @@ void GraphWidget::rebuild_windowed_data(int32_t start_index, int32_t end_index) 
 			}
 		}
 
-		m_alt_body_vect.push_back(m_next_index);
+		// x is the sample's own index, not m_next_index: m_next_index moves on by the stride, which is under 1 when
+		// there are fewer samples than columns to draw, and then x drifted behind the index (a short window came out
+		// squeezed to the left, and render_pilot_position()'s absolute index landed too far right).
+		m_alt_body_vect.push_back((float)index);
 		m_alt_body_vect.push_back(slice.m_alt[1]);
-		m_alt_body_vect.push_back(m_next_index);
+		m_alt_body_vect.push_back((float)index);
 		m_alt_body_vect.push_back(m_below_min_alt);
-
-		glm::vec2 xy(m_next_index, slice.m_alt[1]);
-		std::vector<float> sup;
-		m_alt_outline_lines.add_segment(xy, sup);
 
 		m_next_index += stride;
 	}
 
 	if (m_alt_body_vect.size() > 0) {
 		update_graph_to_screen_projection();
+
+		// The outline is made last, now that the altitude range (and so the shape of the graph on the screen) is
+		// known. Its dots are spaced by how far apart they look, in pixels: spaced in graph units, a graph of a
+		// small altitude range (stretched tall) came out as scattered dots instead of a line.
+		const float min_x = m_alt_body_vect[0];
+		const float max_x = m_alt_body_vect[m_alt_body_vect.size() - 2];
+		const float alt_span = m_alt_max - m_below_min_alt;
+		// (The widget's size is in NDC, which runs -1 to 1, so a width of 1 is half the screen.)
+		const float pixels_per_x = env_config->screen_width() * m_width * 0.5f / (1.0f + max_x - min_x);
+		const float pixels_per_y = (alt_span > 0.0f) ? env_config->screen_height() * m_height * 0.5f / alt_span : 1.0f;
+		m_alt_outline_lines.set_metric(pixels_per_x, pixels_per_y);
+		for (size_t i = 0; i + 3 < m_alt_body_vect.size(); i += 4) {
+			glm::vec2 xy(m_alt_body_vect[i], m_alt_body_vect[i + 1]);
+			std::vector<float> sup;
+			m_alt_outline_lines.add_segment(xy, sup);
+		}
 	}
 }
 

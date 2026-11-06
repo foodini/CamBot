@@ -10,6 +10,7 @@
 Lines::Lines(float line_width, float dot_frequency) :
 	m_line_width(line_width),
 	m_dot_frequency(dot_frequency),
+	m_metric(1.0f, 1.0f),
 	m_remaining_dist(0.0),
 	m_vert_count(0),
 	m_uploaded_vert_count(0),
@@ -46,6 +47,11 @@ void Lines::clear() {
 	m_vert_count = 0;
 }
 
+void Lines::set_metric(float x_scale, float y_scale) {
+	std::lock_guard<std::mutex> lock(m_mutex);
+	m_metric = glm::vec2(x_scale, y_scale);
+}
+
 void Lines::add_segment(glm::vec2& xy, std::vector<float>& supplementary) {
 	std::lock_guard<std::mutex> lock(m_mutex);
 	if (m_dot_vector.size() == 0) {
@@ -60,9 +66,14 @@ void Lines::add_segment(glm::vec2& xy, std::vector<float>& supplementary) {
 	// units of distance, until we cannot procede further w/o overrunning xy.
 	float remaining_dist = m_dot_frequency - m_remaining_dist;
 	glm::vec2 dir = xy - m_last_target;
-	float dir_len = glm::length(dir);
+	float dir_len = glm::length(dir * m_metric);
+	if (dir_len <= 0.0f) {
+		m_last_supplementary = supplementary;
+		return;
+	}
 	if (remaining_dist > dir_len) {
-		remaining_dist -= dir_len;
+		// Not far enough for another dot, but it counts towards the next one.
+		m_remaining_dist += dir_len;
 		m_last_target = xy;
 		m_last_supplementary = supplementary;
 		return;
