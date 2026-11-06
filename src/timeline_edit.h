@@ -65,6 +65,13 @@ int     drop_index(const EditList& list, int dragged, double position_ticks);
 // clip the dragged one would go after (not counting the dragged clip itself), or 0 if it would go first.
 int64_t drop_marker_ticks(const EditList& list, int dragged, int to);
 
+// Plays the clip under the playhead at `speed` times normal speed (MIN_SPEED to MAX_SPEED), its sound treated as `audio_mode` (an
+// AudioMode). The clip lasts that much longer or shorter on the timeline, and what follows moves to suit. The playhead stays on
+// the same frame of the footage. Not possible when there is no clip, when the speed is out of range, or when it changes
+// nothing.
+bool   can_set_speed(const EditList& list, int64_t playhead_ticks, double speed, int audio_mode);
+Result set_speed(const EditList& list, int64_t playhead_ticks, double speed, int audio_mode, int64_t frame_ticks);
+
 // Which clip the playhead is in, or -1 when there are none. The same answer the timeline uses to
 // show the "current" clip.
 int    current_clip(const EditList& list, int64_t playhead_ticks);

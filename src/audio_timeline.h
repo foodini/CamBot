@@ -11,6 +11,7 @@
 
 #include "audio_file_reader.h"
 #include "audio_plan.h"
+#include "audio_stretch.h"
 #include "edit_model.h"
 
 class AudioTimeline {
@@ -39,12 +40,16 @@ public:
 
 private:
 	AudioFileReader* reader_for(int media);
+	audio_stretch::SourceWindow* window_for(int media);
 	void close_readers();
 
 	std::vector<std::string>         m_paths;
 	std::vector<audio_plan::Segment> m_segments;
 	std::vector<AudioFileReader*>    m_readers;      // By media; null until needed.
 	std::vector<char>                m_no_sound;     // By media: 1 for a file that has none (or won't open), tried once.
+	std::vector<audio_stretch::SourceWindow*> m_windows;   // By media; null until a clip at another speed needs one.
+	audio_stretch::PitchKeeper       m_keeper;       // For the clip being stretched, if one is.
+	int                              m_keeper_segment;   // The segment m_keeper is working on, or -1.
 	int64_t                          m_position;
 	std::string                      m_last_error;
 };

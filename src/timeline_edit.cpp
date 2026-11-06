@@ -15,7 +15,7 @@ bool locate(const EditList& list, int64_t playhead_ticks, Place* place) {
 	if (index < 0)
 		return false;
 	const Clip& clip = list.clip(index);
-	int64_t local = clip.in_ticks + (playhead_ticks - list.start(index));
+	int64_t local = clip.in_ticks + timeline_to_footage(playhead_ticks - list.start(index), clip.speed);
 	if (local < clip.in_ticks)
 		local = clip.in_ticks;
 	if (local > clip.out_ticks - 1)
@@ -58,10 +58,18 @@ Result split(const EditList& list, int64_t playhead_ticks, int64_t frame_ticks) 
 			result.clips.push_back(old_clips[i]);
 			continue;
 		}
-		result.clips.push_back(Clip(old_clips[i].media, old_clips[i].in_ticks, place.local));
-		result.clips.push_back(Clip(old_clips[i].media, place.local, old_clips[i].out_ticks));
+		// Both halves play as the whole did: the same speed, the same treatment of the sound.
+		Clip first = old_clips[i];
+		first.out_ticks = place.local;
+		Clip second = old_clips[i];
+		second.in_ticks = place.local;
+		result.clips.push_back(first);
+		result.clips.push_back(second);
 	}
-	result.playhead_ticks = playhead_ticks;
+	// The playhead's frame is the first of the second half, which starts where the first half ends.
+	EditList after;
+	after.set(result.clips);
+	result.playhead_ticks = after.start(place.index + 1);
 	result.ok = true;
 	return result;
 }
@@ -119,7 +127,7 @@ Result remove_clip(const EditList& list, int64_t playhead_ticks, int64_t frame_t
 	if (index < (int)result.clips.size()) {
 		result.playhead_ticks = list.start(index);
 	} else {
-		int64_t new_total = list.total_ticks() - old_clips[index].duration_ticks();
+		int64_t new_total = list.total_ticks() - old_clips[index].timeline_ticks();
 		result.playhead_ticks = new_total - frame_ticks > 0 ? new_total - frame_ticks : 0;
 	}
 	result.ok = true;
@@ -155,7 +163,7 @@ Result move_clip(const EditList& list, int from, int to, int64_t playhead_ticks)
 		}
 		EditList moved;
 		moved.set(result.clips);
-		result.playhead_ticks = moved.start(new_index) + (place.local - list.clip(place.index).in_ticks);
+		result.playhead_ticks = moved.timeline_for(new_index, place.local);
 	}
 	result.ok = true;
 	return result;
@@ -166,11 +174,39 @@ int drop_index(const EditList& list, int dragged, double position_ticks) {
 	for (int i = 0; i < list.count(); i++) {
 		if (i == dragged)
 			continue;
-		const double center = (double)list.start(i) + (double)list.clip(i).duration_ticks() / 2.0;
+		const double center = (double)list.start(i) + (double)list.clip(i).timeline_ticks() / 2.0;
 		if (center < position_ticks)
 			index++;
 	}
 	return index;
+}
+
+bool can_set_speed(const EditList& list, int64_t playhead_ticks, double speed, int audio_mode) {
+	const int index = list.clip_index_for(playhead_ticks);
+	if (index < 0)
+		return false;
+	if (!(speed >= MIN_SPEED && speed <= MAX_SPEED) || audio_mode < AUDIO_KEEP_PITCH || audio_mode > AUDIO_MUTE)
+		return false;
+	return list.clip(index).speed != speed || list.clip(index).audio_mode != audio_mode;
+}
+
+Result set_speed(const EditList& list, int64_t playhead_ticks, double speed, int audio_mode, int64_t frame_ticks) {
+	(void)frame_ticks;
+	Result result;
+	if (!can_set_speed(list, playhead_ticks, speed, audio_mode))
+		return result;
+	Place place;
+	if (!locate(list, playhead_ticks, &place))
+		return result;
+	result.clips = list.clips();
+	result.clips[place.index].speed = speed;
+	result.clips[place.index].audio_mode = audio_mode;
+	// Everything before the clip is as it was, so it starts where it did; the playhead stays on its frame of the footage.
+	EditList after;
+	after.set(result.clips);
+	result.playhead_ticks = after.timeline_for(place.index, place.local);
+	result.ok = true;
+	return result;
 }
 
 int64_t drop_marker_ticks(const EditList& list, int dragged, int to) {
@@ -182,7 +218,7 @@ int64_t drop_marker_ticks(const EditList& list, int dragged, int to) {
 	for (int i = 0; i < list.count() && others_seen < to; i++) {
 		if (i == dragged)
 			continue;
-		boundary = list.start(i) + list.clip(i).duration_ticks();
+		boundary = list.start(i) + list.clip(i).timeline_ticks();
 		others_seen++;
 	}
 	return boundary;

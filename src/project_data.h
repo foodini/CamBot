@@ -2,7 +2,8 @@
 
 // Everything a CamBot project file stores, as plain data, plus reading and writing it.
 //
-// Project files are JSON (format "cambot-project", version 4; versions 2 and 3 are still read). The editing
+// Project files are JSON (format "cambot-project", version 5; versions 2, 3 and 4 are still read. Version 5 added a speed and a
+// sound treatment to each clip; older projects read as normal speed). The editing
 // parts of a project (the library, the capture order, the clips, the sync anchors, the text boxes) are described
 // in edit_model.h and text_box.h;
 // times in them are ticks, the video time base of the first video file, which is stored beside
@@ -57,7 +58,7 @@ struct ProjectData {
 
 namespace project_io {
 
-const int CURRENT_VERSION = 4;
+const int CURRENT_VERSION = 5;
 
 bool parse_json(const std::string& text, ProjectData* project, std::string* error);
 std::string to_json(const ProjectData& project);

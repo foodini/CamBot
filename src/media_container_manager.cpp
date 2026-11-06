@@ -29,6 +29,8 @@ MediaContainerMgr::MediaContainerMgr(MediaDecoder* decoder, const std::string& v
     m_shader(vert.c_str(), frag.c_str()),
     m_recording(false),
     m_export_cancelled(false),
+    m_export_on_grid(false),
+    m_export_ticks(0),
     m_output_format(nullptr),
     m_output_format_context(nullptr),
     m_output_video_codec(nullptr),
@@ -228,7 +230,19 @@ void MediaContainerMgr::render() {
 }
 
 bool MediaContainerMgr::advance_frame() {
-    bool got_frame = m_decoder->read_frame();
+    bool got_frame = false;
+    if (m_recording && m_export_on_grid) {
+        // Clips at other speeds: the next frame of the export is the next whole frame's time on the timeline, whatever the
+        // footage has there (the same frame again where it is slowed down, a later one where it is sped up).
+        const int64_t frame = m_decoder->frame_ticks();
+        const int64_t next = m_export_ticks + frame;
+        if (next + frame / 2 <= m_decoder->total_ticks() && m_decoder->show_at(next)) {
+            m_export_ticks = next;
+            got_frame = true;
+        }
+    } else {
+        got_frame = m_decoder->read_frame();
+    }
     if (!got_frame) {
         // The picture is over; so is the sound, to the very end of the edit.
         if (m_recording)
@@ -293,6 +307,10 @@ float MediaContainerMgr::frame_rate() const {
 
 bool MediaContainerMgr::advance_to(int64_t timestamp) {
     return m_decoder->advance_to(timestamp);
+}
+
+bool MediaContainerMgr::show_at(int64_t timestamp) {
+    return m_decoder->show_at(timestamp);
 }
 
 bool MediaContainerMgr::advance_to_parametric(float parametric) {
@@ -437,6 +455,10 @@ bool MediaContainerMgr::start_output(const std::string& video_file_name, unsigne
         m_last_error = "Could not go back to the start of the video.";
         return false;
     }
+    // An edit with clips at other speeds is exported frame by frame on the timeline's own clock; one without is exported
+    // frame by frame as the footage has them, as it always has been.
+    m_export_on_grid = m_decoder->edit_list().has_speed_changes();
+    m_export_ticks = 0;
     if (m_output_audio_stream != nullptr) {
         m_audio_timeline.seek(0);
         write_audio_for_current_frame();
@@ -511,7 +533,7 @@ bool MediaContainerMgr::start_audio_output() {
 // The sound up to the end of the frame the decoder is on.
 void MediaContainerMgr::write_audio_for_current_frame() {
     const double seconds_per_tick = (double)m_decoder->time_base().num / (double)m_decoder->time_base().den;
-    const int64_t frame_end = m_decoder->pts() + m_decoder->frame_ticks();
+    const int64_t frame_end = (m_export_on_grid ? m_export_ticks : m_decoder->pts()) + m_decoder->frame_ticks();
     write_audio_through(audio_plan::ticks_to_samples(frame_end, seconds_per_tick));
 }
 
@@ -648,7 +670,7 @@ bool MediaContainerMgr::output_video_frame(uint8_t* buf) {
               m_output_video_frame->data, m_output_video_frame->linesize);
     PrepareFlipFrameJ420(m_output_video_frame);
     // The decoder's global time for the frame on screen: continuous across all the input files.
-    m_output_video_frame->pts = m_decoder->pts();
+    m_output_video_frame->pts = m_export_on_grid ? m_export_ticks : m_decoder->pts();
     err = avcodec_send_frame(m_output_video_codec_context, m_output_video_frame);
     if (err < 0) {
         printf("  ERROR sending new video frame output: ");

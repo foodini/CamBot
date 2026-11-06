@@ -49,7 +49,7 @@ bool apply_to_model(const ProjectData& project, const std::vector<int64_t>& medi
 		for (size_t i = 0; i < project.clips.size(); i++) {
 			const Clip& clip = project.clips[i];
 			clips.push_back(Clip(clip.media, rescale_ticks(clip.in_ticks, from_num, from_den, tb_num, tb_den),
-				rescale_ticks(clip.out_ticks, from_num, from_den, tb_num, tb_den)));
+				rescale_ticks(clip.out_ticks, from_num, from_den, tb_num, tb_den), clip.speed, clip.audio_mode));
 		}
 		if (!model->set_clips(clips)) {
 			// The usual cause is a file that has been replaced by a shorter one.

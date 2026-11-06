@@ -44,6 +44,8 @@ const ImU32 COLOR_RULER_TEXT = IM_COL32(190, 190, 205, 255);
 const ImU32 COLOR_CLIP_BORDER = IM_COL32(12, 12, 15, 255);
 const ImU32 COLOR_CLIP_TEXT = IM_COL32(240, 240, 245, 255);
 const ImU32 COLOR_CLIP_BACKDROP = IM_COL32(30, 30, 36, 255);       // Behind the pictures, where one hasn't arrived.
+const ImU32 COLOR_SPEED_PLATE = IM_COL32(236, 168, 48, 255);       // Behind a clip's speed when it isn't normal.
+const ImU32 COLOR_SPEED_TEXT = IM_COL32(20, 14, 0, 255);
 const ImU32 COLOR_NAME_PLATE = IM_COL32(0, 0, 0, 150);             // Under a file's name, so it can be read over any picture.
 const ImU32 COLOR_TEXT_BLOCK = IM_COL32(58, 64, 92, 255);
 const ImU32 COLOR_TEXT_BORDER = IM_COL32(150, 160, 205, 255);
@@ -447,7 +449,7 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 	// can be told by color alone.
 	for (int i = 0; i < clips.count(); i++) {
 		const double tint_start = (double)clips.start(i);
-		const double tint_end = tint_start + (double)clips.clip(i).duration_ticks();
+		const double tint_end = tint_start + (double)clips.clip(i).timeline_ticks();
 		float tint_left = origin.x + m_scale.tick_to_x(tint_start);
 		float tint_right = origin.x + m_scale.tick_to_x(tint_end);
 		if (tint_right < strip_min.x || tint_left > strip_max.x)
@@ -481,7 +483,7 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 	for (int i = 0; i < clips.count(); i++) {
 		const Clip& clip = clips.clip(i);
 		const double start = (double)clips.start(i);
-		const double end = start + (double)clip.duration_ticks();
+		const double end = start + (double)clip.timeline_ticks();
 		float left = origin.x + m_scale.tick_to_x(start);
 		float right = origin.x + m_scale.tick_to_x(end);
 		if (right < strip_min.x || left > strip_max.x)
@@ -508,7 +510,8 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 					corners |= ImDrawFlags_RoundCornersLeft;
 				if (slot.right >= true_right - 0.001)
 					corners |= ImDrawFlags_RoundCornersRight;
-				const int64_t moment = thumbnails::tile_ticks(clip.in_ticks, clip.out_ticks, slot.index, picture_width, m_scale.ticks_per_pixel());
+				// (The pictures are laid out along the timeline; a clip at another speed covers more or less of its footage per pixel.)
+				const int64_t moment = thumbnails::tile_ticks(clip.in_ticks, clip.out_ticks, slot.index, picture_width, m_scale.ticks_per_pixel() * clip.speed);
 				// The first picture of a clip is that exact frame: it is the one being cut around.
 				const unsigned int texture = m_thumbnails->want(clip.media, moment, slot.index == 0);
 				const ImVec2 picture_min((float)slot.left, track_top);
@@ -552,6 +555,18 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 			if (room >= badge_width) {
 				draw->AddRectFilled(plate_min, ImVec2(plate_min.x + badge_width, plate_min.y + plate_height), file_color, 3.0f);
 				draw->AddText(ImVec2(plate_min.x + 5.0f, plate_min.y + 2.0f), text_color_on(file_color), number_text);
+			}
+			// A clip that doesn't play at normal speed says how fast it does, at the bottom left.
+			if (clip.speed != 1.0 && room >= 24.0f) {
+				char speed_text[32];
+				snprintf(speed_text, sizeof(speed_text), clip.audio_mode == AUDIO_MUTE ? "%.3gx  muted" : "%.3gx", clip.speed);
+				const ImVec2 speed_size = ImGui::CalcTextSize(speed_text);
+				const float speed_width = speed_size.x + 10.0f;
+				const ImVec2 speed_min(text_left + 5.0f, track_bottom - plate_height - 5.0f);
+				if (room >= speed_width) {
+					draw->AddRectFilled(speed_min, ImVec2(speed_min.x + speed_width, speed_min.y + plate_height), COLOR_SPEED_PLATE, 3.0f);
+					draw->AddText(ImVec2(speed_min.x + 5.0f, speed_min.y + 2.0f), COLOR_SPEED_TEXT, speed_text);
+				}
 			}
 			draw->PopClipRect();
 		}
@@ -617,7 +632,7 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 	const int current = timeline_edit::current_clip(clips, playhead);
 	if (current >= 0) {
 		const double start = (double)clips.start(current);
-		const double end = start + (double)clips.clip(current).duration_ticks();
+		const double end = start + (double)clips.clip(current).timeline_ticks();
 		const float left = larger(origin.x + m_scale.tick_to_x(start), strip_min.x - 4.0f);
 		const float right = smaller(origin.x + m_scale.tick_to_x(end), strip_max.x + 4.0f);
 		draw->AddRect(ImVec2(left, track_top - 1.0f), ImVec2(right, track_bottom + 1.0f), COLOR_CURRENT_CLIP, CLIP_ROUNDING, 0, 2.0f);
@@ -626,7 +641,7 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 	// A clip being carried: a copy of it follows the mouse, and a mark shows where it would be dropped.
 	if (m_drag_clip >= 0 && m_drag_clip < clips.count()) {
 		const Clip& dragged = clips.clip(m_drag_clip);
-		const float ghost_width = larger(8.0f, (float)((double)dragged.duration_ticks() / m_scale.ticks_per_pixel()));
+		const float ghost_width = larger(8.0f, (float)((double)dragged.timeline_ticks() / m_scale.ticks_per_pixel()));
 		const float ghost_left = origin.x + mouse_x - ghost_width / 2.0f;
 		draw->AddRectFilled(ImVec2(ghost_left, track_top), ImVec2(ghost_left + ghost_width, track_bottom),
 			(color_for_number(capture_number(model, dragged.media)) & 0x00FFFFFF) | IM_COL32(0, 0, 0, 170));

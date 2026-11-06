@@ -36,6 +36,8 @@ public:
 	// Lands on the first frame at or after `timestamp`, a count of decoder ticks (see
 	// MediaDecoder) from the beginning of the first file.
 	bool advance_to(int64_t timestamp);
+	// Shows the frame that belongs at `timestamp` (see MediaDecoder::show_at): what playing uses.
+	bool show_at(int64_t timestamp);
 	bool advance_to_parametric(float parametric);
 	bool advance_by(uint64_t frame_count);
 	bool rewind_by(uint64_t frame_count);
@@ -137,6 +139,8 @@ private:
 	bool write_encoded_packets();
 	bool                   m_recording;
 	bool                   m_export_cancelled;
+	bool                   m_export_on_grid;          // The export is cut at the timeline's frame times (the edit has speed changes).
+	int64_t                m_export_ticks;            // The timeline time of the frame being exported, when it is.
 	std::string            m_last_error;
 	const AVOutputFormat*  m_output_format;  // av_guess_format() now returns a const pointer
 	AVFormatContext*       m_output_format_context;

@@ -12,6 +12,7 @@ int  fake_audio_open_count();
 
 static int g_failures = 0;
 #define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); g_failures++; } } while (0)
+#define CHECK_MSG(cond, ...) do { if (!(cond)) { printf("FAIL line %d: %s -- ", __LINE__, #cond); printf(__VA_ARGS__); printf("\n"); g_failures++; } } while (0)
 
 using namespace audio_plan;
 
@@ -242,6 +243,76 @@ static void test_editing_keeps_readers() {
 	CHECK(out[0] == 0.0f && out[19] == 0.0f);
 }
 
+static void test_clips_at_other_speeds() {
+	fake_audio_reset();
+	// TICK is 48 samples, so these clips are 4800 samples of the file (100 ticks) each.
+	std::vector<Clip> clips;
+	clips.push_back(Clip(0, 0, 100));                                    // Normal: 4800 samples.
+	clips.push_back(Clip(0, 100, 300, 2.0, AUDIO_CHANGE_PITCH));        // 200 ticks of file at double speed: 4800 samples.
+	clips.push_back(Clip(0, 300, 400, 0.5, AUDIO_MUTE));                // Silent: 9600 samples.
+	clips.push_back(Clip(2, 0, 200, 2.0, AUDIO_KEEP_PITCH));            // The tone, stretched: 4800 samples.
+	AudioTimeline timeline;
+	timeline.set_edit(names("a.mp4", "b.mp4", "tone.mp4"), make_list(clips), TICK);
+	CHECK(timeline.total_samples() == 4800 + 4800 + 9600 + 4800);
+	std::vector<float> out((size_t)timeline.total_samples() * 2);
+	timeline.render(out.data(), (int)timeline.total_samples());
+
+	// Played like a tape: the left channel (the sample number) runs twice as fast, from where the clip begins in the file.
+	const int second = 4800;
+	for (int n = 1000; n < 3800; n += 311)
+		CHECK_MSG(fabsf(out[(size_t)(second + n) * 2] - (4800.0f + 2.0f * (float)n)) < 0.1f, "n=%d got %f", n, out[(size_t)(second + n) * 2]);
+	// Faded in and out at its ends, being a different treatment from the clip before.
+	CHECK(out[(size_t)second * 2 + 1] == 0.0f && out[(size_t)(second - 1) * 2 + 1] == 0.0f);
+	// Muted is silent all the way through.
+	const int third = 9600;
+	for (int n = 0; n < 9600; n += 97)
+		CHECK(out[(size_t)(third + n) * 2] == 0.0f && out[(size_t)(third + n) * 2 + 1] == 0.0f);
+	// Stretched without changing pitch: still a 1013 Hz tone, and no click where it begins or ends.
+	const int fourth = 19200;
+	int crossings = 0;
+	int first_crossing = -1;
+	int last_crossing = -1;
+	for (int n = 1000; n < 3800; n++) {
+		if (out[(size_t)(fourth + n - 1) * 2] < 0.0f && out[(size_t)(fourth + n) * 2] >= 0.0f) {
+			crossings++;
+			if (first_crossing < 0)
+				first_crossing = n;
+			last_crossing = n;
+		}
+	}
+	const double hz = (double)(crossings - 1) * 48000.0 / (double)(last_crossing - first_crossing);
+	CHECK_MSG(fabs(hz - 1013.0) < 25.0, "tone is %.1f Hz", hz);
+	CHECK(out[(size_t)fourth * 2] == 0.0f && out[(size_t)(fourth + 4799) * 2] == 0.0f);
+
+	// In small blocks it is the same as in one.
+	AudioTimeline blocks;
+	blocks.set_edit(names("a.mp4", "b.mp4", "tone.mp4"), make_list(clips), TICK);
+	std::vector<float> small((size_t)timeline.total_samples() * 2);
+	int done = 0;
+	const int total = (int)timeline.total_samples();
+	while (done < total) {
+		const int count = total - done < 777 ? total - done : 777;
+		blocks.render(small.data() + (size_t)done * 2, count);
+		done += count;
+	}
+	for (size_t i = 0; i < out.size(); i++) {
+		if (out[i] != small[i]) {
+			CHECK_MSG(false, "blocks differ at %zu", i);
+			break;
+		}
+	}
+	// Seeking into the middle of a stretched clip gives the same sound as playing up to it.
+	AudioTimeline jumped;
+	jumped.set_edit(names("a.mp4", "b.mp4", "tone.mp4"), make_list(clips), TICK);
+	jumped.seek(fourth + 2000);
+	std::vector<float> tail(1500 * 2);
+	jumped.render(tail.data(), 1500);
+	float biggest_step = 0.0f;
+	for (int i = 1; i < 1500; i++)
+		biggest_step = fmaxf(biggest_step, fabsf(tail[(size_t)i * 2] - tail[(size_t)(i - 1) * 2]));
+	CHECK(biggest_step < 0.25f);
+}
+
 int main() {
 	test_plays_clips_in_order();
 	test_split_carries_on_without_fade_or_seek();
@@ -251,6 +322,7 @@ int main() {
 	test_cuts_make_no_click();
 	test_files_without_sound();
 	test_editing_keeps_readers();
+	test_clips_at_other_speeds();
 	if (g_failures == 0)
 		printf("audio_timeline_test: all ok\n");
 	return g_failures == 0 ? 0 : 1;

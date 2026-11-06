@@ -60,6 +60,51 @@ bool read_whole(const Json::Value& object, const char* key, int64_t minimum, int
 	return true;
 }
 
+const char* audio_mode_name(int mode) {
+	if (mode == AUDIO_CHANGE_PITCH)
+		return "change_pitch";
+	if (mode == AUDIO_MUTE)
+		return "mute";
+	return "keep_pitch";
+}
+
+// Reads a clip's optional speed and what to do with its sound at that speed (project version 5; older projects have neither,
+// which means normal speed).
+bool read_clip_speed(const Json::Value& object, double* speed, int* audio_mode, std::string* error) {
+	*speed = 1.0;
+	*audio_mode = AUDIO_KEEP_PITCH;
+	if (object.isMember("speed")) {
+		if (!object["speed"].isNumeric()) {
+			set_error(error, "The project file has a clip whose \"speed\" is not a number.");
+			return false;
+		}
+		const double value = object["speed"].asDouble();
+		if (!(value >= MIN_SPEED && value <= MAX_SPEED)) {
+			set_error(error, "The project file has a clip whose \"speed\" is outside what CamBot can play (a tenth of normal speed to sixteen times).");
+			return false;
+		}
+		*speed = value;
+	}
+	if (object.isMember("audio")) {
+		if (!object["audio"].isString()) {
+			set_error(error, "The project file has a clip whose \"audio\" should be a name.");
+			return false;
+		}
+		const std::string name = object["audio"].asString();
+		if (name == "keep_pitch")
+			*audio_mode = AUDIO_KEEP_PITCH;
+		else if (name == "change_pitch")
+			*audio_mode = AUDIO_CHANGE_PITCH;
+		else if (name == "mute")
+			*audio_mode = AUDIO_MUTE;
+		else {
+			set_error(error, "The project file has a clip whose \"audio\" is not one of keep_pitch, change_pitch or mute.");
+			return false;
+		}
+	}
+	return true;
+}
+
 bool read_media_index(const Json::Value& object, size_t media_count, int* media, std::string* error) {
 	int64_t index = 0;
 	if (!read_whole(object, "media", 0, &index, error))
@@ -282,7 +327,11 @@ bool read_editing_state(const Json::Value& root, ProjectData* result, std::strin
 				set_error(error, "The project file has a clip that ends before it begins.");
 				return false;
 			}
-			result->clips.push_back(Clip(media, in_ticks, out_ticks));
+			double speed = 1.0;
+			int audio_mode = AUDIO_KEEP_PITCH;
+			if (!read_clip_speed(clips[i], &speed, &audio_mode, error))
+				return false;
+			result->clips.push_back(Clip(media, in_ticks, out_ticks, speed, audio_mode));
 		}
 		if (!result->clips.empty() && result->time_base_num == 0) {
 			set_error(error, "The project file has clips but no \"time_base\" to measure them in.");
@@ -457,6 +506,10 @@ std::string to_json(const ProjectData& project) {
 			clip["media"] = project.clips[i].media;
 			clip["in"] = Json::Value((Json::Int64)project.clips[i].in_ticks);
 			clip["out"] = Json::Value((Json::Int64)project.clips[i].out_ticks);
+			if (project.clips[i].speed != 1.0)
+				clip["speed"] = project.clips[i].speed;
+			if (project.clips[i].audio_mode != AUDIO_KEEP_PITCH)
+				clip["audio"] = audio_mode_name(project.clips[i].audio_mode);
 			clips.append(clip);
 		}
 		root["clips"] = clips;

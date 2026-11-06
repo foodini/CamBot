@@ -289,10 +289,26 @@
   if the machine can't decode fast enough it skips frames instead of running slowly. Before, playback advanced one frame per
   screen refresh, which only looked right when the screen's rate matched the video's. Stepping, scrubbing and the other ways
   of moving around are silent, and playing carries on from wherever you put the picture.
+- **Speed.** A new **Speed** section in the left panel sets how fast the clip under the playhead (the one outlined on the
+  timeline) plays: buttons for 0.25x, 0.5x, 1x, 2x, 4x and 8x, or any speed from 0.1x to 16x typed into the field (press Enter).
+  The clip becomes longer or shorter on the timeline and what follows moves up or out to suit; it keeps the footage it had,
+  so trimming and splitting still work on the footage, and a split gives both halves the speed. The telemetry goes along with
+  the picture, so the overlay speeds up and slows down with it, while text boxes keep their own lengths. A clip off normal speed
+  shows its speed in orange at the bottom left of its block. In preview and in the export, a slowed-down clip repeats frames
+  and a sped-up one drops them (no blending). Each change is one undo step, and speeds are saved with the project (project
+  format 5; older projects open at normal speed).
+  The clip's sound has three treatments, chosen with the radio buttons under the speed (they apply once the clip is off normal
+  speed): **Keep pitch** stretches or squeezes the sound in time without changing how high it is (a time-domain stretch, fine for
+  speech and wind between about 0.5x and 2x, increasingly stuttery beyond), **Change pitch** plays it like a tape (higher when fast,
+  lower when slow), and **Mute**. This is what you hear in preview and what the export carries.
+  Known limitation: while a slowed-down clip is held on one frame, the overlay (telemetry, text fades) changes only when the
+  frame does.
 - **Tests.** `tests/run_tests.sh` (run it with `wsl ./tests/run_tests.sh`) builds and runs
   the unit tests: climb filters, map zoom, flight statistics, altitude references, user
   settings, the source timeline and file ordering, project reading, and the multi-file
-  decoder (against a fake FFmpeg that serves small synthetic files).
+  decoder (against a fake FFmpeg that serves small synthetic files). New: speed (edit
+  arithmetic, cuts, decoder frame choice), the audio stretcher, and the project file's JSON
+  (read and written with jsoncpp's source, from the vcpkg folder; skipped if that isn't there).
 
 ## 1.0.0 (October 2026)
 

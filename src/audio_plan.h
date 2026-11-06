@@ -23,9 +23,11 @@ struct Segment {
 	int64_t timeline_start;   // Where it begins on the timeline.
 	int64_t length;
 	int64_t source_start;     // Where in the file's sound it comes from.
+	double  speed;            // Samples of the file's sound used per sample of the timeline (1 for normal speed).
+	int     mode;             // An AudioMode: what is done with the sound if the speed isn't 1.
 	bool    fade_in;          // False where the sound carries straight on from the clip before (a split that wasn't trimmed).
 	bool    fade_out;
-	Segment() : media(0), timeline_start(0), length(0), source_start(0), fade_in(true), fade_out(true) {}
+	Segment() : media(0), timeline_start(0), length(0), source_start(0), speed(1.0), mode(AUDIO_KEEP_PITCH), fade_in(true), fade_out(true) {}
 	int64_t timeline_end() const { return timeline_start + length; }
 };
 
@@ -36,7 +38,9 @@ int64_t ticks_to_samples(int64_t ticks, double seconds_per_tick);
 int64_t samples_to_ticks(int64_t samples, double seconds_per_tick);
 
 // The sound of `clips`, one segment per clip, tiling the timeline exactly (each begins where the one before ends).
-// A cut that joins two stretches of the same file with nothing missing between gets no fade, as there is no cut to hear.
+// A cut that joins two stretches of the same file with nothing missing between gets no fade, as there is no cut to hear. (That
+// goes for clips played at the same speed, and not for sound that is stretched without changing its pitch, which is made afresh
+// for each clip and so doesn't join up.)
 void plan(const EditList& clips, double seconds_per_tick, std::vector<Segment>* segments);
 
 // The volume (0 to 1) `offset` samples into `segment`: a smooth rise over the first FADE_SAMPLES if it fades in, a smooth

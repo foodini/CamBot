@@ -35,6 +35,7 @@
 #include "timecode.h"
 #include "sync_view.h"
 #include "text_box.h"
+#include "speed_panel.h"
 #include "text_panel.h"
 #include "text_renderer.h"
 #include "thumbnail_store.h"
@@ -577,9 +578,9 @@ static void draw_altitude_window(bool* open, bool* resync, bool exporting) {
 // the buttons to change that. Returns true when the "Load Telemetry..." button was clicked; the
 // caller does the loading, as it means restarting. `open_sync_view` is set when the "Sync / Reorder..."
 // button was clicked. `can_change` is false while an export runs, as that needs everything left as it is.
-// Below Source Material is the Text section (see text_panel.h).
+// Below Source Material are the Speed section (see speed_panel.h) and the Text section (see text_panel.h).
 static bool draw_left_panel(const LayoutRect& rect, const EditModel& edit_model,
-    const ProjectFileManager& project_file_mgr, TextPanel* text_panel, bool can_change, bool* open_sync_view) {
+    const ProjectFileManager& project_file_mgr, SpeedPanel* speed_panel, TextPanel* text_panel, bool can_change, bool* open_sync_view) {
     bool load_telemetry = false;
     if (rect.w < 1.0f || rect.h < 1.0f)
         return false;
@@ -628,6 +629,7 @@ static bool draw_left_panel(const LayoutRect& rect, const EditModel& edit_model,
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
                 ImGui::SetTooltip("Line the telemetry up with the video, and put the video files in order.\nShows all of the footage; your edit comes back afterward.");
         }
+        speed_panel->draw(can_change);
         text_panel->draw(can_change);
     }
     ImGui::End();
@@ -933,6 +935,7 @@ int main()
     // export and the overlay screenshot), and edited in the left panel.
     TextRenderer text_renderer;
     TextPanel text_panel(&edit_model, &media_container_mgr, &timeline_editor, &env_config);
+    SpeedPanel speed_panel(&edit_model, &media_container_mgr, &timeline_editor);
     TileLayer tile_layer;
     SyncView sync_view(&tile_layer);
     // The pictures of the video along the timelines, got from the files on a thread of their own.
@@ -1421,7 +1424,7 @@ int main()
                 if (outcome == SyncView::CANCEL || (outcome == SyncView::DONE && sync_view.confirm_done(edit_model)))
                     sync_view.leave(outcome == SyncView::DONE, &edit_model, &media_container_mgr);
             } else {
-                if (draw_left_panel(layout.left_panel, edit_model, project_file_mgr, &text_panel, !media_container_mgr.recording(), &open_sync_view_requested))
+                if (draw_left_panel(layout.left_panel, edit_model, project_file_mgr, &speed_panel, &text_panel, !media_container_mgr.recording(), &open_sync_view_requested))
                     load_telemetry_requested = true;
                 draw_panel_splitter(layout.panel_splitter, layout.widest_panel, &panel_width);
                 draw_splitter(layout.splitter, &timeline_height);

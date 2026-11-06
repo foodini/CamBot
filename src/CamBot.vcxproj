@@ -180,6 +180,8 @@
     <ClCompile Include="audio_output.cpp" />
     <ClCompile Include="audio_player.cpp" />
     <ClCompile Include="audio_plan.cpp" />
+    <ClCompile Include="audio_stretch.cpp" />
+    <ClCompile Include="speed_panel.cpp" />
     <ClCompile Include="audio_timeline.cpp" />
     <ClCompile Include="playback.cpp" />
     <ClCompile Include="text_lanes.cpp" />
@@ -271,6 +273,8 @@
     <ClInclude Include="audio_output.h" />
     <ClInclude Include="audio_player.h" />
     <ClInclude Include="audio_plan.h" />
+    <ClInclude Include="audio_stretch.h" />
+    <ClInclude Include="speed_panel.h" />
     <ClInclude Include="audio_timeline.h" />
     <ClInclude Include="playback.h" />
     <ClInclude Include="text_lanes.h" />

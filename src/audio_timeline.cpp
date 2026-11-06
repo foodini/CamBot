@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-AudioTimeline::AudioTimeline() : m_position(0) {
+AudioTimeline::AudioTimeline() : m_keeper_segment(-1), m_position(0) {
 }
 
 AudioTimeline::~AudioTimeline() {
@@ -10,10 +10,14 @@ AudioTimeline::~AudioTimeline() {
 }
 
 void AudioTimeline::close_readers() {
+	for (size_t i = 0; i < m_windows.size(); i++)
+		delete m_windows[i];
+	m_windows.clear();
 	for (size_t i = 0; i < m_readers.size(); i++)
 		delete m_readers[i];
 	m_readers.clear();
 	m_no_sound.clear();
+	m_keeper_segment = -1;
 }
 
 void AudioTimeline::set_edit(const std::vector<std::string>& paths, const EditList& clips, double seconds_per_tick) {
@@ -22,8 +26,10 @@ void AudioTimeline::set_edit(const std::vector<std::string>& paths, const EditLi
 		m_paths = paths;
 		m_readers.assign(paths.size(), nullptr);
 		m_no_sound.assign(paths.size(), 0);
+		m_windows.assign(paths.size(), nullptr);
 	}
 	audio_plan::plan(clips, seconds_per_tick, &m_segments);
+	m_keeper_segment = -1;
 	if (m_position > total_samples())
 		m_position = total_samples();
 }
@@ -59,6 +65,17 @@ AudioFileReader* AudioTimeline::reader_for(int media) {
 	return reader;
 }
 
+audio_stretch::SourceWindow* AudioTimeline::window_for(int media) {
+	AudioFileReader* reader = reader_for(media);
+	if (reader == nullptr)
+		return nullptr;
+	if (m_windows[media] == nullptr) {
+		m_windows[media] = new audio_stretch::SourceWindow();
+		m_windows[media]->set_reader(reader);
+	}
+	return m_windows[media];
+}
+
 bool AudioTimeline::has_sound() {
 	for (size_t i = 0; i < m_segments.size(); i++) {
 		if (reader_for(m_segments[i].media) != nullptr)
@@ -86,7 +103,22 @@ void AudioTimeline::render(float* out, int frames) {
 
 		int got = 0;
 		AudioFileReader* reader = reader_for(segment.media);
-		if (reader != nullptr) {
+		if (segment.speed != 1.0 && segment.mode == AUDIO_MUTE) {
+			got = 0;       // Silence (below).
+		} else if (segment.speed != 1.0 && reader != nullptr) {
+			// Played at another speed: the sound is made from the file's, not simply read from it.
+			audio_stretch::SourceWindow* window = window_for(segment.media);
+			if (segment.mode == AUDIO_CHANGE_PITCH) {
+				audio_stretch::resample(window, segment.source_start, segment.speed, offset, (int)count, destination);
+			} else {
+				if (m_keeper_segment != index || m_keeper.next_output() != offset) {
+					m_keeper.start(window, segment.source_start, segment.speed, offset);
+					m_keeper_segment = index;
+				}
+				m_keeper.render(destination, (int)count);
+			}
+			got = (int)count;
+		} else if (reader != nullptr) {
 			const int64_t source = segment.source_start + offset;
 			// Carries straight on from the last thing read when the edit does (a split, or the next block of the same clip).
 			if (reader->position() != source)

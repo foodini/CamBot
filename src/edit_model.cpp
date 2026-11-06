@@ -6,22 +6,44 @@
 // EditList
 // ---------------------------------------------------------------------------------------------
 
-EditList::EditList() : m_total(0) {
+int64_t footage_to_timeline(int64_t footage_ticks, double speed) {
+	if (speed == 1.0)
+		return footage_ticks;
+	return (int64_t)llround((double)footage_ticks / speed);
+}
+
+int64_t timeline_to_footage(int64_t timeline_ticks, double speed) {
+	if (speed == 1.0)
+		return timeline_ticks;
+	return (int64_t)llround((double)timeline_ticks * speed);
+}
+
+EditList::EditList() : m_total(0), m_footage_total(0), m_speed_changes(false) {
 }
 
 void EditList::clear() {
 	m_clips.clear();
 	m_starts.clear();
 	m_total = 0;
+	m_footage_starts.clear();
+	m_footage_total = 0;
+	m_speed_changes = false;
 }
 
 void EditList::set(const std::vector<Clip>& clips) {
 	m_clips = clips;
 	m_starts.clear();
 	m_total = 0;
+	m_footage_starts.clear();
+	m_footage_total = 0;
+	m_speed_changes = false;
 	for (size_t i = 0; i < m_clips.size(); i++) {
 		m_starts.push_back(m_total);
-		m_total += m_clips[i].duration_ticks();
+		m_total += m_clips[i].timeline_ticks();
+		m_footage_starts.push_back(m_footage_total);
+		m_footage_total += m_clips[i].duration_ticks();
+		if (m_clips[i].speed != 1.0)
+			m_speed_changes = true;
 	}
 }
 
@@ -49,17 +71,87 @@ FileTime EditList::source_for(int64_t timeline_ticks) const {
 		timeline_ticks = 0;
 	if (timeline_ticks > m_total)
 		timeline_ticks = m_total;
-	return FileTime(m_clips[index].media, m_clips[index].in_ticks + (timeline_ticks - m_starts[index]));
+	const Clip& clip = m_clips[index];
+	int64_t local = clip.in_ticks + timeline_to_footage(timeline_ticks - m_starts[index], clip.speed);
+	// Rounding at a clip's very end must not name a moment past it.
+	if (local > clip.out_ticks)
+		local = clip.out_ticks;
+	return FileTime(clip.media, local);
 }
 
 int64_t EditList::timeline_for(int index, int64_t local_ticks) const {
-	int64_t time = m_starts[index] + (local_ticks - m_clips[index].in_ticks);
+	const Clip& clip = m_clips[index];
+	int64_t time = m_starts[index] + footage_to_timeline(local_ticks - clip.in_ticks, clip.speed);
 	if (time < m_starts[index])
 		time = m_starts[index];
-	int64_t end = m_starts[index] + m_clips[index].duration_ticks();
+	int64_t end = m_starts[index] + clip.timeline_ticks();
 	if (time > end)
 		time = end;
 	return time;
+}
+
+int EditList::clip_index_for_footage(int64_t footage_ticks) const {
+	if (m_clips.empty())
+		return -1;
+	int low = 0;
+	int high = (int)m_clips.size() - 1;
+	while (low < high) {
+		int middle = low + (high - low + 1) / 2;
+		if (m_footage_starts[middle] <= footage_ticks)
+			low = middle;
+		else
+			high = middle - 1;
+	}
+	return low;
+}
+
+FileTime EditList::source_for_footage(int64_t footage_ticks) const {
+	int index = clip_index_for_footage(footage_ticks);
+	if (index < 0)
+		return FileTime();
+	if (footage_ticks < 0)
+		footage_ticks = 0;
+	if (footage_ticks > m_footage_total)
+		footage_ticks = m_footage_total;
+	return FileTime(m_clips[index].media, m_clips[index].in_ticks + (footage_ticks - m_footage_starts[index]));
+}
+
+int64_t EditList::footage_for(int index, int64_t local_ticks) const {
+	int64_t time = m_footage_starts[index] + (local_ticks - m_clips[index].in_ticks);
+	if (time < m_footage_starts[index])
+		time = m_footage_starts[index];
+	int64_t end = m_footage_starts[index] + m_clips[index].duration_ticks();
+	if (time > end)
+		time = end;
+	return time;
+}
+
+int64_t EditList::footage_for_timeline(int64_t timeline_ticks) const {
+	int index = clip_index_for(timeline_ticks);
+	if (index < 0)
+		return 0;
+	if (timeline_ticks < 0)
+		timeline_ticks = 0;
+	if (timeline_ticks > m_total)
+		timeline_ticks = m_total;
+	const Clip& clip = m_clips[index];
+	int64_t footage = m_footage_starts[index] + timeline_to_footage(timeline_ticks - m_starts[index], clip.speed);
+	const int64_t end = m_footage_starts[index] + clip.duration_ticks();
+	return footage > end ? end : footage;
+}
+
+int64_t EditList::timeline_for_footage(int64_t footage_ticks) const {
+	int index = clip_index_for_footage(footage_ticks);
+	if (index < 0)
+		return 0;
+	if (footage_ticks < 0)
+		footage_ticks = 0;
+	if (footage_ticks > m_footage_total)
+		footage_ticks = m_footage_total;
+	const Clip& clip = m_clips[index];
+	int64_t time = m_starts[index] + footage_to_timeline(footage_ticks - m_footage_starts[index], clip.speed);
+	const int64_t end = m_starts[index] + clip.timeline_ticks();
+	return time > end ? end : time;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -206,6 +298,8 @@ bool EditModel::set_clips(const std::vector<Clip>& clips) {
 		if (clip.media < 0 || clip.media >= media_count())
 			return false;
 		if (clip.in_ticks < 0 || clip.out_ticks <= clip.in_ticks || clip.out_ticks > m_durations[clip.media])
+			return false;
+		if (!(clip.speed >= MIN_SPEED && clip.speed <= MAX_SPEED) || clip.audio_mode < AUDIO_KEEP_PITCH || clip.audio_mode > AUDIO_MUTE)
 			return false;
 	}
 	m_edit_list.set(clips);

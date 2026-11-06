@@ -33,6 +33,10 @@ bool TimelineEditor::can_remove(const EditModel& model, const MediaContainerMgr&
 	return timeline_edit::can_remove(model.edit_list(), media.current_ticks(), media.frame_ticks());
 }
 
+bool TimelineEditor::can_set_speed(const EditModel& model, const MediaContainerMgr& media, double speed, int audio_mode) const {
+	return !media.recording() && timeline_edit::can_set_speed(model.edit_list(), media.current_ticks(), speed, audio_mode);
+}
+
 bool TimelineEditor::can_undo(const MediaContainerMgr& media) const {
 	return (m_history.can_undo() || m_box_edit_pending) && !media.recording();
 }
@@ -97,6 +101,25 @@ bool TimelineEditor::move_clip(EditModel* model, MediaContainerMgr* media, int f
 		return false;
 	commit_box_edit(*model, *media);
 	const timeline_edit::Result result = timeline_edit::move_clip(model->edit_list(), from, to, media->current_ticks());
+	if (!result.ok)
+		return false;
+	EditState before = current_state(*model, *media);
+	EditState after = before;
+	after.clips = result.clips;
+	after.edit_started = true;
+	after.playhead_ticks = result.playhead_ticks;
+	EnvConfig::instance->pause();
+	if (!apply_state(after, model, media))
+		return false;
+	m_history.record(before);
+	return true;
+}
+
+bool TimelineEditor::set_clip_speed(EditModel* model, MediaContainerMgr* media, double speed, int audio_mode) {
+	if (media->recording())
+		return false;
+	commit_box_edit(*model, *media);
+	const timeline_edit::Result result = timeline_edit::set_speed(model->edit_list(), media->current_ticks(), speed, audio_mode, media->frame_ticks());
 	if (!result.ok)
 		return false;
 	EditState before = current_state(*model, *media);

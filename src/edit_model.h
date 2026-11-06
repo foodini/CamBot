@@ -27,22 +27,52 @@
 #include "file_time.h"
 #include "text_box.h"
 
+// What a clip does with its sound when it is not played at normal speed.
+enum AudioMode {
+	AUDIO_KEEP_PITCH = 0,     // Stretched or squeezed in time, the pitch left alone.
+	AUDIO_CHANGE_PITCH = 1,   // Played faster or slower like a tape: the pitch goes up and down with the speed.
+	AUDIO_MUTE = 2            // Silent.
+};
+
+// How fast a clip can be played: from a tenth of normal speed to sixteen times it.
+const double MIN_SPEED = 0.1;
+const double MAX_SPEED = 16.0;
+
+// Footage ticks to timeline ticks for a clip played at `speed` (and back), to the nearest tick. At normal speed they are the
+// same, exactly.
+int64_t footage_to_timeline(int64_t footage_ticks, double speed);
+int64_t timeline_to_footage(int64_t timeline_ticks, double speed);
+
 // A piece of one media file: from in_ticks up to (not including) out_ticks, counted from the
-// start of the file.
+// start of the file. It plays at `speed` times normal speed, so it lasts 1/speed as long on the timeline as it does in the
+// file: in_ticks and out_ticks are always the file's own time.
 struct Clip {
 	int     media;
 	int64_t in_ticks;
 	int64_t out_ticks;
-	Clip() : media(0), in_ticks(0), out_ticks(0) {}
-	Clip(int media_index, int64_t in, int64_t out) : media(media_index), in_ticks(in), out_ticks(out) {}
+	double  speed;         // MIN_SPEED to MAX_SPEED; 1 is normal.
+	int     audio_mode;    // An AudioMode; only matters when the speed isn't 1.
+	Clip() : media(0), in_ticks(0), out_ticks(0), speed(1.0), audio_mode(AUDIO_KEEP_PITCH) {}
+	Clip(int media_index, int64_t in, int64_t out) : media(media_index), in_ticks(in), out_ticks(out), speed(1.0), audio_mode(AUDIO_KEEP_PITCH) {}
+	Clip(int media_index, int64_t in, int64_t out, double clip_speed, int mode)
+		: media(media_index), in_ticks(in), out_ticks(out), speed(clip_speed), audio_mode(mode) {}
+	// How much of the file the clip uses ("footage"), whatever the speed.
 	int64_t duration_ticks() const { return out_ticks - in_ticks; }
+	// How long the clip lasts on the timeline.
+	int64_t timeline_ticks() const { return footage_to_timeline(out_ticks - in_ticks, speed); }
 	bool operator==(const Clip& other) const {
-		return media == other.media && in_ticks == other.in_ticks && out_ticks == other.out_ticks;
+		return media == other.media && in_ticks == other.in_ticks && out_ticks == other.out_ticks && speed == other.speed &&
+			audio_mode == other.audio_mode;
 	}
 	bool operator!=(const Clip& other) const { return !(*this == other); }
 };
 
 // The edit timeline: clips played back to back. Clip i starts where clip i-1 ends.
+//
+// A clip that isn't played at normal speed lasts more or less time on the timeline than the footage it uses. So there are two
+// ways to count along the edit: timeline ticks, which is what the user sees and everything else here uses, and footage ticks,
+// which are what you get if every clip is laid down at normal speed (the video decoder works in those, as it reads each file
+// straight through). The two are the same for an edit with no speed changes.
 class EditList {
 public:
 	EditList();
@@ -65,10 +95,25 @@ public:
 	// The timeline time of a moment in clip `index`'s media, kept inside that clip.
 	int64_t                  timeline_for(int index, int64_t local_ticks) const;
 
+	// ---- Footage ticks (every clip at normal speed) ----
+	bool                     has_speed_changes() const { return m_speed_changes; }
+	int64_t                  footage_start(int index) const { return m_footage_starts[index]; }
+	int64_t                  footage_total() const { return m_footage_total; }
+	int                      clip_index_for_footage(int64_t footage_ticks) const;
+	FileTime                 source_for_footage(int64_t footage_ticks) const;
+	// The footage time of clip `index`'s moment `local_ticks` of its media, kept inside the clip.
+	int64_t                  footage_for(int index, int64_t local_ticks) const;
+	// Timeline time to footage time and back (both kept inside the edit).
+	int64_t                  footage_for_timeline(int64_t timeline_ticks) const;
+	int64_t                  timeline_for_footage(int64_t footage_ticks) const;
+
 private:
 	std::vector<Clip>    m_clips;
 	std::vector<int64_t> m_starts;
 	int64_t              m_total;
+	std::vector<int64_t> m_footage_starts;
+	int64_t              m_footage_total;
+	bool                 m_speed_changes;
 };
 
 // The flight clock: the media files in the order they were recorded, end to end.

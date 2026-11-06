@@ -284,7 +284,7 @@ bool MediaDecoder::open(const std::vector<std::string>& paths, std::string* erro
 
 	// Starting over, in case this object was used before.
 	close_file();
-	m_clips.clear();
+	clear_clips();
 	m_media_durations.clear();
 	m_cur_clip = 0;
 	m_cache.clear();
@@ -311,7 +311,7 @@ bool MediaDecoder::open(const std::vector<std::string>& paths, std::string* erro
 	for (int i = 0; i < (int)m_paths.size(); i++) {
 		if (!open_file(i, error) || !read_file_properties(i, error)) {
 			close_file();
-			m_clips.clear();
+			clear_clips();
 			m_media_durations.clear();
 			return false;
 		}
@@ -321,12 +321,12 @@ bool MediaDecoder::open(const std::vector<std::string>& paths, std::string* erro
 		std::vector<Clip> whole_files;
 		for (int i = 0; i < (int)m_paths.size(); i++)
 			whole_files.push_back(Clip(i, 0, m_media_durations[i]));
-		m_clips.set(whole_files);
+		set_clip_lists(whole_files);
 	}
 
 	// Second pass: start at the beginning of the first.
 	if (!open_file(0, error)) {
-		m_clips.clear();
+		clear_clips();
 		m_media_durations.clear();
 		return false;
 	}
@@ -337,7 +337,7 @@ bool MediaDecoder::open(const std::vector<std::string>& paths, std::string* erro
 	if (!m_packet || !m_decoded || !m_frame) {
 		*error = "Out of memory while opening the video.";
 		close_file();
-		m_clips.clear();
+		clear_clips();
 		m_media_durations.clear();
 		av_packet_free(&m_packet);
 		av_frame_free(&m_decoded);
@@ -350,7 +350,7 @@ bool MediaDecoder::open(const std::vector<std::string>& paths, std::string* erro
 	if (av_frame_get_buffer(m_frame, 32) < 0) {
 		*error = "Out of memory while opening the video.";
 		close_file();
-		m_clips.clear();
+		clear_clips();
 		m_media_durations.clear();
 		av_packet_free(&m_packet);
 		av_frame_free(&m_decoded);
@@ -361,7 +361,7 @@ bool MediaDecoder::open(const std::vector<std::string>& paths, std::string* erro
 	if (!decode_next()) {
 		*error = m_last_error.empty() ? std::string("Could not decode any video from the first file.") : m_last_error;
 		close_file();
-		m_clips.clear();
+		clear_clips();
 		m_media_durations.clear();
 		av_packet_free(&m_packet);
 		av_frame_free(&m_decoded);
@@ -385,10 +385,10 @@ bool MediaDecoder::open(const std::vector<std::string>& paths, std::string* erro
 bool MediaDecoder::next_clip(bool have_frame, int64_t frame_local_ticks, bool* keep_frame) {
 	*keep_frame = false;
 	int next = m_cur_clip + 1;
-	if (next >= m_clips.count())
+	if (next >= m_footage.count())
 		return false;
-	const Clip& target = m_clips.clip(next);
-	const Clip& old_clip = m_clips.clip(m_cur_clip);
+	const Clip& target = m_footage.clip(next);
+	const Clip& old_clip = m_footage.clip(m_cur_clip);
 	const int64_t half_frame = m_frame_ticks / 2;
 	bool same_media = target.media == m_cur_file && m_fmt != nullptr;
 	bool file_ran_out = m_draining || !have_frame;
@@ -446,17 +446,17 @@ int64_t MediaDecoder::local_ticks_of(const AVFrame* frame) const {
 	if (raw_pts != AV_NOPTS_VALUE)
 		return av_rescale_q(raw_pts - m_video_start, m_file_video_tb, m_global_tb);
 	// No timestamp at all: one frame after the last one.
-	const Clip& clip = m_clips.clip(m_cur_clip);
+	const Clip& clip = m_footage.clip(m_cur_clip);
 	if (m_decoder_pts == AV_NOPTS_VALUE)
 		return clip.in_ticks;
-	return clip.in_ticks + (m_decoder_pts - m_clips.start(m_cur_clip)) + m_frame_ticks;
+	return clip.in_ticks + (m_decoder_pts - m_footage.start(m_cur_clip)) + m_frame_ticks;
 }
 
 // Turns what the decoder just produced (m_decoded) into the current frame, at `local_ticks` into
 // its file, and works out its time on the edit timeline.
 bool MediaDecoder::store_decoded_frame(int64_t local_ticks) {
 	AVFrame* src = m_decoded;
-	int64_t pts = m_clips.timeline_for(m_cur_clip, local_ticks);
+	int64_t pts = m_footage.timeline_for(m_cur_clip, local_ticks);
 
 	bool is_420 = src->format == AV_PIX_FMT_YUV420P || src->format == AV_PIX_FMT_YUVJ420P;
 	if (is_420 && src->width == m_width && src->height == m_height) {
@@ -498,7 +498,7 @@ bool MediaDecoder::read_frame() {
 			return true;
 		// The frame after the one on screen was never cached (the cache only holds what
 		// advance_to() decoded). Decoding on would skip it, so find it the long way.
-		return advance_to(m_pts + 1);
+		return advance_to_footage(m_pts + 1);
 	}
 	return decode_next();
 }
@@ -564,7 +564,7 @@ bool MediaDecoder::decode_next() {
 		// nearest frame, so a cut that falls between two frames is half a frame either way.
 		const int64_t half_frame = m_frame_ticks / 2;
 		int64_t local = local_ticks_of(m_decoded);
-		const Clip& clip = m_clips.clip(m_cur_clip);
+		const Clip& clip = m_footage.clip(m_cur_clip);
 		if (local < clip.in_ticks - half_frame) {
 			av_frame_unref(m_decoded);       // Before the clip: only decoded to get here.
 			have_decoded = false;
@@ -597,13 +597,13 @@ bool MediaDecoder::decode_next() {
 bool MediaDecoder::seek_to(int64_t ticks) {
 	if (ticks < 0)
 		ticks = 0;
-	if (ticks >= total_ticks())
-		ticks = total_ticks() - 1;
+	if (ticks >= m_footage.total_ticks())
+		ticks = m_footage.total_ticks() - 1;
 	if (ticks < 0)
 		ticks = 0;
 
-	FileTime source = m_clips.source_for(ticks);
-	m_cur_clip = m_clips.clip_index_for(ticks);
+	FileTime source = m_footage.source_for(ticks);
+	m_cur_clip = m_footage.clip_index_for(ticks);
 	if (!position_media(source.media, source.local_ticks))
 		return false;
 	m_decoder_pts = AV_NOPTS_VALUE;
@@ -668,13 +668,13 @@ void MediaDecoder::cache_add_current(int64_t previous_decoder_pts, bool starts_n
 	m_cache_bytes += frame_bytes;
 }
 
-bool MediaDecoder::advance_to(int64_t ticks) {
+bool MediaDecoder::advance_to_footage(int64_t ticks) {
 	if (!is_open())
 		return false;
 	if (ticks < 0)
 		ticks = 0;
-	if (ticks > total_ticks())
-		ticks = total_ticks();
+	if (ticks > m_footage.total_ticks())
+		ticks = m_footage.total_ticks();
 
 	// A GOP we've already decoded through can answer for free: no seek and no decoding.
 	if (serve_from_cache(ticks))
@@ -708,9 +708,87 @@ bool MediaDecoder::advance_to(int64_t ticks) {
 	if (!got_frame && coast && m_decoder_pts != AV_NOPTS_VALUE && m_pts != m_decoder_pts) {
 		// Ran into the end of the media while the picture on screen was an older one (it had come
 		// from the cache): show the last frame there is.
-		return advance_to(m_decoder_pts);
+		return advance_to_footage(m_decoder_pts);
 	}
 	return got_frame || coast;
+}
+
+void MediaDecoder::clear_clips() {
+	m_edit.clear();
+	m_footage.clear();
+}
+
+void MediaDecoder::set_clip_lists(const std::vector<Clip>& clips) {
+	m_edit.set(clips);
+	// The same clips with the speed taken out: the decoder reads each file straight through, one frame after another, so it
+	// keeps its own idea of time (footage ticks) and the public functions below turn it into the edit's.
+	std::vector<Clip> at_normal_speed = clips;
+	for (size_t i = 0; i < at_normal_speed.size(); i++) {
+		at_normal_speed[i].speed = 1.0;
+		at_normal_speed[i].audio_mode = AUDIO_KEEP_PITCH;
+	}
+	m_footage.set(at_normal_speed);
+}
+
+// A timeline time as a footage time to ask for "the first frame at or after". Where a clip's speed is not 1 the conversion
+// rounds, and a frame's own time turned into the timeline and back can land a few ticks later than it started, which would skip
+// that frame; so ask for a little earlier.
+int64_t MediaDecoder::footage_request(int64_t timeline_ticks) const {
+	int64_t footage = m_edit.footage_for_timeline(timeline_ticks);
+	if (!m_edit.has_speed_changes()) 
+		return footage;
+	const int index = m_edit.clip_index_for(timeline_ticks);
+	if (index >= 0 && m_edit.clip(index).speed != 1.0) {
+		footage -= (int64_t)ceil(m_edit.clip(index).speed) + 1;
+		if (footage < 0)
+			footage = 0;
+	}
+	return footage;
+}
+
+bool MediaDecoder::advance_to(int64_t ticks) {
+	if (!is_open())
+		return false;
+	if (ticks < 0)
+		ticks = 0;
+	if (ticks > m_edit.total_ticks())
+		ticks = m_edit.total_ticks();
+	// Where a clip is slowed down a frame lasts for several frames' worth of the timeline, and a time part way through one is
+	// that frame's, not the next one's. (A tick of leeway, as turning a frame's own time into footage time and back can come
+	// out a tick short.)
+	const int index = m_edit.clip_index_for(ticks);
+	if (index >= 0 && m_edit.clip(index).speed < 1.0)
+		return show_footage(m_edit.footage_for_timeline(ticks) + 1);
+	return advance_to_footage(footage_request(ticks));
+}
+
+bool MediaDecoder::seek_keyframe(int64_t ticks) {
+	if (!is_open())
+		return false;
+	if (ticks < 0)
+		ticks = 0;
+	if (ticks > m_edit.total_ticks())
+		ticks = m_edit.total_ticks();
+	return seek_keyframe_footage(footage_request(ticks));
+}
+
+bool MediaDecoder::show_at(int64_t ticks) {
+	if (!is_open())
+		return false;
+	if (ticks < 0)
+		ticks = 0;
+	if (ticks > m_edit.total_ticks())
+		ticks = m_edit.total_ticks();
+	return show_footage(m_edit.footage_for_timeline(ticks));
+}
+
+// The frame to show is the last one that starts at or before the time. In footage time frames come one every m_frame_ticks
+// whatever the speeds, so that is the first at or after "one frame ago, plus a tick". The picture already on screen is
+// the answer, often (a slowed-down clip shows each frame for several times it is asked), and costs nothing.
+bool MediaDecoder::show_footage(int64_t footage) {
+	if (m_pts > footage - m_frame_ticks && m_pts <= footage)
+		return true;
+	return advance_to_footage(footage - m_frame_ticks + 1);
 }
 
 bool MediaDecoder::set_clips(const std::vector<Clip>& clips, int64_t show_ticks) {
@@ -722,8 +800,10 @@ bool MediaDecoder::set_clips(const std::vector<Clip>& clips, int64_t show_ticks)
 			return false;
 		if (clip.in_ticks < 0 || clip.out_ticks <= clip.in_ticks || clip.out_ticks > m_media_durations[clip.media])
 			return false;
+		if (!(clip.speed >= MIN_SPEED && clip.speed <= MAX_SPEED))
+			return false;
 	}
-	m_clips.set(clips);
+	set_clip_lists(clips);
 	// Nothing decoded so far means anything in the new arrangement: forget it all, and force the
 	// next move to seek.
 	m_cache.clear();
@@ -738,7 +818,7 @@ bool MediaDecoder::step_frames(int64_t count) {
 	// ticks: "first frame at or after (wanted - half a frame)" is the wanted frame.
 	int64_t start_pts = m_pts;
 	int64_t wanted = start_pts + count * m_frame_ticks;
-	bool moved = advance_to(wanted - m_frame_ticks / 2);
+	bool moved = advance_to_footage(wanted - m_frame_ticks / 2);
 	if (count < 0 && m_pts >= start_pts) {
 		// Asking for "the first frame at or after" a time before this one found this one again.
 		// That happens at a join when the earlier file's last frame ends well short of where
@@ -755,7 +835,7 @@ bool MediaDecoder::step_frames(int64_t count) {
 	return moved;
 }
 
-bool MediaDecoder::seek_keyframe(int64_t ticks) {
+bool MediaDecoder::seek_keyframe_footage(int64_t ticks) {
 	if (!is_open())
 		return false;
 	if (!seek_to(ticks))
@@ -779,22 +859,22 @@ bool MediaDecoder::seek_by_frames_fast(int64_t count) {
 		// "keyframe at or before" would land behind us, a step backward dressed up as a seek.
 		// Checked via the file's index (read-only); a speculative seek we then had to undo would
 		// cost the very GOP-decode burst this function exists to avoid.
-		int target_clip = m_clips.clip_index_for(target);
-		int now_clip = m_clips.clip_index_for(m_pts);
-		if (target_clip == now_clip && m_clips.clip(now_clip).media == m_cur_file && m_fmt != nullptr) {
+		int target_clip = m_footage.clip_index_for(target);
+		int now_clip = m_footage.clip_index_for(m_pts);
+		if (target_clip == now_clip && m_footage.clip(now_clip).media == m_cur_file && m_fmt != nullptr) {
 			AVStream* stream = m_fmt->streams[m_video_index];
-			FileTime target_source = m_clips.source_for(target);
-			FileTime now_source = m_clips.source_for(m_pts);
+			FileTime target_source = m_footage.source_for(target);
+			FileTime now_source = m_footage.source_for(m_pts);
 			int64_t file_target = av_rescale_q(target_source.local_ticks, m_global_tb, m_file_video_tb) + m_video_start;
 			int64_t file_now = av_rescale_q(now_source.local_ticks, m_global_tb, m_file_video_tb) + m_video_start;
 			const AVIndexEntry* entry = avformat_index_get_entry_from_timestamp(stream, file_target, AVSEEK_FLAG_BACKWARD);
 			if (entry != nullptr && entry->timestamp > file_now)
-				return seek_keyframe(target);
+				return seek_keyframe_footage(target);
 			return step_frames(count);  // Still inside this GOP: decode forward for real.
 		}
-		return seek_keyframe(target);  // A clip boundary is in the way, and the next clip starts where it is cut.
+		return seek_keyframe_footage(target);  // A clip boundary is in the way, and the next clip starts where it is cut.
 	}
-	return seek_keyframe(target);
+	return seek_keyframe_footage(target);
 }
 
 void MediaDecoder::release_cache() {

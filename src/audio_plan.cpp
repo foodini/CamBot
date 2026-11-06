@@ -26,7 +26,15 @@ void plan(const EditList& clips, double seconds_per_tick, std::vector<Segment>* 
 		                                    : ticks_to_samples(clips.total_ticks(), seconds_per_tick);
 		segment.length = end - segment.timeline_start;
 		segment.source_start = ticks_to_samples(clip.in_ticks, seconds_per_tick);
-		const bool continues_previous = i > 0 && clips.clip(i - 1).media == clip.media && clips.clip(i - 1).out_ticks == clip.in_ticks;
+		segment.speed = clip.speed;
+		segment.mode = clip.audio_mode;
+		bool continues_previous = i > 0 && clips.clip(i - 1).media == clip.media && clips.clip(i - 1).out_ticks == clip.in_ticks;
+		if (continues_previous) {
+			const Clip& before = clips.clip(i - 1);
+			const bool same_treatment = before.speed == clip.speed && (clip.speed == 1.0 || before.audio_mode == clip.audio_mode);
+			const bool stretched_afresh = clip.speed != 1.0 && clip.audio_mode == AUDIO_KEEP_PITCH;
+			continues_previous = same_treatment && !stretched_afresh;
+		}
 		segment.fade_in = !continues_previous;
 		segments->push_back(segment);
 		if (i > 0)

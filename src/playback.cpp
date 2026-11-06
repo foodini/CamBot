@@ -69,11 +69,9 @@ bool Playback::update(bool paused) {
 		stop();
 		return false;
 	}
-	// The newest frame that is not after the clock: when a whole frame has gone by, go to the frame at or after one frame ago.
-	const int64_t frame = m_media->frame_ticks();
-	if (target >= shown + frame) {
-		m_media->advance_to(target - frame + 1);
-		m_last_shown = m_media->current_ticks();
-	}
+	// The newest frame that is not after the clock. (Where a clip is slowed down the same frame stays up for several times its
+	// length, and where it is sped up several go by in the time of one; show_at() knows, and does nothing when the picture is right.)
+	m_media->show_at(target);
+	m_last_shown = m_media->current_ticks();
 	return true;
 }

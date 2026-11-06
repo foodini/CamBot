@@ -25,6 +25,8 @@ public:
 	bool can_trim_left(const EditModel& model, const MediaContainerMgr& media) const;
 	bool can_trim_right(const EditModel& model, const MediaContainerMgr& media) const;
 	bool can_remove(const EditModel& model, const MediaContainerMgr& media) const;
+	// Whether the clip under the playhead could be given this speed and treatment of its sound (see timeline_edit::set_speed).
+	bool can_set_speed(const EditModel& model, const MediaContainerMgr& media, double speed, int audio_mode) const;
 	bool can_undo(const MediaContainerMgr& media) const;
 	bool can_redo(const MediaContainerMgr& media) const;
 
@@ -36,6 +38,9 @@ public:
 	// Moves clip `from` so that it is clip `to` afterwards (see timeline_edit::move_clip); the picture
 	// on screen stays the same. Undoable like the cuts.
 	bool move_clip(EditModel* model, MediaContainerMgr* media, int from, int to);
+	// Plays the clip under the playhead at `speed` (an AudioMode says what happens to its sound), as one undoable step. The picture
+	// on screen stays the same frame.
+	bool set_clip_speed(EditModel* model, MediaContainerMgr* media, double speed, int audio_mode);
 	bool undo(EditModel* model, MediaContainerMgr* media);
 	bool redo(EditModel* model, MediaContainerMgr* media);
 
