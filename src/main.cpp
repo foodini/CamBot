@@ -36,6 +36,8 @@
 #include "sync_view.h"
 #include "text_box.h"
 #include "speed_panel.h"
+#include "timeline_selection.h"
+#include "transition_panel.h"
 #include "text_panel.h"
 #include "text_renderer.h"
 #include "thumbnail_store.h"
@@ -578,9 +580,10 @@ static void draw_altitude_window(bool* open, bool* resync, bool exporting) {
 // the buttons to change that. Returns true when the "Load Telemetry..." button was clicked; the
 // caller does the loading, as it means restarting. `open_sync_view` is set when the "Sync / Reorder..."
 // button was clicked. `can_change` is false while an export runs, as that needs everything left as it is.
-// Below Source Material are the Speed section (see speed_panel.h) and the Text section (see text_panel.h).
+// Below Source Material are the Speed section (see speed_panel.h), the Transition section (see transition_panel.h) and the Text
+// section (see text_panel.h).
 static bool draw_left_panel(const LayoutRect& rect, const EditModel& edit_model,
-    const ProjectFileManager& project_file_mgr, SpeedPanel* speed_panel, TextPanel* text_panel, bool can_change, bool* open_sync_view) {
+    const ProjectFileManager& project_file_mgr, SpeedPanel* speed_panel, TransitionPanel* transition_panel, TextPanel* text_panel, bool can_change, bool* open_sync_view) {
     bool load_telemetry = false;
     if (rect.w < 1.0f || rect.h < 1.0f)
         return false;
@@ -630,6 +633,7 @@ static bool draw_left_panel(const LayoutRect& rect, const EditModel& edit_model,
                 ImGui::SetTooltip("Line the telemetry up with the video, and put the video files in order.\nShows all of the footage; your edit comes back afterward.");
         }
         speed_panel->draw(can_change);
+        transition_panel->draw(can_change);
         text_panel->draw(can_change);
     }
     ImGui::End();
@@ -936,6 +940,9 @@ int main()
     TextRenderer text_renderer;
     TextPanel text_panel(&edit_model, &media_container_mgr, &timeline_editor, &env_config);
     SpeedPanel speed_panel(&edit_model, &media_container_mgr, &timeline_editor);
+    // What is picked on the timeline (a clip, or a transition's icon), and the section of the left panel for the transition.
+    TimelineSelection timeline_selection;
+    TransitionPanel transition_panel(&edit_model, &timeline_selection);
     TileLayer tile_layer;
     SyncView sync_view(&tile_layer);
     // The pictures of the video along the timelines, got from the files on a thread of their own.
@@ -1010,13 +1017,13 @@ int main()
     // layout (see the note on S below), and they stand aside while a text box has the keyboard.
     // Ctrl+S saves the project, and S by itself splits the clip at the playhead.
     interaction_mgr->bind_char('s', GLFW_KEY_S,
-        [window, &env_config, &timeline_editor, &edit_model, &media_container_mgr, &sync_view]() {
+        [window, &env_config, &timeline_editor, &edit_model, &media_container_mgr, &sync_view, &timeline_selection]() {
             if (ImGui::GetIO().WantTextInput)
                 return;
             if (ctrl_is_down(window))
                 env_config.save_project();
             else if (!sync_view.active())
-                timeline_editor.split(&edit_model, &media_container_mgr);
+                timeline_editor.split(&edit_model, &media_container_mgr, &timeline_selection);
         },
         nullptr,
         nullptr);
@@ -1424,13 +1431,13 @@ int main()
                 if (outcome == SyncView::CANCEL || (outcome == SyncView::DONE && sync_view.confirm_done(edit_model)))
                     sync_view.leave(outcome == SyncView::DONE, &edit_model, &media_container_mgr);
             } else {
-                if (draw_left_panel(layout.left_panel, edit_model, project_file_mgr, &speed_panel, &text_panel, !media_container_mgr.recording(), &open_sync_view_requested))
+                if (draw_left_panel(layout.left_panel, edit_model, project_file_mgr, &speed_panel, &transition_panel, &text_panel, !media_container_mgr.recording(), &open_sync_view_requested))
                     load_telemetry_requested = true;
                 draw_panel_splitter(layout.panel_splitter, layout.widest_panel, &panel_width);
                 draw_splitter(layout.splitter, &timeline_height);
                 ReorderRequest reorder;
                 int selected_text = text_panel.selected_id();
-                timeline_view.draw(layout.timeline, edit_model, media_container_mgr, &timeline_editor, &reorder, &selected_text);
+                timeline_view.draw(layout.timeline, edit_model, media_container_mgr, &timeline_editor, &reorder, &selected_text, &timeline_selection);
                 text_panel.select(selected_text);
                 const float taller_timeline = timeline_view.take_height_request();   // A new row of text boxes needs room.
                 if (taller_timeline > timeline_height)

@@ -47,6 +47,8 @@ for test in *_test.cpp; do
     if [ "$name" = "audio_timeline_test" ]; then extra="fake_audio_file_reader.cpp ../src/audio_timeline.cpp ../src/audio_stretch.cpp ../src/audio_plan.cpp ../src/edit_model.cpp ../src/text_box.cpp"; fi
     if [ "$name" = "text_lanes_test" ]; then extra="../src/text_lanes.cpp"; fi
     if [ "$name" = "text_fonts_test" ]; then extra="../src/text_fonts.cpp"; fi
+    if [ "$name" = "timeline_selection_test" ]; then extra="../src/timeline_selection.cpp ../src/edit_model.cpp ../src/text_box.cpp"; fi
+    if [ "$name" = "seam_icon_test" ]; then extra="../src/seam_icon.cpp"; fi
     if [ "$name" = "thumbnail_layout_test" ]; then extra="../src/thumbnail_layout.cpp"; fi
     if [ "$name" = "timeline_scale_test" ]; then extra="../src/timeline_scale.cpp ../src/scan_gesture.cpp"; fi
     # The decoder test runs the real MediaDecoder against a fake FFmpeg (fake_ffmpeg.cpp) that

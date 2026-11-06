@@ -91,7 +91,16 @@ bool TimelineEditor::edit(Operation operation, EditModel* model, MediaContainerM
 	return true;
 }
 
-bool TimelineEditor::split(EditModel* model, MediaContainerMgr* media)       { return edit(SPLIT, model, media); }
+bool TimelineEditor::split(EditModel* model, MediaContainerMgr* media, TimelineSelection* selection) {
+	const int index = timeline_edit::current_clip(model->edit_list(), media->current_ticks());
+	if (!edit(SPLIT, model, media))
+		return false;
+	if (selection != nullptr && index >= 0) {
+		selection->adopt_clips(model->edit_list());
+		selection->select_transition(index + 1);       // The join between the two pieces.
+	}
+	return true;
+}
 bool TimelineEditor::trim_left(EditModel* model, MediaContainerMgr* media)   { return edit(TRIM_LEFT, model, media); }
 bool TimelineEditor::trim_right(EditModel* model, MediaContainerMgr* media)  { return edit(TRIM_RIGHT, model, media); }
 bool TimelineEditor::remove_clip(EditModel* model, MediaContainerMgr* media) { return edit(REMOVE, model, media); }

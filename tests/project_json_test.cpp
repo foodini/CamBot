@@ -91,6 +91,97 @@ static void test_through_the_model() {
 	CHECK(other.edit_list().clip(2).speed == 2.0 && other.edit_list().clip(2).audio_mode == AUDIO_CHANGE_PITCH);
 }
 
+// A whole project, with something of everything in it, through the model, the text of the file, and back: nothing is lost,
+// reordered or rounded on the way, and writing it a second time gives the same text.
+static ProjectData full_project() {
+	ProjectData project;
+	project.video_files.push_back("first.mp4");
+	project.video_files.push_back("second.mp4");
+	project.video_files.push_back("third.mp4");
+	project.time_base_num = 1;
+	project.time_base_den = 25000;
+	project.capture_order.push_back(2);     // Recorded in a different order from the one they were added in.
+	project.capture_order.push_back(0);
+	project.capture_order.push_back(1);
+	project.clips.push_back(Clip(1, 10000, 90000));
+	project.clips.push_back(Clip(0, 5000, 65000, 0.5, AUDIO_KEEP_PITCH));
+	project.clips.push_back(Clip(2, 0, 50000, 2.0, AUDIO_CHANGE_PITCH));
+	project.clips.push_back(Clip(0, 100000, 150000, 0.25, AUDIO_MUTE));
+	project.clips.push_back(Clip(1, 90000, 120000));
+	project.edit_started = true;
+	project.sync_anchors.push_back(SyncAnchor(FileTime(0, 20000), 1755.5f));
+	project.sync_anchors.push_back(SyncAnchor(FileTime(1, 60000), 1801.25f));
+	project.launch_mark = FileTime(1, 12345);
+	TextBox first = text_box::default_box();
+	first.id = 3;
+	first.anchor = FileTime(1, 20000);
+	first.fade_in_ticks = 12500;
+	first.dwell_ticks = 75000;
+	first.fade_out_ticks = 25000;
+	first.text = "Fort Funston\nsecond line";
+	first.style.bold = true;
+	first.style.align = TEXT_ALIGN_RIGHT;
+	TextBox second = text_box::default_box();
+	second.id = 9;
+	second.anchor = FileTime(0, 30000);
+	second.text = "Short";
+	project.text_boxes.push_back(first);
+	project.text_boxes.push_back(second);
+	project.telemetry_file = "D:\\flights\\2026.09.27 Fort Funston.LOG";
+	project.window_start_elapsed_s = 12.5f;
+	project.rotation_rad = 3.14159274f;
+	project.altitude_refs.start_ft = 12.5f;
+	project.altitude_refs.end_ft = 40.0f;
+	project.altitude_refs.end_same_as_start = false;
+	return project;
+}
+
+static void test_full_round_trip() {
+	std::vector<int64_t> durations;
+	durations.push_back(200000);
+	durations.push_back(150000);
+	durations.push_back(100000);
+	const ProjectData project = full_project();
+	std::string error;
+	EditModel model;
+	CHECK_MSG(project_io::apply_to_model(project, durations, 1, 25000, &model, &error), "%s", error.c_str());
+	CHECK(model.edit_list().count() == 5);
+	CHECK(model.capture().order().size() == 3 && model.capture().order()[0] == 2 && model.capture().order()[1] == 0 && model.capture().order()[2] == 1);
+	CHECK(model.anchors().size() == 2);
+	CHECK(model.text_boxes().size() == 2);
+
+	ProjectData written = project;
+	project_io::fill_from_model(model, 1, 25000, &written);
+	CHECK(written == project);
+
+	// Through the text of the file.
+	const std::string text = project_io::to_json(written);
+	ProjectData read;
+	CHECK_MSG(project_io::parse_json(text, &read, &error), "%s", error.c_str());
+	CHECK(read == project);
+	CHECK(project_io::to_json(read) == text);
+
+	// And into a fresh model, which must be the same as the first in everything that can be asked of it.
+	EditModel again;
+	CHECK_MSG(project_io::apply_to_model(read, durations, 1, 25000, &again, &error), "%s", error.c_str());
+	CHECK(again.edit_list().clips() == model.edit_list().clips());
+	CHECK(again.edit_list().total_ticks() == model.edit_list().total_ticks());
+	CHECK(again.capture().order() == model.capture().order());
+	CHECK(again.anchors() == model.anchors());
+	CHECK(again.text_boxes() == model.text_boxes());
+	CHECK(again.launch_flight_seconds() == model.launch_flight_seconds());
+	CHECK(again.edit_started() == model.edit_started());
+	const int64_t total = model.edit_list().total_ticks();
+	for (int step = 0; step <= 10; step++) {
+		const int64_t ticks = total * step / 11;
+		CHECK(again.telemetry_seconds_for_timeline(ticks) == model.telemetry_seconds_for_timeline(ticks));
+	}
+	ProjectData rewritten = read;
+	project_io::fill_from_model(again, 1, 25000, &rewritten);
+	CHECK(rewritten == project);
+	CHECK(project_io::to_json(rewritten) == text);
+}
+
 static std::string project_text(int version, const std::string& clips_json) {
 	return "{\"format\":\"cambot-project\",\"version\":" + std::to_string(version) + ",\"video_files\":[\"a.mp4\"],\"time_base\":[1,25000],\"clips\":" +
 		clips_json + "}";
@@ -128,6 +219,7 @@ static void test_older_and_bad_files() {
 int main() {
 	test_speed_round_trip();
 	test_through_the_model();
+	test_full_round_trip();
 	test_older_and_bad_files();
 	if (g_failures == 0)
 		printf("project_json_test: all ok\n");

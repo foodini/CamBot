@@ -181,6 +181,7 @@
     <ClCompile Include="audio_player.cpp" />
     <ClCompile Include="audio_plan.cpp" />
     <ClCompile Include="audio_stretch.cpp" />
+    <ClCompile Include="seam_icon.cpp" />
     <ClCompile Include="speed_panel.cpp" />
     <ClCompile Include="audio_timeline.cpp" />
     <ClCompile Include="playback.cpp" />
@@ -205,6 +206,8 @@
     <ClCompile Include="sync_view.cpp" />
     <ClCompile Include="timeline_editor.cpp" />
     <ClCompile Include="timeline_scale.cpp" />
+    <ClCompile Include="timeline_selection.cpp" />
+    <ClCompile Include="transition_panel.cpp" />
     <ClCompile Include="timeline_view.cpp" />
     <ClCompile Include="timecode.cpp" />
     <ClCompile Include="window_layout.cpp" />
@@ -274,6 +277,7 @@
     <ClInclude Include="audio_player.h" />
     <ClInclude Include="audio_plan.h" />
     <ClInclude Include="audio_stretch.h" />
+    <ClInclude Include="seam_icon.h" />
     <ClInclude Include="speed_panel.h" />
     <ClInclude Include="audio_timeline.h" />
     <ClInclude Include="playback.h" />
@@ -297,6 +301,8 @@
     <ClInclude Include="sync_view.h" />
     <ClInclude Include="timeline_editor.h" />
     <ClInclude Include="timeline_scale.h" />
+    <ClInclude Include="timeline_selection.h" />
+    <ClInclude Include="transition_panel.h" />
     <ClInclude Include="timeline_view.h" />
     <ClInclude Include="timecode.h" />
     <ClInclude Include="window_layout.h" />

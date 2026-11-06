@@ -3,6 +3,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string>
+#include <vector>
 
 #include "imgui/imgui.h"
 
@@ -10,11 +11,13 @@
 #include "file_io.h"
 #include "media_container_manager.h"
 #include "scan_gesture.h"
+#include "seam_icon.h"
 #include "thumbnail_layout.h"
 #include "thumbnail_store.h"
 #include "timeline_edit.h"
 #include "text_lanes.h"
 #include "timeline_editor.h"
+#include "timeline_selection.h"
 
 namespace {
 
@@ -53,6 +56,11 @@ const ImU32 COLOR_TEXT_SELECTED = IM_COL32(255, 255, 255, 255);
 const ImU32 COLOR_TEXT_WORDS = IM_COL32(235, 238, 250, 255);
 const ImU32 COLOR_TEXT_FADE = IM_COL32(0, 0, 0, 80);               // Darkens the stretches where the words fade in and out.
 const ImU32 COLOR_TEXT_GRAB = IM_COL32(255, 255, 255, 90);         // Shows the ends and the body that Ctrl and the mouse can take.
+const ImU32 COLOR_SEAM_FILL = IM_COL32(20, 20, 26, 190);          // The icon at a join: dark, so the pictures show through a little.
+const ImU32 COLOR_SEAM_BORDER = IM_COL32(170, 170, 185, 255);
+const ImU32 COLOR_SEAM_HOT = IM_COL32(240, 240, 248, 255);        // With the mouse on it.
+const ImU32 COLOR_SEAM_PICKED = IM_COL32(70, 215, 235, 255);      // The one being edited.
+const float SEAM_ROUNDING = 3.0f;
 const ImU32 COLOR_JOIN = IM_COL32(235, 200, 70, 255);
 const ImU32 COLOR_PLAYHEAD = IM_COL32(240, 70, 70, 255);
 const ImU32 COLOR_CURRENT_CLIP = IM_COL32(245, 245, 250, 255);   // Outlines the clip the playhead is in.
@@ -141,6 +149,34 @@ std::string line_of(const std::string& text, int line) {
 float larger(float a, float b) { return a > b ? a : b; }
 float smaller(float a, float b) { return a < b ? a : b; }
 
+// Where one transition's icon is, and which transition it is (a seam number, see timeline_selection.h).
+struct SeamBox {
+	int   seam;
+	float left;
+	float right;
+};
+
+// The stretch of the timeline a transition takes up, as times: from `*zone_start` to `*zone_end`. Every one is a plain cut for now,
+// which takes no time, so they are a single moment, the join itself (or the start or end of the video).
+void seam_zone(const EditList& clips, int seam, int64_t* zone_start, int64_t* zone_end) {
+	int64_t moment = 0;
+	if (seam >= clips.count())
+		moment = clips.total_ticks();
+	else if (seam > 0)
+		moment = clips.start(seam);
+	*zone_start = moment;
+	*zone_end = moment;
+}
+
+// Where to take the playhead to show a transition: the start of the clip after a join, the first or the last frame at the ends.
+int64_t seam_playhead(const EditList& clips, int seam, int64_t frame_ticks) {
+	if (seam >= clips.count()) {
+		const int64_t last = clips.total_ticks() - frame_ticks;
+		return last > 0 ? last : 0;
+	}
+	return seam > 0 ? clips.start(seam) : 0;
+}
+
 }  // namespace
 
 TimelineView::TimelineView(const char* window_name) :
@@ -152,7 +188,7 @@ TimelineView::TimelineView(const char* window_name) :
 }
 
 void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainerMgr& media, TimelineEditor* editor, ReorderRequest* reorder,
-		int* selected_text) {
+		int* selected_text, TimelineSelection* selection) {
 	if (rect.w < 1.0f || rect.h < 1.0f)
 		return;
 	ImGui::SetNextWindowPos(ImVec2(rect.x, rect.y));
@@ -167,6 +203,8 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 
 	const EditList& clips = model.edit_list();
 	const bool exporting = media.recording();
+	if (selection != nullptr)
+		selection->note_clips(clips);
 
 	// The row of labels and buttons above the timeline itself.
 	ImGui::AlignTextToFramePadding();
@@ -179,7 +217,7 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 	if (editor != nullptr) {
 		ImGui::SameLine(0.0f, 16.0f);
 		if (edit_button("Split", !exporting && editor->can_split(model, media), "Cut the clip in two at the playhead (S)"))
-			editor->split(&model, &media);
+			editor->split(&model, &media, selection);
 		ImGui::SameLine();
 		if (edit_button("Trim Left", !exporting && editor->can_trim_left(model, media), "Delete the clip from its start up to the playhead frame ([)"))
 			editor->trim_left(&model, &media);
@@ -272,6 +310,50 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 		}
 	}
 
+	// The icons for the transitions: one at each join, and at the start and end of the video. Worked out here, as the mouse needs to
+	// know where they are. They are a third of the height of the clips, centered on them up and down.
+	const bool show_seams = editor != nullptr && selection != nullptr && !model.in_source_view() && clips.count() > 0;
+	const float seam_side = track_height / 3.0f;
+	const float seam_top = track_top + (track_height - seam_side) / 2.0f;
+	std::vector<SeamBox> seam_boxes;
+	int seam_under_mouse = -1;
+	if (show_seams) {
+		const int count = clips.count();
+		for (int seam = 0; seam <= count; seam++) {
+			int64_t zone_start = 0;
+			int64_t zone_end = 0;
+			seam_zone(clips, seam, &zone_start, &zone_end);
+			const float zone_left = origin.x + m_scale.tick_to_x((double)zone_start);
+			const float zone_right = origin.x + m_scale.tick_to_x((double)zone_end);
+			seam_icon::Span span;
+			if (seam == 0) {
+				const float clip_right = origin.x + m_scale.tick_to_x((double)(clips.start(0) + clips.clip(0).timeline_ticks()));
+				span = seam_icon::for_start(zone_left, zone_right, clip_right - zone_left, seam_side);
+			} else if (seam == count) {
+				const float clip_left = origin.x + m_scale.tick_to_x((double)clips.start(count - 1));
+				span = seam_icon::for_end(zone_left, zone_right, zone_right - clip_left, seam_side);
+			} else {
+				const float before_left = origin.x + m_scale.tick_to_x((double)clips.start(seam - 1));
+				const float after_right = origin.x + m_scale.tick_to_x((double)(clips.start(seam) + clips.clip(seam).timeline_ticks()));
+				span = seam_icon::for_join(zone_left, zone_right, zone_left - before_left, after_right - zone_right, seam_side);
+			}
+			if (!span.visible || span.right < origin.x || span.left > origin.x + available.x)
+				continue;
+			SeamBox box;
+			box.seam = seam;
+			box.left = span.left;
+			box.right = span.right;
+			seam_boxes.push_back(box);
+		}
+		if (!exporting) {
+			const ImVec2 mouse = ImGui::GetIO().MousePos;
+			for (size_t i = 0; i < seam_boxes.size(); i++) {
+				if (mouse.x >= seam_boxes[i].left && mouse.x <= seam_boxes[i].right && mouse.y >= seam_top && mouse.y <= seam_top + seam_side)
+					seam_under_mouse = seam_boxes[i].seam;
+			}
+		}
+	}
+
 	// One surface over the whole strip takes the mouse; what it means depends on the button.
 	ImGui::InvisibleButton("##timeline_surface", available,
 		ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_MouseButtonMiddle);
@@ -322,13 +404,32 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 					m_drag_to = m_drag_clip;
 					EnvConfig::instance->pause();
 				}
+			} else if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && seam_under_mouse >= 0) {
+				// A click on a transition's icon picks the transition, and takes the playhead to it.
+				selection->select_transition(seam_under_mouse);
+				const int64_t target = seam_playhead(clips, seam_under_mouse, media.frame_ticks());
+				EnvConfig::instance->pause();
+				media.seek_to_keyframe_near(target);
+				media.advance_to(target);
+				m_follow = true;
 			} else if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
 				if (text_under_mouse >= 0) {
 					// A click on a text box selects it and takes the playhead to where it shows in full.
 					*selected_text = text_ids[text_under_mouse];
+					if (selection != nullptr)
+						selection->clear();
 					editor->go_to_text_box(model, &media, *selected_text);
 					m_follow = true;
 				} else {
+					// A click on a clip picks it (the pull of the playhead then keeps it picked while the playhead is in it); a click on
+					// nothing lets go. Either way the press goes on to be a scrub.
+					if (selection != nullptr) {
+						const double clicked = m_scale.x_to_ticks(mouse_x);
+						if (io.MousePos.y >= track_top && io.MousePos.y <= track_bottom && clicked >= 0.0 && clicked < (double)clips.total_ticks())
+							selection->select_clip(clips.clip_index_for((int64_t)clicked));
+						else
+							selection->clear();
+					}
 					m_scrubbing = true;
 					m_follow = true;
 					m_scrub_ticks = -1;
@@ -629,7 +730,7 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 	}
 
 	// The clip the playhead is in, which the edit buttons and keys act on.
-	const int current = timeline_edit::current_clip(clips, playhead);
+	const int current = selection != nullptr ? selection->effective_clip(clips, playhead) : timeline_edit::current_clip(clips, playhead);
 	if (current >= 0) {
 		const double start = (double)clips.start(current);
 		const double end = start + (double)clips.clip(current).timeline_ticks();
@@ -638,10 +739,26 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 		draw->AddRect(ImVec2(left, track_top - 1.0f), ImVec2(right, track_bottom + 1.0f), COLOR_CURRENT_CLIP, CLIP_ROUNDING, 0, 2.0f);
 	}
 
+	// The transitions' icons: an empty box for a plain cut.
+	for (size_t i = 0; i < seam_boxes.size(); i++) {
+		const SeamBox& box = seam_boxes[i];
+		const bool picked = selection->picked_seam() == box.seam;
+		const bool hot = box.seam == seam_under_mouse && hovered && !m_scrubbing && !m_scanning && m_drag_clip < 0;
+		const float rounding = smaller(SEAM_ROUNDING, (box.right - box.left) / 2.0f);
+		const ImVec2 corner_min(box.left, seam_top);
+		const ImVec2 corner_max(box.right, seam_top + seam_side);
+		draw->AddRectFilled(corner_min, corner_max, COLOR_SEAM_FILL, rounding);
+		draw->AddRect(corner_min, corner_max, picked ? COLOR_SEAM_PICKED : (hot ? COLOR_SEAM_HOT : COLOR_SEAM_BORDER), rounding, 0, picked ? 2.0f : 1.0f);
+		if (hot)
+			ImGui::SetTooltip("No transition. Click to edit.");
+	}
+
 	// A clip being carried: a copy of it follows the mouse, and a mark shows where it would be dropped.
 	if (m_drag_clip >= 0 && m_drag_clip < clips.count()) {
 		const Clip& dragged = clips.clip(m_drag_clip);
-		const float ghost_width = larger(8.0f, (float)((double)dragged.timeline_ticks() / m_scale.ticks_per_pixel()));
+		// As wide as the clip is, but never more than a quarter of the strip: a clip wider than the strip (zoomed in on it, say) would
+		// otherwise have its copy tint the whole timeline.
+		const float ghost_width = larger(8.0f, smaller((float)((double)dragged.timeline_ticks() / m_scale.ticks_per_pixel()), available.x / 4.0f));
 		const float ghost_left = origin.x + mouse_x - ghost_width / 2.0f;
 		draw->AddRectFilled(ImVec2(ghost_left, track_top), ImVec2(ghost_left + ghost_width, track_bottom),
 			(color_for_number(capture_number(model, dragged.media)) & 0x00FFFFFF) | IM_COL32(0, 0, 0, 170));

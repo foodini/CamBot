@@ -14,6 +14,7 @@
 #include "edit_history.h"
 #include "edit_model.h"
 #include "text_box.h"
+#include "timeline_selection.h"
 
 class MediaContainerMgr;
 
@@ -31,7 +32,8 @@ public:
 	bool can_redo(const MediaContainerMgr& media) const;
 
 	// Each returns whether anything was done.
-	bool split(EditModel* model, MediaContainerMgr* media);
+	// A split picks the join it has made (in `selection`, if one is given), so that its transition is at once the one being edited.
+	bool split(EditModel* model, MediaContainerMgr* media, TimelineSelection* selection = nullptr);
 	bool trim_left(EditModel* model, MediaContainerMgr* media);
 	bool trim_right(EditModel* model, MediaContainerMgr* media);
 	bool remove_clip(EditModel* model, MediaContainerMgr* media);

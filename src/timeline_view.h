@@ -11,6 +11,8 @@
 // Ctrl and the left button on its body move it in time, and on either end of it change when it starts or stops (the box
 // stays tied to a frame of the video: see text_lanes.h). The buttons along its top cut the clips at the playhead (see timeline_editor.h); a
 // timeline with no editor, such as the one in the sync view, has no such buttons.
+// At each join, and at the start and end of the video, is a square icon for the transition there (see seam_icon.h); clicking it
+// picks the transition to be edited.
 //
 // Drawn with ImGui, so it is the window's own, never part of the exported picture. The arithmetic
 // of what's showing is in timeline_scale.h.
@@ -27,6 +29,7 @@
 class MediaContainerMgr;
 class ThumbnailStore;
 class TimelineEditor;
+class TimelineSelection;
 
 // What the user asked for by dropping a clip somewhere else: clip `from` is to become clip `to`
 // (see timeline_edit::move_clip). Whoever is showing the timeline carries it out, as what it means
@@ -51,8 +54,11 @@ public:
 	// no editor (null) they are not shown. When the user drops a dragged clip, `reorder` is set.
 	// The text track is shown only with an editor, and `selected_text` (the id of the selected text box, or 0 for
 	// none) is where it reads which box is selected and tells of a click on another.
+	// `selection` (see timeline_selection.h), if given, is what a click on a clip or on a transition's icon sets (the icons, a small
+	// square at each join and at the two ends of the video, are shown only with one). A click on a text box, or on nothing, lets go
+	// of it.
 	void draw(const LayoutRect& rect, EditModel& model, MediaContainerMgr& media, TimelineEditor* editor, ReorderRequest* reorder,
-		int* selected_text = nullptr);
+		int* selected_text = nullptr, TimelineSelection* selection = nullptr);
 
 	// Shows the whole timeline.
 	void fit() { m_scale.fit(); }
