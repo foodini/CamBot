@@ -325,6 +325,210 @@ static void test_drop_marker() {
 	CHECK(timeline_edit::drop_marker_ticks(list, 1, 2) == 1800);   // After C.
 }
 
+// Transitions go with the clips through the edits (A 0..1000, B 1000..1500 and C 1500..1800 on the timeline).
+static EditList three_clips_with_fades() {
+	std::vector<Clip> clips;
+	clips.push_back(Clip(0, 0, 1000));
+	clips.push_back(Clip(1, 200, 700));
+	clips.push_back(Clip(0, 2000, 2300));
+	std::vector<Transition> transitions(4);
+	transitions[0] = Transition(TRANSITION_FADE, 400);     // The most A can give: 500.
+	transitions[3] = Transition(TRANSITION_FADE, 150);     // The most C can give: 150.
+	EditList list;
+	list.set(clips, transitions);
+	return list;
+}
+
+static bool valid_after(const timeline_edit::Result& result) {
+	EditList after;
+	after.set(result.clips, result.transitions);
+	return after.transitions_valid();
+}
+
+static void test_transitions_with_edits() {
+	EditList list = three_clips_with_fades();
+	CHECK(list.transitions_valid());
+	// Split: the pieces keep what they can, the new join is a cut. A piece too short for the fade it would carry is not allowed.
+	CHECK(!timeline_edit::can_split(list, 400, FT));       // The first piece, 400 long, has room for a fade of 200 only.
+	CHECK(!timeline_edit::split(list, 400, FT).ok);
+	timeline_edit::Result result = timeline_edit::split(list, 800, FT);
+	CHECK(result.ok && timeline_edit::can_split(list, 800, FT));
+	CHECK(result.clips.size() == 4 && result.transitions.size() == 5);
+	CHECK(result.transitions[0] == list.transition(0) && result.transitions[1].is_cut() && result.transitions[2].is_cut());
+	CHECK(result.transitions[4] == list.transition(3));
+	CHECK(valid_after(result));
+	// A split in the last clip hands the end on to the second piece.
+	result = timeline_edit::split(list, 1700, FT);
+	CHECK(!result.ok);                                      // 200 and 100 long: the end's 150 doesn't fit the second.
+	// Trims.
+	CHECK(!timeline_edit::can_trim_left(list, 500, FT));    // A would be 500 long, room for a fade of 250.
+	CHECK(timeline_edit::can_trim_left(list, 100, FT));
+	result = timeline_edit::trim_left(list, 100, FT);
+	CHECK(result.ok && result.transitions == list.transitions() && valid_after(result));
+	CHECK(!timeline_edit::can_trim_right(list, 1600, FT));  // C would be 200 long, room for 100.
+	CHECK(!timeline_edit::trim_right(list, 1600, FT).ok);
+	// A trim in the middle of B, which has no transitions, is free.
+	CHECK(timeline_edit::can_trim_right(list, 1200, FT));
+	CHECK(timeline_edit::can_trim_left(list, 1200, FT));
+	// Speed.
+	CHECK(!timeline_edit::can_set_speed(list, 100, 2.0, AUDIO_KEEP_PITCH));    // A would be 500 long.
+	CHECK(timeline_edit::can_set_speed(list, 100, 0.5, AUDIO_KEEP_PITCH));
+	CHECK(timeline_edit::can_set_speed(list, 1200, 2.0, AUDIO_KEEP_PITCH));    // B has no transition of its own.
+	result = timeline_edit::set_speed(list, 100, 0.5, AUDIO_KEEP_PITCH, FT);
+	CHECK(result.ok && result.transitions == list.transitions() && valid_after(result));
+}
+
+static void test_transitions_when_clips_come_and_go() {
+	EditList list = three_clips_with_fades();
+	// Removing a clip: the start and the end stay, the join it leaves is a cut.
+	timeline_edit::Result result = timeline_edit::remove_clip(list, 1200, FT);      // B.
+	CHECK(result.ok && result.transitions.size() == 3);
+	CHECK(result.transitions[0] == list.transition(0) && result.transitions[1].is_cut() && result.transitions[2] == list.transition(3));
+	CHECK(valid_after(result));
+	// Removing the first clip hands the start to B, which has room for half its 500 only: the fade is shortened to fit.
+	result = timeline_edit::remove_clip(list, 100, FT);
+	CHECK(result.ok && result.transitions.size() == 3);
+	CHECK(result.transitions[0].type == TRANSITION_FADE && result.transitions[0].ticks == 250);
+	CHECK(result.transitions[2] == list.transition(3));
+	CHECK(valid_after(result));
+	// And the last: B now ends the video, with room for 250, so the 150 stays.
+	result = timeline_edit::remove_clip(list, 1700, FT);
+	CHECK(result.ok && result.transitions[2] == list.transition(3) && result.transitions[0] == list.transition(0));
+	// Moving: the ends stay where they are, and a join is kept only if the same two clips are still together in the same order.
+	// (Joins can't have a transition yet; a crossfade is put in here by hand to see where it goes.)
+	std::vector<Clip> four;
+	four.push_back(Clip(0, 0, 1000));
+	four.push_back(Clip(1, 0, 1000));
+	four.push_back(Clip(0, 1000, 2000));
+	four.push_back(Clip(1, 1000, 2000));
+	std::vector<Transition> marked(5);
+	marked[3] = Transition(TRANSITION_CROSSFADE, 100);     // Between the third clip and the fourth.
+	marked[0] = Transition(TRANSITION_FADE, 300);
+	marked[4] = Transition(TRANSITION_FADE, 200);
+	EditList long_list;
+	long_list.set(four, marked);
+	result = timeline_edit::move_clip(long_list, 0, 3, 0);          // The first clip to the end: B C D A.
+	CHECK(result.ok && result.transitions.size() == 5);
+	CHECK(result.transitions[0] == marked[0] && result.transitions[4] == marked[4]);
+	CHECK(result.transitions[1].is_cut());                          // B|C kept the (cut) they had.
+	CHECK(result.transitions[3].is_cut());                          // D|A is new.
+	CHECK(result.transitions[2] == marked[3]);                      // C|D kept it.
+	result = timeline_edit::move_clip(long_list, 1, 2, 0);          // The second clip after the third: A C B D.
+	CHECK(result.ok);
+	CHECK(!result.transitions[1].type && !result.transitions[2].type && !result.transitions[3].type);   // All cuts.
+	CHECK(result.transitions[0] == marked[0] && result.transitions[4] == marked[4]);
+	// Removing from the front of a list with a crossfade carries it to where it is now.
+	result = timeline_edit::remove_clip(long_list, 100, FT);        // A: B C D.
+	CHECK(result.ok && result.transitions.size() == 4);
+	CHECK(result.transitions[2] == marked[3]);
+}
+
+
+// Edits of a named clip, and edits where clips overlap in a crossfade.
+//   A: file 0, 0..1000 (timeline 0..1000). B: file 1, 0..1000, starting 200 before A ends (800..1800). C: file 0, 2000..3000, starting
+//   300 before B ends (1500..2500).
+static EditList crossfaded() {
+	std::vector<Clip> clips;
+	clips.push_back(Clip(0, 0, 1000));
+	clips.push_back(Clip(1, 0, 1000));
+	clips.push_back(Clip(0, 2000, 3000));
+	std::vector<Transition> transitions(4);
+	transitions[1] = Transition(TRANSITION_CROSSFADE, 200);
+	transitions[2] = Transition(TRANSITION_CROSSFADE, 300);
+	EditList list;
+	list.set(clips, transitions);
+	return list;
+}
+
+static void test_named_clip() {
+	const EditList list = three_clips();
+	// The named clip is the one, if the playhead is in it; the playhead's own clip if none is named.
+	timeline_edit::Result result = timeline_edit::trim_left(list, 1200, FT, 1);
+	CHECK(result.ok && result.clips[1].in_ticks == 200 + 200);
+	result = timeline_edit::trim_left(list, 1200, FT, 0);          // The playhead is not in A.
+	CHECK(!result.ok);
+	result = timeline_edit::trim_left(list, 1200, FT, 5);          // No such clip.
+	CHECK(!result.ok);
+	CHECK(!timeline_edit::can_split(list, 1200, FT, 2) && timeline_edit::can_split(list, 1200, FT, 1) && timeline_edit::can_split(list, 1200, FT, -1));
+	CHECK(!timeline_edit::can_remove(list, 1200, FT, 0) && timeline_edit::can_remove(list, 1200, FT, 1));
+	CHECK(!timeline_edit::can_set_speed(list, 1200, 2.0, AUDIO_KEEP_PITCH, 0) && timeline_edit::can_set_speed(list, 1200, 2.0, AUDIO_KEEP_PITCH, 1));
+}
+
+static void test_same_frame_after() {
+	const EditList crossed = crossfaded();
+	EditList plain;
+	plain.set(crossed.clips());
+	// Making the crossfades pulls what follows them earlier; the playhead goes with its frame (500 into C: 2500 -> 2000). Taking them away undoes it.
+	CHECK(timeline_edit::same_frame_after(plain, crossed, 2500) == 2000);
+	CHECK(timeline_edit::same_frame_after(crossed, plain, 2000) == 2500);
+	CHECK(timeline_edit::same_frame_after(plain, crossed, 100) == 100);
+	CHECK(timeline_edit::same_frame_after(plain, plain, 1234) == 1234);
+}
+
+static void test_edits_in_a_crossfade() {
+	const EditList list = crossfaded();
+	CHECK(list.start(1) == 800 && list.start(2) == 1500 && list.total_ticks() == 2500);
+	// At 850 the playhead is in A and in B; the one that shows more of itself is A until 900, then B.
+	CHECK(timeline_edit::current_clip(list, 850) == 0 && timeline_edit::current_clip(list, 950) == 1);
+	// A trim right of A at 800 leaves A 900 long (up to the next frame), and what follows moves up with its crossfade.
+	timeline_edit::Result result = timeline_edit::trim_right(list, 800, FT);
+	CHECK(result.ok && result.clips[0].out_ticks == 900);
+	EditList after;
+	after.set(result.clips, result.transitions);
+	CHECK(after.start(1) == 700 && after.total_ticks() == 2400 && result.playhead_ticks == 800);
+	// A trim left of A at 850 is not possible: A would be 150 long, with a crossfade of 200 at its end.
+	CHECK(!timeline_edit::trim_left(list, 850, FT).ok);
+	// Naming B at the same place, it is 50 ticks into B, which has no whole frame before it.
+	CHECK(!timeline_edit::trim_left(list, 830, FT, 1).ok);
+}
+
+static void test_edits_in_a_crossfade_more() {
+	const EditList list = crossfaded();
+	// Trim Left of B at 1000 (200 into it) is possible, and B keeps its start.
+	timeline_edit::Result result = timeline_edit::trim_left(list, 1000, FT, 1);
+	CHECK(result.ok && result.clips[1].in_ticks == 200 && result.playhead_ticks == 800);
+	CHECK(result.transitions[1] == list.transition(1) && result.transitions[2] == list.transition(2));
+	// Splitting B: each piece has to hold its crossfades (200 in; 300 out).
+	CHECK(!timeline_edit::split(list, 1000, FT, 1).ok);            // First piece 200 long, crossfade 200: needs 400.
+	CHECK(!timeline_edit::split(list, 1100, FT, 1).ok);            // 300 long: needs 400.
+	result = timeline_edit::split(list, 1200, FT, 1);              // 400 long: just enough; the second piece is 600 and has the 300.
+	CHECK(result.ok && result.clips.size() == 4 && result.clips[1].out_ticks == 400 && result.clips[2].in_ticks == 400);
+	CHECK(result.transitions[1] == list.transition(1) && result.transitions[2].is_cut() && result.transitions[3] == list.transition(2));
+	EditList split_list;
+	split_list.set(result.clips, result.transitions);
+	CHECK(result.playhead_ticks == split_list.start(2) && split_list.start(2) == 1200);
+	CHECK(split_list.transitions_valid());
+	// A change of speed that makes a clip too short for its crossfades is refused; one that leaves room is allowed.
+	CHECK(!timeline_edit::can_set_speed(list, 1000, 8.0, AUDIO_KEEP_PITCH, 1));        // B would be 125 long.
+	CHECK(!timeline_edit::can_set_speed(list, 1000, 2.0, AUDIO_KEEP_PITCH, 1));        // 500 long: half is 250, short of the 300.
+	result = timeline_edit::set_speed(list, 1000, 1.5, AUDIO_KEEP_PITCH, FT, 1);       // 667 long: room for 300 and 200.
+	CHECK(result.ok);
+	EditList fast;
+	fast.set(result.clips, result.transitions);
+	CHECK(fast.transitions_valid() && fast.start(1) == 800 && fast.start(2) == 1167);
+	// The playhead stays on the frame of footage: 200 in, which is now 133 timeline ticks into B.
+	CHECK(result.playhead_ticks == 933);
+	// Removing the middle clip: the crossfades go with it and the neighbours join with a cut.
+	result = timeline_edit::remove_clip(list, 1200, FT, 1);
+	CHECK(result.ok && result.clips.size() == 2 && result.transitions[1].is_cut());
+	EditList closed;
+	closed.set(result.clips, result.transitions);
+	CHECK(closed.start(1) == 1000 && result.playhead_ticks == 1000 && closed.total_ticks() == 2000);
+	// Removing the first clip: the second starts the timeline.
+	result = timeline_edit::remove_clip(list, 100, FT);
+	CHECK(result.ok && result.clips.size() == 2 && result.playhead_ticks == 0 && result.transitions[1] == list.transition(2));
+	// Moving keeps a crossfade only between clips that are still together: A B C -> B A C breaks both.
+	result = timeline_edit::move_clip(list, 0, 1, 100);
+	CHECK(result.ok && result.transitions[1].is_cut() && result.transitions[2].is_cut());
+	// Moving the last clip out and back round: C B A has no crossfades; B C A keeps B|C.
+	result = timeline_edit::move_clip(list, 0, 2, 900);
+	CHECK(result.ok && result.transitions[1] == list.transition(2) && result.transitions[2].is_cut());
+	// The playhead at 900 is on B (it shows more of itself from there), 100 into it: B is first now, so that is 100.
+	EditList moved;
+	moved.set(result.clips, result.transitions);
+	CHECK(result.playhead_ticks == 100 && result.playhead_ticks == moved.timeline_for(0, 100));
+}
+
 int main() {
 	test_current_clip();
 	test_split();
@@ -338,6 +542,12 @@ int main() {
 	test_move_clip();
 	test_drop_index();
 	test_drop_marker();
+	test_transitions_with_edits();
+	test_transitions_when_clips_come_and_go();
+	test_named_clip();
+	test_same_frame_after();
+	test_edits_in_a_crossfade();
+	test_edits_in_a_crossfade_more();
 	printf(g_failures ? "FAILED\n" : "all ok\n");
 	return g_failures;
 }

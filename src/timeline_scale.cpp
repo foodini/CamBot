@@ -78,6 +78,19 @@ void TimelineScale::zoom_at(float x, double factor) {
 	m_fitted = m_ticks_per_pixel >= fit * (1.0 - 1e-9);
 }
 
+float TimelineScale::zoom_anchor(float x) const {
+	const float reach = timeline_zoom::NEAR_END_FRACTION * m_width;
+	const float start_x = tick_to_x(0.0);
+	const float end_x = tick_to_x((double)m_total);
+	const float to_start = fabsf(x - start_x);
+	const float to_end = fabsf(x - end_x);
+	if (to_start <= reach && to_start <= to_end)
+		return start_x;
+	if (to_end <= reach)
+		return end_x;
+	return x;
+}
+
 void TimelineScale::pan_by_pixels(float pixels) {
 	m_start += (double)pixels * m_ticks_per_pixel;
 	clamp_view();

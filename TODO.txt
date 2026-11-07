@@ -21,3 +21,46 @@
 * Slightly darken "future" flight track vs past.
 * The first frame of exported video should default to duration 0:00:00 if the user hasn't
   set a launch point. It's fine for the first frame to be negative, just probably not positive.
+* Add a fade-in/fade-out mode for text: Blur/fade. Fading in still is an alpha process, but 
+  each frame has less and less blur to it. Fading out increases blur as transparency incresas. 
+* After cancelling an export, the first open of the file in Windows Media Player (Store app) often fails with 0x80070323
+  ("can't get to your local storage"); the second try works. CamBot closes the file (avio_close) before the "cancelled" message, so
+  probably Defender/indexer/OneDrive touching the new file. Check Associated Handles in Resource Monitor when it happens; test a
+  completed export and an export outside OneDrive.
+
+==== FEATURE LIST (from the Nov 6 brainstorm) ====
+
+HIGH PRIORITY
+* DJI camera metadata debug pane: read the djmd and dbgi data streams of the camera files (protobuf, no schema for the Osmo Action 6
+  exists, so a generic wire decoder), show every field as a tree for the frame on screen, and plot any one field across the clip.
+  Find out what is useful (orientation quaternions at 1 kHz, exposure, ...). Needs a real flight clip, not a desk test.
+  FIRST VERSION IS IN (left panel, "Camera Data (debug)"). Next: look at a clip with GPS (fields 3.4.2.*), and at orientation in a turn.
+* Pin things to the ground: lock a label to a landmark (peak, LZ, a feature on the ground) so a text box floats with it, or a leader
+  line runs from a text box to it. Needs the camera's orientation (camera IMU + collector heading) and elevation data.
+* Tag and track things in the air (other gliders, hawks): a name/label that follows the target pixel for pixel, with a leader line
+  option. Near the top. Tracker + user keyframe fixes when it loses the target.
+* Vario audio: a climb/sink beep synthesized from the telemetry and mixed into the export. Also meant as a platform for trying out
+  the stereo vario (3 baro sensors) before it goes into firmware.
+
+MEDIUM / EXPERIMENT
+* 3D trail ribbon coloured by climb rate, to show the spiral of a thermal (best for another pilot's flight).
+* Wind estimate from circling drift, and a lift map from wind + terrain slope: experiment.
+* Interesting-moment marker without extra hardware: recognise a gesture (see notes) instead of a button on the control bar. Then
+  the highlight finder (score the flight, propose cuts with crossfades and speed ramps) can use the marks too.
+* Replace the map with a 3D terrain view (flyby style).
+* Ghost glider: overlay an earlier flight (especially a previous flight in a competition format).
+
+LATER
+* Glide-horizon line / reach-to-landing-fields overlay (terrain-aware; a lot involved).
+* Real distance and closing speed to a tagged glider, once a second collector is flying.
+* Landmark labels from OpenStreetMap peaks/lakes + elevation data, hidden behind ridges.
+
+TRANSITION IDEAS (with the transitions work)
+* Swooping hang glider wipe (modelled from photos of his wing); hawk and thermal-spiral variants.
+* Bank/roll transition (the clips roll into each other).
+* Climb/sink wipe: the direction follows the vario.
+
+NOTES
+* Camera orientation under sustained g (nearly 3 g in a tight turn): an accelerometer-referenced attitude can't see roll in a
+  coordinated turn (it feels "down" along the wing normal). Check on a real flight clip how well the camera's own fused attitude
+  holds up; the fix, if needed, is gyro integration steered by the collector's GPS (bank from speed x turn rate).

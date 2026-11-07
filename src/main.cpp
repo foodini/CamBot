@@ -38,8 +38,10 @@
 #include "speed_panel.h"
 #include "timeline_selection.h"
 #include "transition_panel.h"
+#include "camera_panel.h"
 #include "text_panel.h"
 #include "text_renderer.h"
+#include "fade_overlay.h"
 #include "thumbnail_store.h"
 #include "tile_layer.h"
 #include "position_smoothing.h"
@@ -583,7 +585,7 @@ static void draw_altitude_window(bool* open, bool* resync, bool exporting) {
 // Below Source Material are the Speed section (see speed_panel.h), the Transition section (see transition_panel.h) and the Text
 // section (see text_panel.h).
 static bool draw_left_panel(const LayoutRect& rect, const EditModel& edit_model,
-    const ProjectFileManager& project_file_mgr, SpeedPanel* speed_panel, TransitionPanel* transition_panel, TextPanel* text_panel, bool can_change, bool* open_sync_view) {
+    const ProjectFileManager& project_file_mgr, SpeedPanel* speed_panel, TransitionPanel* transition_panel, TextPanel* text_panel, CameraPanel* camera_panel, bool can_change, bool* open_sync_view) {
     bool load_telemetry = false;
     if (rect.w < 1.0f || rect.h < 1.0f)
         return false;
@@ -635,6 +637,7 @@ static bool draw_left_panel(const LayoutRect& rect, const EditModel& edit_model,
         speed_panel->draw(can_change);
         transition_panel->draw(can_change);
         text_panel->draw(can_change);
+        camera_panel->draw();
     }
     ImGui::End();
     return load_telemetry;
@@ -898,7 +901,7 @@ int main()
             shut_down_gui();
             return 1;
         }
-        if (!media_decoder.set_clips(edit_model.edit_list().clips(), 0)) {
+        if (!media_decoder.set_clips(edit_model.edit_list(), 0)) {
             ffsw::message_box("CamBot - Cannot Open Project", "The video could not be set up the way this project describes.");
             shut_down_gui();
             return 1;
@@ -938,11 +941,15 @@ int main()
     // The text laid over the video: drawn into the canvas after the telemetry's text (so it is in the preview, the
     // export and the overlay screenshot), and edited in the left panel.
     TextRenderer text_renderer;
+    // Black laid over the finished frame for the edit's fade in at its start and fade out at its end.
+    FadeOverlay fade_overlay;
     TextPanel text_panel(&edit_model, &media_container_mgr, &timeline_editor, &env_config);
+    CameraPanel camera_panel(&media_container_mgr);
     SpeedPanel speed_panel(&edit_model, &media_container_mgr, &timeline_editor);
     // What is picked on the timeline (a clip, or a transition's icon), and the section of the left panel for the transition.
     TimelineSelection timeline_selection;
-    TransitionPanel transition_panel(&edit_model, &timeline_selection);
+    timeline_editor.set_selection(&timeline_selection);
+    TransitionPanel transition_panel(&edit_model, &media_container_mgr, &timeline_editor, &timeline_selection);
     TileLayer tile_layer;
     SyncView sync_view(&tile_layer);
     // The pictures of the video along the timelines, got from the files on a thread of their own.
@@ -1017,13 +1024,13 @@ int main()
     // layout (see the note on S below), and they stand aside while a text box has the keyboard.
     // Ctrl+S saves the project, and S by itself splits the clip at the playhead.
     interaction_mgr->bind_char('s', GLFW_KEY_S,
-        [window, &env_config, &timeline_editor, &edit_model, &media_container_mgr, &sync_view, &timeline_selection]() {
+        [window, &env_config, &timeline_editor, &edit_model, &media_container_mgr, &sync_view]() {
             if (ImGui::GetIO().WantTextInput)
                 return;
             if (ctrl_is_down(window))
                 env_config.save_project();
             else if (!sync_view.active())
-                timeline_editor.split(&edit_model, &media_container_mgr, &timeline_selection);
+                timeline_editor.split(&edit_model, &media_container_mgr);
         },
         nullptr,
         nullptr);
@@ -1431,7 +1438,7 @@ int main()
                 if (outcome == SyncView::CANCEL || (outcome == SyncView::DONE && sync_view.confirm_done(edit_model)))
                     sync_view.leave(outcome == SyncView::DONE, &edit_model, &media_container_mgr);
             } else {
-                if (draw_left_panel(layout.left_panel, edit_model, project_file_mgr, &speed_panel, &transition_panel, &text_panel, !media_container_mgr.recording(), &open_sync_view_requested))
+                if (draw_left_panel(layout.left_panel, edit_model, project_file_mgr, &speed_panel, &transition_panel, &text_panel, &camera_panel, !media_container_mgr.recording(), &open_sync_view_requested))
                     load_telemetry_requested = true;
                 draw_panel_splitter(layout.panel_splitter, layout.widest_panel, &panel_width);
                 draw_splitter(layout.splitter, &timeline_height);
@@ -1510,6 +1517,26 @@ int main()
             }
 
             draw_shortcuts_window(&show_shortcuts_window);
+
+            // A message from an edit that was not done (see EnvConfig::say), over the top of the preview for a few seconds. Drawn
+            // through ImGui for the same reason as the export status below.
+            {
+                float notice_fade = 0.0f;
+                const std::string notice_text = env_config.notice(ffsw::elapsed(), &notice_fade);
+                if (!notice_text.empty()) {
+                    ImGui::SetNextWindowPos(ImVec2(layout.preview.x + layout.preview.w / 2.0f, layout.preview.y + 36.0f),
+                        ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+                    ImGui::SetNextWindowBgAlpha(0.8f * notice_fade);
+                    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, notice_fade);
+                    ImGui::Begin("Notice", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
+                        ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav);
+                    ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + layout.preview.w * 0.8f);
+                    ImGui::TextUnformatted(notice_text.c_str());
+                    ImGui::PopTextWrapPos();
+                    ImGui::End();
+                    ImGui::PopStyleVar();
+                }
+            }
 
             // Export status, bottom-center. Drawn through ImGui -- rather than font_manager,
             // like the other overlays -- specifically because ImGui's own render pass happens
@@ -1629,6 +1656,10 @@ int main()
                 text_renderer.draw(text_boxes[i], text_box::alpha_at(text_boxes[i], now_ticks - start_ticks));
             }
             text_renderer.end();
+        }
+        // The fade in from black at the start of the edit and out to black at its end, over everything above.
+        if (!edit_model.in_source_view()) {
+            fade_overlay.draw(1.0f - (float)media_container_mgr.edit_list().fade_level(media_container_mgr.current_ticks()));
         }
         save_frame_as_png(canvas, pending_overlay_screenshot_path);
         pending_overlay_screenshot_path.clear();

@@ -39,17 +39,24 @@ public:
 	const std::string& last_error() const { return m_last_error; }
 
 private:
-	AudioFileReader* reader_for(int media);
-	audio_stretch::SourceWindow* window_for(int media);
+	// A file's sound is read through one of two readers, so that two clips that are crossfaded, which can be from the same file,
+	// each carry straight on from where they were instead of both seeking back and forth every block. Clips that are crossfaded
+	// use one or the other by their number, odd or even, so neighbours differ; the others use the first.
+	AudioFileReader* reader_for(int media, int slot);
+	audio_stretch::SourceWindow* window_for(int media, int slot);
 	void close_readers();
+	// Writes `count` frames of segment `index`, from timeline sample `position` (inside it), with its fades, to `destination`.
+	void render_segment(int index, int64_t position, int count, float* destination);
 
 	std::vector<std::string>         m_paths;
 	std::vector<audio_plan::Segment> m_segments;
-	std::vector<AudioFileReader*>    m_readers;      // By media; null until needed.
+	audio_plan::EdgeFades            m_edges;        // The fade in and fade out of the whole edit.
+	std::vector<AudioFileReader*>    m_readers;      // By slot * media count + media; null until needed.
 	std::vector<char>                m_no_sound;     // By media: 1 for a file that has none (or won't open), tried once.
-	std::vector<audio_stretch::SourceWindow*> m_windows;   // By media; null until a clip at another speed needs one.
-	audio_stretch::PitchKeeper       m_keeper;       // For the clip being stretched, if one is.
-	int                              m_keeper_segment;   // The segment m_keeper is working on, or -1.
+	std::vector<audio_stretch::SourceWindow*> m_windows;   // The same way; null until a clip at another speed needs one.
+	audio_stretch::PitchKeeper       m_keepers[2];   // For the clips being stretched, if any (one for each slot).
+	int                              m_keeper_segments[2];   // The segment each is working on, or -1.
+	std::vector<float>               m_second;       // The second clip of a crossfade, rendered here to be added to the first.
 	int64_t                          m_position;
 	std::string                      m_last_error;
 };

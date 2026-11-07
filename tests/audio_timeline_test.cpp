@@ -313,6 +313,107 @@ static void test_clips_at_other_speeds() {
 	CHECK(biggest_step < 0.25f);
 }
 
+static void test_fade_in_and_out_of_the_edit() {
+	fake_audio_reset();
+	std::vector<Clip> clips;
+	clips.push_back(Clip(0, 0, 400));      // 400 ticks: 19200 samples, all in file a, tag 1.
+	std::vector<Transition> transitions(2);
+	transitions[0] = Transition(TRANSITION_FADE, 100);     // 4800 samples up.
+	transitions[1] = Transition(TRANSITION_FADE, 50);      // 2400 samples down.
+	EditList list;
+	list.set(clips, transitions);
+	CHECK(list.transitions_valid());
+	AudioTimeline timeline;
+	timeline.set_edit(names("a.mp4", "b.mp4", "c.mp4"), list, TICK);
+	const int total = (int)timeline.total_samples();
+	CHECK(total == 19200);
+	std::vector<float> out((size_t)total * 2);
+	timeline.render(out.data(), total);
+	// The right channel is the file's steady tag (1): its level is the gain. Silent at the very start, three quarters up three
+	// quarters of the way, full from then until the fall begins, and half down half way, nothing at the end.
+	CHECK(out[1] == 0.0f);
+	CHECK(fabsf(out[2400 * 2 + 1] - 0.5f) < 1e-4f);
+	CHECK(fabsf(out[3600 * 2 + 1] - 0.75f) < 1e-4f);
+	CHECK(fabsf(out[5000 * 2 + 1] - 1.0f) < 1e-6f);
+	CHECK(fabsf(out[10000 * 2 + 1] - 1.0f) < 1e-6f);
+	CHECK(fabsf(out[(total - 1200) * 2 + 1] - 0.5f) < 1e-3f);
+	CHECK(out[(total - 1) * 2 + 1] < 1e-3f);
+	// In small blocks it is the same.
+	timeline.seek(0);
+	std::vector<float> blocks((size_t)total * 2);
+	for (int at = 0; at < total; at += 1000)
+		timeline.render(blocks.data() + (size_t)at * 2, total - at < 1000 ? total - at : 1000);
+	bool same = true;
+	for (size_t i = 0; i < blocks.size(); i++) {
+		if (blocks[i] != out[i])
+			same = false;
+	}
+	CHECK(same);
+	// A list with no fades is as it was.
+	EditList plain;
+	plain.set(clips);
+	timeline.set_edit(names("a.mp4", "b.mp4", "c.mp4"), plain, TICK);
+	timeline.seek(0);
+	timeline.render(out.data(), total);
+	CHECK(fabsf(out[2400 * 2 + 1] - 1.0f) < 1e-6f);
+}
+
+static void test_crossfade_mix() {
+	fake_audio_reset();
+	std::vector<Clip> clips;
+	clips.push_back(Clip(0, 0, 100));      // File a, tag 1: 4800 samples.
+	clips.push_back(Clip(1, 0, 100));      // File b, tag 2, starting 40 ticks before the first ends (at 60 ticks: sample 2880).
+	std::vector<Transition> transitions(3);
+	transitions[1] = Transition(TRANSITION_CROSSFADE, 40);
+	EditList list;
+	list.set(clips, transitions);
+	CHECK(list.transitions_valid());
+	AudioTimeline timeline;
+	timeline.set_edit(names("a.mp4", "b.mp4", "c.mp4"), list, TICK);
+	const int total = (int)timeline.total_samples();
+	CHECK(total == 160 * 48);
+	std::vector<float> out((size_t)total * 2);
+	timeline.render(out.data(), total);
+	// The right channel is the tag times the gain: all of the first before the crossfade, all of the second after it, and in
+	// it a sine and cosine mix (a quarter, half and three quarters of the way, an overlap of 1920 samples from 2880).
+	CHECK(fabsf(out[1000 * 2 + 1] - 1.0f) < 1e-6f);
+	CHECK(fabsf(out[5000 * 2 + 1] - 2.0f) < 1e-6f);
+	CHECK(fabsf(out[2880 * 2 + 1] - 1.0f) < 1e-5f);
+	CHECK(fabsf(out[(2880 + 960) * 2 + 1] - (0.70710678f + 2.0f * 0.70710678f)) < 1e-3f);
+	CHECK(fabsf(out[(2880 + 480) * 2 + 1] - (cosf(0.39269908f) + 2.0f * sinf(0.39269908f))) < 1e-3f);
+	CHECK(fabsf(out[(4800 - 1) * 2 + 1] - 2.0f) < 1e-2f);
+	// In small blocks it is the same.
+	timeline.seek(0);
+	std::vector<float> blocks((size_t)total * 2);
+	for (int at = 0; at < total; at += 700)
+		timeline.render(blocks.data() + (size_t)at * 2, total - at < 700 ? total - at : 700);
+	bool same = true;
+	for (size_t i = 0; i < blocks.size(); i++) {
+		if (fabsf(blocks[i] - out[i]) > 1e-5f)
+			same = false;
+	}
+	CHECK(same);
+
+	// Two clips from the same file, crossfaded: each carries on from where it was, without seeking back and forth every block.
+	fake_audio_reset();
+	std::vector<Clip> halves;
+	halves.push_back(Clip(0, 0, 100));
+	halves.push_back(Clip(0, 100, 200));
+	list.set(halves, transitions);
+	timeline.set_edit(names("a.mp4", "b.mp4", "c.mp4"), list, TICK);
+	const int total_halves = (int)timeline.total_samples();
+	std::vector<float> same_file((size_t)total_halves * 2);
+	timeline.seek(0);
+	for (int at = 0; at < total_halves; at += 100)
+		timeline.render(same_file.data() + (size_t)at * 2, total_halves - at < 100 ? total_halves - at : 100);
+	CHECK(fake_audio_seek_count() <= 4);
+	// Where the second clip is half in: the left channel is the first's sample (here 2880 + 960) times a gain plus the second's
+	// (4800 + 960) times the other. The right channel is the tag 1, so it sums to the mix of two gains.
+	const int s = 2880 + 960;
+	CHECK(fabsf(same_file[(size_t)s * 2] - (0.70710678f * (float)s + 0.70710678f * (4800.0f + 960.0f))) < 0.5f);
+	CHECK(fabsf(same_file[(size_t)s * 2 + 1] - 2.0f * 0.70710678f) < 1e-3f);
+}
+
 int main() {
 	test_plays_clips_in_order();
 	test_split_carries_on_without_fade_or_seek();
@@ -323,6 +424,8 @@ int main() {
 	test_files_without_sound();
 	test_editing_keeps_readers();
 	test_clips_at_other_speeds();
+	test_fade_in_and_out_of_the_edit();
+	test_crossfade_mix();
 	if (g_failures == 0)
 		printf("audio_timeline_test: all ok\n");
 	return g_failures == 0 ? 0 : 1;

@@ -173,6 +173,7 @@
     <ClCompile Include="map_tiles.cpp" />
     <ClCompile Include="map_view.cpp" />
     <ClCompile Include="position_smoothing.cpp" />
+    <ClCompile Include="proto_wire.cpp" />
     <ClCompile Include="text_box.cpp" />
     <ClCompile Include="text_box_geometry.cpp" />
     <ClCompile Include="text_fonts.cpp" />
@@ -187,6 +188,9 @@
     <ClCompile Include="playback.cpp" />
     <ClCompile Include="text_lanes.cpp" />
     <ClCompile Include="text_layout.cpp" />
+    <ClCompile Include="camera_metadata.cpp" />
+    <ClCompile Include="camera_panel.cpp" />
+    <ClCompile Include="fade_overlay.cpp" />
     <ClCompile Include="text_panel.cpp" />
     <ClCompile Include="text_renderer.cpp" />
     <ClCompile Include="thumbnail_layout.cpp" />
@@ -268,6 +272,7 @@
     <ClInclude Include="map_tiles.h" />
     <ClInclude Include="map_view.h" />
     <ClInclude Include="position_smoothing.h" />
+    <ClInclude Include="proto_wire.h" />
     <ClInclude Include="file_time.h" />
     <ClInclude Include="text_box.h" />
     <ClInclude Include="text_box_geometry.h" />
@@ -283,6 +288,9 @@
     <ClInclude Include="playback.h" />
     <ClInclude Include="text_lanes.h" />
     <ClInclude Include="text_layout.h" />
+    <ClInclude Include="camera_metadata.h" />
+    <ClInclude Include="camera_panel.h" />
+    <ClInclude Include="fade_overlay.h" />
     <ClInclude Include="text_panel.h" />
     <ClInclude Include="text_renderer.h" />
     <ClInclude Include="thumbnail_layout.h" />

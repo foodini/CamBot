@@ -79,6 +79,11 @@ public:
 	// Pauses normal playback (used when an interactive scrub/scan begins); there's no un-pause
 	// call here because nothing currently auto-resumes -- releasing the mouse just leaves it paused.
 	void pause()                                           { paused = true; }
+	// A short message for the user, shown over the preview for a few seconds (an edit that was not done and why, say). `now` is the
+	// time on ffsw::elapsed()'s clock.
+	void say(const std::string& text, float now)           { m_notice = text; m_notice_time = now; }
+	// The message to show at time `now`, or empty if the last one has been up long enough; `*fade` is how much of it to show (1 to 0).
+	std::string notice(float now, float* fade) const;
 
 	//Getters
 	//TODO(P0): set these to sane values (0 and whatever the file max is) when the video is read and
@@ -164,6 +169,8 @@ public:
 	const glm::mat4& pixel_to_screen_space_projection() const { return m_pixel_to_screen_space_projection; }
 
 private:
+	std::string             m_notice;
+	float                   m_notice_time = -100.0f;
 	void                    recompute_projections();
 	AltitudeReferences      m_altitude_refs;
 	UserSettings            m_user_settings;

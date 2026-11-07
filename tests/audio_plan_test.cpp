@@ -154,6 +154,72 @@ static void test_segment_at() {
 	CHECK(segment_at(none, 0) == -1);
 }
 
+static void test_crossfade() {
+	std::vector<Clip> clips;
+	clips.push_back(Clip(0, 0, 1000));
+	clips.push_back(Clip(1, 0, 1000));
+	clips.push_back(Clip(0, 1000, 2000));
+	std::vector<Transition> transitions(4);
+	transitions[1] = Transition(TRANSITION_CROSSFADE, 200);       // B starts at 800.
+	EditList list;
+	list.set(clips, transitions);
+	std::vector<Segment> segments;
+	plan(list, TICK, &segments);
+	CHECK(segments.size() == 3);
+	CHECK(segments[0].timeline_start == 0 && segments[0].length == 48000);
+	CHECK(segments[1].timeline_start == 800 * 48 && segments[1].length == 48000);
+	CHECK(segments[1].timeline_end() == 1800 * 48);
+	// A cut after the crossfade: C begins where B ends.
+	CHECK(segments[2].timeline_start == segments[1].timeline_end());
+	CHECK(segments[2].timeline_end() == ticks_to_samples(list.total_ticks(), TICK));
+	// The crossfade is the same length for both, and replaces their cut fades.
+	CHECK(segments[0].xfade_out == 9600 && segments[1].xfade_in == 9600);
+	CHECK(segments[0].xfade_in == 0 && segments[1].xfade_out == 0 && segments[2].xfade_in == 0);
+	CHECK(segments[0].fade_in && !segments[0].fade_out);
+	CHECK(!segments[1].fade_in && segments[1].fade_out);
+	CHECK(segments[2].fade_in && segments[2].fade_out);
+
+	// Equal power: where the two overlap, their volumes' squares add up to 1, from all A to all B.
+	CHECK(crossfade_gain(segments[1], 0) == 0.0f);
+	CHECK(fabsf(crossfade_gain(segments[1], 9600) - 1.0f) < 1e-6f);
+	CHECK(fabsf(crossfade_gain(segments[1], 4800) - 0.70710678f) < 1e-5f);
+	CHECK(crossfade_gain(segments[1], 30000) == 1.0f);
+	const int64_t a_out = segments[0].length - segments[0].xfade_out;
+	CHECK(crossfade_gain(segments[0], a_out - 1) == 1.0f);
+	CHECK(fabsf(crossfade_gain(segments[0], a_out + 4800) - 0.70710678f) < 1e-5f);
+	CHECK(fabsf(crossfade_gain(segments[0], segments[0].length - 1)) < 1e-3f);
+	for (int64_t s = segments[1].timeline_start; s < segments[0].timeline_end(); s += 311) {
+		const float a = crossfade_gain(segments[0], s - segments[0].timeline_start);
+		const float b = crossfade_gain(segments[1], s - segments[1].timeline_start);
+		CHECK(fabsf(a * a + b * b - 1.0f) < 1e-4f);
+	}
+
+	// Which segments hold a sample.
+	int first = 0;
+	int second = 0;
+	CHECK(covering(segments, 20000, &first, &second) == 1 && first == 0 && second == -1);
+	CHECK(covering(segments, 38400, &first, &second) == 2 && first == 0 && second == 1);
+	CHECK(covering(segments, 47999, &first, &second) == 2 && first == 0 && second == 1);
+	CHECK(covering(segments, 48000, &first, &second) == 1 && first == 1 && second == -1);
+	CHECK(covering(segments, 100000, &first, &second) == 1 && first == 2);
+	CHECK(covering(segments, segments[2].timeline_end(), &first, &second) == 0 && first == -1);
+	CHECK(covering(segments, -1, &first, &second) == 0);
+
+	// A crossfade between a split's two halves is a crossfade all the same (there is a cut to hide, with overlap).
+	std::vector<Clip> halves;
+	halves.push_back(Clip(0, 0, 1000));
+	halves.push_back(Clip(0, 1000, 2000));
+	std::vector<Transition> mixed(3);
+	mixed[1] = Transition(TRANSITION_CROSSFADE, 100);
+	list.set(halves, mixed);
+	plan(list, TICK, &segments);
+	CHECK(segments[0].xfade_out == 4800 && segments[1].xfade_in == 4800 && !segments[0].fade_out && !segments[1].fade_in);
+	// And with the transition a cut it is a plain join with nothing between (no fade either).
+	list.set(halves);
+	plan(list, TICK, &segments);
+	CHECK(segments[0].xfade_out == 0 && !segments[0].fade_out && !segments[1].fade_in);
+}
+
 int main() {
 	test_ticks_to_samples();
 	test_samples_to_ticks();
@@ -162,6 +228,7 @@ int main() {
 	test_tiling_survives_rounding();
 	test_fade_gain();
 	test_segment_at();
+	test_crossfade();
 	if (g_failures == 0)
 		printf("audio_plan_test: all ok\n");
 	return g_failures == 0 ? 0 : 1;

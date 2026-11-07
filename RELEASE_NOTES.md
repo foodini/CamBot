@@ -36,7 +36,8 @@
   yellow lines mark the joins, a ruler shows time, and a red line shows the playhead. Left-click
   or drag to scrub (it follows keyframes while you drag and lands on the exact frame when you
   let go), right-drag to scan at a speed that grows with the distance dragged (the same feel as
-  the old scrub bar), mouse wheel to zoom around the cursor, Shift+wheel, middle-drag or a left-drag on the ruler to pan,
+  the old scrub bar), mouse wheel to zoom around the cursor (or around the very start or end of the video, when the cursor is
+  within a few percent of the timeline's width of it), Shift+wheel, middle-drag or a left-drag on the ruler to pan,
   and the Fit button to show everything. The timeline follows the playhead during playback.
   This replaces the video scrub bar that used to sit under the video; the telemetry scrub bar
   is unchanged for now.
@@ -303,6 +304,38 @@
   lower when slow), and **Mute**. This is what you hear in preview and what the export carries.
   Known limitation: while a slowed-down clip is held on one frame, the overlay (telemetry, text fades) changes only when the
   frame does.
+- **Transitions.** Every join between two clips, and the start and the end of the video, now has a small square on
+  the timeline, half over each clip: click it to pick that *transition* (a clip is picked by clicking it). An empty square is a plain
+  cut. Splitting a clip picks the new join, and Trim Left / Trim Right pick the transition at the edge they moved, ready for the **Transition** section of the left panel. At the start of the video the
+  section offers **Fade in from black**, at the end **Fade out to black**, with a length in seconds (to the nearest frame, up to half
+  the clip beside it); the whole picture, telemetry and text included, and the sound fade together, in the preview and the export. The
+  square shows a ramp for a fade. A fade is one undo step and is saved with the project (project format 6; older projects open with no
+  fades). Trim, Split and the Speed buttons are greyed when they would leave a fade longer than its clip allows; removing or moving
+  clips shortens a fade to fit instead.
+  **Crossfade** is the third choice at a join: the end of one clip and the start of the next play together, the picture blending
+  from one to the other and the sound mixing with an equal-power curve (so the level stays steady), and the video gets shorter by the
+  length of the crossfade. A crossfade can't be longer than half of either clip beside it. The timeline shows the overlap as a band
+  and an X in the square. In the crossfade the overlays and telemetry belong to whichever clip is showing more of itself (they jump at
+  the middle); scrubbing, stepping and playing all show the blend, and exports with crossfades are cut at the timeline's frame
+  times, as with speed changes. Two decoders run in a crossfade, so playback can stutter at the start of one on slow machines.
+  Under a transition that is set, **Apply to all transitions** gives its type and length to every other of its kind (all the joins,
+  or the start and the end), and **Apply to un-configured transitions** only to those that have none; joins where the footage carries
+  straight on (the same file, or one file ending as the next begins) are left alone.
+  Trim, Split, Speed and Delete act on the clip you picked, or else on the clip under the playhead (in a crossfade the one showing
+  more of itself). They are greyed while the video plays, and pressing their keys then pauses the video and says the edit was not
+  done (press again once it has stopped).
+- **Camera Data (debug).** A new section at the bottom of the left panel (closed until opened) shows what a DJI camera wrote into its
+  video file about itself: the `djmd` stream (orientation, accelerometer, exposure, GPS when the camera had a fix) and the `dbgi`
+  debugging stream, for the frame on screen, as a tree of fields with their values and, for the ones known (from ExifTool's DJI tag
+  list), their names. Hover a field for the other ways its bytes can be read; click a number to plot that field over the whole file (a
+  red line marks the playhead), which is how to tell what is worth using. The plot appears at once and fills in as the file is read,
+  starting at the playhead, so the part being looked at is there first. The values most worth having at hand
+  (frame, time, ISO, shutter speed, colour temperature, accelerometer X/Y/Z with the direction of each axis, zoom, and the camera's barometer: altitude and air pressure) are repeated in a
+  "Key values" list above the tree; click one to plot it. The size of the accelerometer
+  reading (`|a|`, about 1 g at rest) is there too, and plots like a field. The first plot of a stream reads the whole of it from the file
+  (the part at the playhead first) and keeps it in memory, so after that any other field of the stream plots at once. The files name no schema we can read for the Osmo Action 6, so
+  the messages are decoded without one and the odd field may be shown as the wrong kind of thing. It does nothing while the section is
+  closed or an export runs.
 - **Tests.** `tests/run_tests.sh` (run it with `wsl ./tests/run_tests.sh`) builds and runs
   the unit tests: climb filters, map zoom, flight statistics, altitude references, user
   settings, the source timeline and file ordering, project reading, and the multi-file

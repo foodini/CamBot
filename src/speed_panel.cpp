@@ -27,7 +27,7 @@ void SpeedPanel::draw(bool can_change) {
 	if (!ImGui::CollapsingHeader("Speed"))
 		return;
 	const EditList& list = m_model->edit_list();
-	const int index = timeline_edit::current_clip(list, m_media->current_ticks());
+	const int index = m_editor->target_clip(*m_model, *m_media);
 	if (index < 0) {
 		ImGui::TextDisabled("(no video)");
 		return;
@@ -40,7 +40,8 @@ void SpeedPanel::draw(bool can_change) {
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("The clip outlined on the timeline: the one the playhead is in.\nHow long it lasts at its speed.");
 
-	// The usual speeds, in a row; the clip's own is lit.
+	// The usual speeds, in a row; the clip's own is lit. Nothing here is changed while the video plays (pausing it is how to pick a frame).
+	can_change = can_change && !m_editor->playing();
 	ImGui::BeginDisabled(!can_change);
 	const float spacing = ImGui::GetStyle().ItemSpacing.x;
 	const float button_width = (ImGui::GetContentRegionAvail().x - spacing * (float)(PRESET_COUNT - 1)) / (float)PRESET_COUNT;
@@ -48,10 +49,17 @@ void SpeedPanel::draw(bool can_change) {
 		if (n > 0)
 			ImGui::SameLine();
 		const bool current = clip.speed == PRESETS[n];
+		// Greyed when the speed would leave a transition longer than its clips allow (see EditList::max_transition_ticks).
+		const bool allowed = current || m_editor->can_set_speed(*m_model, *m_media, PRESETS[n], clip.audio_mode);
 		if (current)
 			ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+		ImGui::BeginDisabled(!allowed);
 		if (ImGui::Button(PRESET_LABELS[n], ImVec2(button_width, 0.0f)))
 			m_editor->set_clip_speed(m_model, m_media, PRESETS[n], clip.audio_mode);
+		ImGui::EndDisabled();
+		if (!allowed && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+			ImGui::SetTooltip(m_editor->playing() ? "Pause the video to change the speed." :
+				"Not at this speed: the clip would be too short for the transition at its start or end.");
 		if (current)
 			ImGui::PopStyleColor();
 	}

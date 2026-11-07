@@ -30,6 +30,7 @@ for test in *_test.cpp; do
     # Tests that touch the disk use the file helpers.
     if [ "$name" = "project_test" ]; then extra="../src/file_io.cpp ../src/edit_model.cpp ../src/text_box.cpp ../src/project_model.cpp"; fi
     if [ "$name" = "edit_model_test" ]; then extra="../src/edit_model.cpp ../src/text_box.cpp"; fi
+    if [ "$name" = "transition_test" ]; then extra="../src/edit_model.cpp ../src/text_box.cpp"; fi
     if [ "$name" = "edit_playhead_test" ]; then extra="../src/edit_model.cpp ../src/text_box.cpp"; fi
     if [ "$name" = "timecode_test" ]; then extra="../src/timecode.cpp"; fi
     if [ "$name" = "window_layout_test" ]; then extra="../src/window_layout.cpp"; fi
@@ -49,6 +50,7 @@ for test in *_test.cpp; do
     if [ "$name" = "text_fonts_test" ]; then extra="../src/text_fonts.cpp"; fi
     if [ "$name" = "timeline_selection_test" ]; then extra="../src/timeline_selection.cpp ../src/edit_model.cpp ../src/text_box.cpp"; fi
     if [ "$name" = "seam_icon_test" ]; then extra="../src/seam_icon.cpp"; fi
+    if [ "$name" = "proto_wire_test" ]; then extra="../src/proto_wire.cpp"; fi
     if [ "$name" = "thumbnail_layout_test" ]; then extra="../src/thumbnail_layout.cpp"; fi
     if [ "$name" = "timeline_scale_test" ]; then extra="../src/timeline_scale.cpp ../src/scan_gesture.cpp"; fi
     # The decoder test runs the real MediaDecoder against a fake FFmpeg (fake_ffmpeg.cpp) that

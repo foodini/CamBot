@@ -220,3 +220,13 @@ void EnvConfig::recompute_projections() {
 	);
 	m_screen_to_pixel_space_projection = scale * projection;
 }
+std::string EnvConfig::notice(float now, float* fade) const {
+	const float SHOWN_SECONDS = 4.0f;
+	const float FADING_SECONDS = 1.0f;
+	const float age = now - m_notice_time;
+	*fade = 0.0f;
+	if (m_notice.empty() || age < 0.0f || age > SHOWN_SECONDS)
+		return std::string();
+	*fade = age > SHOWN_SECONDS - FADING_SECONDS ? (SHOWN_SECONDS - age) / FADING_SECONDS : 1.0f;
+	return m_notice;
+}

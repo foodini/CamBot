@@ -18,28 +18,62 @@ int64_t timeline_to_footage(int64_t timeline_ticks, double speed) {
 	return (int64_t)llround((double)timeline_ticks * speed);
 }
 
-EditList::EditList() : m_total(0), m_footage_total(0), m_speed_changes(false) {
+EditList::EditList() : m_total(0), m_footage_total(0), m_speed_changes(false), m_crossfades(false) {
 }
 
 void EditList::clear() {
 	m_clips.clear();
+	m_transitions.clear();
 	m_starts.clear();
+	m_overlaps.clear();
+	m_switches.clear();
 	m_total = 0;
 	m_footage_starts.clear();
 	m_footage_total = 0;
 	m_speed_changes = false;
+	m_crossfades = false;
 }
 
 void EditList::set(const std::vector<Clip>& clips) {
+	set(clips, std::vector<Transition>());
+}
+
+void EditList::set(const std::vector<Clip>& clips, const std::vector<Transition>& transitions) {
 	m_clips = clips;
+	if (clips.empty())
+		m_transitions.clear();
+	else if (transitions.size() == clips.size() + 1)
+		m_transitions = transitions;
+	else
+		m_transitions.assign(clips.size() + 1, Transition());
 	m_starts.clear();
+	m_overlaps.assign(m_clips.size() + 1, 0);
+	m_switches.clear();
 	m_total = 0;
 	m_footage_starts.clear();
 	m_footage_total = 0;
 	m_speed_changes = false;
+	m_crossfades = false;
 	for (size_t i = 0; i < m_clips.size(); i++) {
-		m_starts.push_back(m_total);
-		m_total += m_clips[i].timeline_ticks();
+		// A crossfade into this clip pulls it back over the end of the one before. (Kept to what is allowed, so that a list that
+		// is not valid still has clips that follow one another.)
+		int64_t overlap = 0;
+		if (i > 0 && m_transitions[i].type == TRANSITION_CROSSFADE && m_transitions[i].ticks > 0) {
+			overlap = m_transitions[i].ticks;
+			const int64_t before = m_clips[i - 1].timeline_ticks() / 2;
+			const int64_t after = m_clips[i].timeline_ticks() / 2;
+			if (overlap > before)
+				overlap = before;
+			if (overlap > after)
+				overlap = after;
+		}
+		m_overlaps[i] = overlap;
+		if (overlap > 0)
+			m_crossfades = true;
+		const int64_t start = i == 0 ? 0 : m_total - overlap;
+		m_starts.push_back(start);
+		m_switches.push_back(start + overlap / 2);
+		m_total = start + m_clips[i].timeline_ticks();
 		m_footage_starts.push_back(m_footage_total);
 		m_footage_total += m_clips[i].duration_ticks();
 		if (m_clips[i].speed != 1.0)
@@ -47,20 +81,124 @@ void EditList::set(const std::vector<Clip>& clips) {
 	}
 }
 
+bool EditList::has_transitions() const {
+	for (size_t i = 0; i < m_transitions.size(); i++) {
+		if (!m_transitions[i].is_cut())
+			return true;
+	}
+	return false;
+}
+
+int64_t EditList::max_transition_ticks(int seam) const {
+	const int n = count();
+	if (seam < 0 || seam > n || n == 0)
+		return 0;
+	int64_t shorter = 0;
+	if (seam == 0)
+		shorter = m_clips[0].timeline_ticks();
+	else if (seam == n)
+		shorter = m_clips[n - 1].timeline_ticks();
+	else
+		shorter = m_clips[seam - 1].timeline_ticks() < m_clips[seam].timeline_ticks() ? m_clips[seam - 1].timeline_ticks() : m_clips[seam].timeline_ticks();
+	return shorter / 2;
+}
+
+bool EditList::transitions_valid() const {
+	const int n = count();
+	if (n == 0)
+		return m_transitions.empty();
+	if ((int)m_transitions.size() != n + 1)
+		return false;
+	for (int seam = 0; seam <= n; seam++) {
+		const Transition& transition = m_transitions[seam];
+		if (transition.type < TRANSITION_CUT || transition.type > TRANSITION_FADE || transition.ticks < 0)
+			return false;
+		if (transition.type == TRANSITION_CUT) {
+			if (transition.ticks != 0)
+				return false;
+			continue;
+		}
+		const bool at_an_end = seam == 0 || seam == n;
+		if (transition.type == TRANSITION_FADE && !at_an_end)
+			return false;
+		if (transition.type == TRANSITION_CROSSFADE && (at_an_end || transition.ticks <= 0))
+			return false;
+		if (transition.ticks > max_transition_ticks(seam))
+			return false;
+	}
+	return true;
+}
+
+double EditList::fade_level(int64_t timeline_ticks) const {
+	double level = 1.0;
+	const int n = count();
+	if (n == 0)
+		return level;
+	const Transition& start = m_transitions[0];
+	if (start.type == TRANSITION_FADE && start.ticks > 0 && timeline_ticks < start.ticks) {
+		const double up = (double)(timeline_ticks > 0 ? timeline_ticks : 0) / (double)start.ticks;
+		if (up < level)
+			level = up;
+	}
+	const Transition& end = m_transitions[n];
+	if (end.type == TRANSITION_FADE && end.ticks > 0 && timeline_ticks > m_total - end.ticks) {
+		const double down = (double)(m_total > timeline_ticks ? m_total - timeline_ticks : 0) / (double)end.ticks;
+		if (down < level)
+			level = down;
+	}
+	return level;
+}
+
 int EditList::clip_index_for(int64_t timeline_ticks) const {
 	if (m_clips.empty())
 		return -1;
-	// The last clip that starts at or before the time.
+	// The last clip that is showing more of itself than the one before it by the time.
 	int low = 0;
 	int high = (int)m_clips.size() - 1;
 	while (low < high) {
 		int middle = low + (high - low + 1) / 2;
-		if (m_starts[middle] <= timeline_ticks)
+		if (m_switches[middle] <= timeline_ticks)
 			low = middle;
 		else
 			high = middle - 1;
 	}
 	return low;
+}
+
+EditList::Mix EditList::mix_at(int64_t timeline_ticks) const {
+	Mix mix;
+	const int index = clip_index_for(timeline_ticks);
+	if (index < 0)
+		return mix;
+	mix.first = index;
+	if (index > 0 && m_overlaps[index] > 0 && timeline_ticks < m_starts[index] + m_overlaps[index]) {
+		mix.first = index - 1;
+		mix.second = index;
+		mix.weight = (double)(timeline_ticks - m_starts[index]) / (double)m_overlaps[index];
+	} else if (index + 1 < count() && m_overlaps[index + 1] > 0 && timeline_ticks >= m_starts[index + 1]) {
+		mix.second = index + 1;
+		mix.weight = (double)(timeline_ticks - m_starts[index + 1]) / (double)m_overlaps[index + 1];
+	}
+	if (mix.second >= 0) {
+		if (mix.weight < 0.0)
+			mix.weight = 0.0;
+		if (mix.weight > 1.0)
+			mix.weight = 1.0;
+	}
+	return mix;
+}
+
+int64_t EditList::footage_for_clip_at(int index, int64_t timeline_ticks) const {
+	if (index < 0 || index >= count())
+		return 0;
+	const Clip& clip = m_clips[index];
+	int64_t into = timeline_ticks - m_starts[index];
+	if (into < 0)
+		into = 0;
+	int64_t footage = timeline_to_footage(into, clip.speed);
+	if (footage > clip.duration_ticks())
+		footage = clip.duration_ticks();
+	return m_footage_starts[index] + footage;
 }
 
 FileTime EditList::source_for(int64_t timeline_ticks) const {
@@ -227,6 +365,7 @@ void EditModel::set_media(const std::vector<std::string>& paths, const std::vect
 	m_capture.set(identity, m_durations);
 	m_in_source_view = false;
 	m_stashed_clips.clear();
+	m_stashed_transitions.clear();
 	set_default_clips();
 	m_edit_started = false;
 	m_anchors.clear();
@@ -285,6 +424,23 @@ void EditModel::text_box_span(const TextBox& box, int64_t* start_ticks, int64_t*
 	*end_ticks = start + box.total_ticks();
 }
 
+bool EditModel::join_is_continuous(int seam) const {
+	if (seam < 1 || seam >= m_edit_list.count())
+		return false;
+	const Clip& before = m_edit_list.clip(seam - 1);
+	const Clip& after = m_edit_list.clip(seam);
+	if (before.media == after.media)
+		return before.out_ticks == after.in_ticks;
+	if (before.out_ticks != m_durations[before.media] || after.in_ticks != 0)
+		return false;
+	const std::vector<int>& order = m_capture.order();
+	for (size_t i = 0; i + 1 < order.size(); i++) {
+		if (order[i] == before.media)
+			return order[i + 1] == after.media;
+	}
+	return false;
+}
+
 bool EditModel::set_capture_order(const std::vector<int>& order) {
 	if (!m_capture.set(order, m_durations))
 		return false;
@@ -293,6 +449,10 @@ bool EditModel::set_capture_order(const std::vector<int>& order) {
 }
 
 bool EditModel::set_clips(const std::vector<Clip>& clips) {
+	return set_edit(clips, std::vector<Transition>());
+}
+
+bool EditModel::set_edit(const std::vector<Clip>& clips, const std::vector<Transition>& transitions) {
 	for (size_t i = 0; i < clips.size(); i++) {
 		const Clip& clip = clips[i];
 		if (clip.media < 0 || clip.media >= media_count())
@@ -302,7 +462,11 @@ bool EditModel::set_clips(const std::vector<Clip>& clips) {
 		if (!(clip.speed >= MIN_SPEED && clip.speed <= MAX_SPEED) || clip.audio_mode < AUDIO_KEEP_PITCH || clip.audio_mode > AUDIO_MUTE)
 			return false;
 	}
-	m_edit_list.set(clips);
+	EditList candidate;
+	candidate.set(clips, transitions);
+	if (!candidate.transitions_valid())
+		return false;
+	m_edit_list = candidate;
 	return true;
 }
 
@@ -318,6 +482,7 @@ void EditModel::begin_source_view() {
 	if (m_in_source_view)
 		return;
 	m_stashed_clips = m_edit_list.clips();
+	m_stashed_transitions = m_edit_list.transitions();
 	m_stashed_edit_started = m_edit_started;
 	m_in_source_view = true;
 	set_default_clips();
@@ -327,9 +492,10 @@ void EditModel::end_source_view() {
 	if (!m_in_source_view)
 		return;
 	m_in_source_view = false;
-	m_edit_list.set(m_stashed_clips);
+	m_edit_list.set(m_stashed_clips, m_stashed_transitions);
 	m_edit_started = m_stashed_edit_started;
 	m_stashed_clips.clear();
+	m_stashed_transitions.clear();
 }
 
 void EditModel::set_anchors(const std::vector<SyncAnchor>& anchors) {

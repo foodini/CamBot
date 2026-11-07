@@ -25,6 +25,7 @@ void Playback::start(int64_t ticks) {
 		paths.push_back(m_media->media_path(i));
 	const AVRational tick = m_media->tick_time_base();
 	m_clips = m_media->edit_list().clips();
+	m_transitions = m_media->edit_list().transitions();
 	m_audio.set_edit(paths, m_media->edit_list(), (double)tick.num / (double)tick.den);
 	m_has_sound = m_audio.start(ticks);
 	m_wall_start = now_seconds();
@@ -48,7 +49,8 @@ bool Playback::update(bool paused) {
 	const int64_t shown = m_media->current_ticks();
 	// Begin from wherever the picture is. That is also what happens when it has been moved since we last put it somewhere (a click
 	// on the timeline, a step) or the edit has changed under us.
-	if (!m_running || shown != m_last_shown || m_media->edit_list().clips() != m_clips)
+	if (!m_running || shown != m_last_shown || m_media->edit_list().clips() != m_clips ||
+			m_media->edit_list().transitions() != m_transitions)
 		start(shown);
 	m_audio.update();
 

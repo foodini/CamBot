@@ -203,7 +203,7 @@ bool SyncView::enter(EditModel* model, MediaContainerMgr* media) {
 	model->begin_source_view();
 	// The same moment of the same file, on the timeline of whole files.
 	const int64_t show_ticks = timeline_ticks_for(*model, on_screen);
-	if (!media->set_clips(model->edit_list().clips(), show_ticks)) {
+	if (!media->set_clips(model->edit_list(), show_ticks)) {
 		model->end_source_view();
 		return false;
 	}
@@ -248,7 +248,7 @@ void SyncView::leave(bool keep_changes, EditModel* model, MediaContainerMgr* med
 	// The edit was not touched in here. Cancel puts the playhead where it was; Done leaves it on the frame
 	// that was on screen (or, if the edit has cut that footage, the nearest footage that is left).
 	const int64_t playhead = keep_changes ? model->timeline_ticks_nearest(on_screen) : m_entry_playhead;
-	media->set_clips(model->edit_list().clips(), playhead);
+	media->set_clips(model->edit_list(), playhead);
 	m_undo.clear();
 	m_redo.clear();
 	// Tiles still waiting to be fetched aren't wanted any more.
@@ -297,7 +297,7 @@ void SyncView::apply_state(const SyncState& state, EditModel* model, MediaContai
 		if (model->set_capture_order(state.order)) {
 			model->refresh_source_view();
 			EnvConfig::instance->pause();
-			media->set_clips(model->edit_list().clips(), timeline_ticks_for(*model, on_screen));
+			media->set_clips(model->edit_list(), timeline_ticks_for(*model, on_screen));
 		}
 	}
 	model->set_anchors(state.anchors);
@@ -360,7 +360,7 @@ void SyncView::reorder_files(int from, int to, EditModel* model, MediaContainerM
 		return;
 	model->refresh_source_view();
 	EnvConfig::instance->pause();
-	media->set_clips(model->edit_list().clips(), moved.playhead_ticks);
+	media->set_clips(model->edit_list(), moved.playhead_ticks);
 	record_change(*model, false);
 }
 

@@ -8,3 +8,5 @@ build_log.txt
 *.png
 third_party/
 *.autosave
+*.LRF
+*.lrf

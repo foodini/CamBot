@@ -67,6 +67,26 @@ struct Clip {
 	bool operator!=(const Clip& other) const { return !(*this == other); }
 };
 
+// How the picture and sound give way at a seam of the edit. The seams are numbered from 0: seam 0 is the start of the video, seam i
+// (1 to count-1) the join between clip i-1 and clip i, and seam `count` the end of the video, so a list of n clips has n+1 of them.
+// A cut (the usual) is an instant. A fade, at the start or the end of the video only, takes `ticks` of the timeline to go up
+// from black (at the start) or down to black (at the end); the picture, whatever is drawn on it and the sound all fade together.
+// A crossfade, at a join only, lays the last `ticks` of one clip over the first `ticks` of the next: both clips play at once for that
+// long, the picture from one giving way to the other (and the sound likewise), so the timeline is `ticks` shorter than the two clips
+// end to end, and the footage of both is used in full (nothing is held or borrowed). No transition may last longer than half of the
+// shorter of the clips either side of it, so the two ends of a clip never meet.
+enum TransitionType { TRANSITION_CUT = 0, TRANSITION_CROSSFADE = 1, TRANSITION_FADE = 2 };
+
+struct Transition {
+	int     type;
+	int64_t ticks;       // Timeline ticks; 0 for a cut.
+	Transition() : type(TRANSITION_CUT), ticks(0) {}
+	Transition(int transition_type, int64_t length) : type(transition_type), ticks(length) {}
+	bool is_cut() const { return type == TRANSITION_CUT || ticks <= 0; }
+	bool operator==(const Transition& other) const { return type == other.type && ticks == other.ticks; }
+	bool operator!=(const Transition& other) const { return !(*this == other); }
+};
+
 // The edit timeline: clips played back to back. Clip i starts where clip i-1 ends.
 //
 // A clip that isn't played at normal speed lasts more or less time on the timeline than the footage it uses. So there are two
@@ -78,18 +98,55 @@ public:
 	EditList();
 
 	void clear();
+	// Sets the clips, with every transition a cut.
 	void set(const std::vector<Clip>& clips);
+	// Sets the clips and the transitions between them (count + 1 of them, see Transition; any other number, and they are all cuts).
+	// Nothing here checks that they are allowed (see transitions_valid()).
+	void set(const std::vector<Clip>& clips, const std::vector<Transition>& transitions);
+
+	// ---- Transitions ----
+	// The transition at seam `seam` (a cut if there is no such seam).
+	Transition               transition(int seam) const { return seam >= 0 && seam < (int)m_transitions.size() ? m_transitions[seam] : Transition(); }
+	const std::vector<Transition>& transitions() const { return m_transitions; }
+	bool                     has_transitions() const;
+	// The longest a transition at `seam` may be, in timeline ticks: half the shorter of the clips either side (0 if there is no such seam).
+	int64_t                  max_transition_ticks(int seam) const;
+	// Whether every transition is of a kind its seam allows and no longer than it may be.
+	bool                     transitions_valid() const;
+	// How much of the picture (and sound) shows at `timeline_ticks`, 0 to 1: less than 1 while a fade at the start or the end is
+	// in progress.
+	double                   fade_level(int64_t timeline_ticks) const;
 
 	int                      count() const { return (int)m_clips.size(); }
 	const Clip&              clip(int index) const { return m_clips[index]; }
 	const std::vector<Clip>& clips() const { return m_clips; }
-	// Where clip `index` begins on the timeline.
+	// Where clip `index` begins on the timeline. A clip with a crossfade into it begins that much before the clip before it ends.
 	int64_t                  start(int index) const { return m_starts[index]; }
+	// Where clip `index` ends on the timeline. (Inside the start of the clip after it, if there is a crossfade between them.)
+	int64_t                  end(int index) const { return m_starts[index] + m_clips[index].timeline_ticks(); }
 	int64_t                  total_ticks() const { return m_total; }
+	// How long the two clips either side of seam `seam` overlap: the length of the crossfade there, 0 for anything else.
+	int64_t                  overlap_ticks(int seam) const { return seam >= 1 && seam < (int)m_overlaps.size() ? m_overlaps[seam] : 0; }
+	// Whether any two clips overlap (so that the picture is sometimes made from two of them).
+	bool                     has_crossfades() const { return m_crossfades; }
 
 	// The clip a timeline time falls in. Times before the start give the first clip and times at
-	// or past the end give the last. -1 if there are no clips.
+	// or past the end give the last. -1 if there are no clips. Where two clips overlap (a crossfade) it is the one that shows more
+	// of itself: the earlier clip for the first half of the overlap, the later for the second. This is the clip that the sound,
+	// the overlays and the edits take the time to belong to.
 	int                      clip_index_for(int64_t timeline_ticks) const;
+
+	// What shows at a timeline time: clip `first` alone (second is -1) or, in a crossfade, clip `first` fading into clip `second = first + 1`,
+	// `weight` (0 to 1) of the way, a straight line from the first to the second.
+	struct Mix {
+		int    first;
+		int    second;
+		double weight;
+		Mix() : first(-1), second(-1), weight(0.0) {}
+	};
+	Mix                      mix_at(int64_t timeline_ticks) const;
+	// The footage time that clip `index` has at `timeline_ticks` (which may be anywhere in the clip, overlap included), kept inside the clip.
+	int64_t                  footage_for_clip_at(int index, int64_t timeline_ticks) const;
 	// Where in the media a timeline time comes from.
 	FileTime                 source_for(int64_t timeline_ticks) const;
 	// The timeline time of a moment in clip `index`'s media, kept inside that clip.
@@ -109,11 +166,15 @@ public:
 
 private:
 	std::vector<Clip>    m_clips;
+	std::vector<Transition> m_transitions;   // count + 1 of them, or none when there are no clips.
 	std::vector<int64_t> m_starts;
+	std::vector<int64_t> m_overlaps;         // Per seam (count + 1 of them): how far the clip after it starts before the clip before it ends.
+	std::vector<int64_t> m_switches;         // Per clip: the time from which it shows more of itself than the clip before.
 	int64_t              m_total;
 	std::vector<int64_t> m_footage_starts;
 	int64_t              m_footage_total;
 	bool                 m_speed_changes;
+	bool                 m_crossfades;
 };
 
 // The flight clock: the media files in the order they were recorded, end to end.
@@ -175,8 +236,15 @@ public:
 	// ---- The edit timeline ----
 	// False, changing nothing, if any clip names a missing media file or doesn't lie inside it.
 	bool                    set_clips(const std::vector<Clip>& clips);
+	// The same with the transitions between them (see EditList::set()). False, changing nothing, if the clips are no good or the
+	// transitions are not valid for them.
+	bool                    set_edit(const std::vector<Clip>& clips, const std::vector<Transition>& transitions);
 	void                    set_default_clips();    // Every file whole, in capture order.
 	const EditList&         edit_list() const { return m_edit_list; }
+	// Whether the join at seam `seam` (1 to count - 1) is between footage that carries on without a break: the same file going straight
+	// on (a clip that has been split), or the end of one file and the start of the next in capture order (what a camera that cuts its
+	// recording into files makes). Nothing is lost at such a join, so a transition there is not wanted.
+	bool                    join_is_continuous(int seam) const;
 	// True once the user has changed the edit timeline by hand. From then on changes that move
 	// telemetry under clips already made are warned about (see clips_with_changed_telemetry).
 	bool                    edit_started() const { return m_edit_started; }
@@ -194,6 +262,7 @@ public:
 	// Changing the capture order shows in the source view: the files are laid out again in the new order.
 	void                    refresh_source_view() { if (m_in_source_view) set_default_clips(); }
 	const std::vector<Clip>& clips_to_keep() const { return m_in_source_view ? m_stashed_clips : m_edit_list.clips(); }
+	const std::vector<Transition>& transitions_to_keep() const { return m_in_source_view ? m_stashed_transitions : m_edit_list.transitions(); }
 	bool                    edit_started_to_keep() const { return m_in_source_view ? m_stashed_edit_started : m_edit_started; }
 
 	// ---- Telemetry sync ----
@@ -276,6 +345,7 @@ private:
 	bool                     m_edit_started;
 	bool                     m_in_source_view;
 	std::vector<Clip>        m_stashed_clips;
+	std::vector<Transition>  m_stashed_transitions;
 	bool                     m_stashed_edit_started;
 	std::vector<SyncAnchor>  m_anchors;
 	FileTime                 m_launch_mark;

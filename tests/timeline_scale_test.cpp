@@ -64,6 +64,35 @@ static void test_zoom_keeps_the_point_under_the_cursor() {
 	CHECK(near(scale.ticks_per_pixel(), 1.0, 1e-12));
 }
 
+static void test_zoom_pins_the_ends() {
+	TimelineScale scale = make(1000000, 1.0, 1000.0f);
+	// Fitted: the ends are the edges of the strip. Within 2.5% of the width (25 pixels) of one, zoom about it.
+	CHECK(scale.zoom_anchor(1000.0f) == 1000.0f && scale.zoom_anchor(980.0f) == 1000.0f && scale.zoom_anchor(975.0f) == 1000.0f);
+	CHECK(scale.zoom_anchor(970.0f) == 970.0f);
+	CHECK(scale.zoom_anchor(0.0f) == 0.0f && scale.zoom_anchor(20.0f) == 0.0f && scale.zoom_anchor(30.0f) == 30.0f);
+	CHECK(scale.zoom_anchor(500.0f) == 500.0f);
+	// Zooming in with the cursor near the end keeps the end where it was, and the end of the video is then at the edge.
+	scale.zoom_at(scale.zoom_anchor(990.0f), 8.0);
+	CHECK(near(scale.view_end(), 1000000.0, 1e-6));
+	// Zoomed in on the middle, the end is not near the cursor: it zooms about the cursor as usual.
+	TimelineScale middle = make(1000000, 1.0, 1000.0f);
+	middle.zoom_at(500.0f, 8.0);
+	CHECK(middle.zoom_anchor(990.0f) == 990.0f && middle.zoom_anchor(5.0f) == 5.0f);
+	double before = middle.x_to_ticks(990.0f);
+	middle.zoom_at(middle.zoom_anchor(990.0f), 2.0);
+	CHECK(near(middle.x_to_ticks(990.0f), before, 1e-6));
+	// The view can't go past the end, so when it is showing it the end is the strip's edge; a little short of it, the end is just off
+	// the edge and a cursor near that edge still zooms about it.
+	TimelineScale panned = make(1000000, 1.0, 1000.0f);
+	panned.zoom_at(500.0f, 2.0);
+	panned.pan_by_pixels(1000.0f);
+	CHECK(near(panned.tick_to_x(1000000.0), 1000.0, 1e-3));
+	CHECK(panned.zoom_anchor(990.0f) == panned.tick_to_x(1000000.0));
+	panned.pan_by_pixels(-10.0f);
+	CHECK(panned.zoom_anchor(995.0f) == panned.tick_to_x(1000000.0));
+	CHECK(panned.zoom_anchor(900.0f) == 900.0f);
+}
+
 static void test_pan_stays_inside() {
 	TimelineScale scale = make(1000000, 1.0, 1000.0f);
 	scale.zoom_at(0.0f, 10.0);   // 100 ticks a pixel: 100000 ticks showing
@@ -142,6 +171,7 @@ static void test_wheel_notches() {
 int main() {
 	test_fit();
 	test_zoom_keeps_the_point_under_the_cursor();
+	test_zoom_pins_the_ends();
 	test_pan_stays_inside();
 	test_reveal();
 	test_ruler();

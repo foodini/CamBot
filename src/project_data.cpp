@@ -105,6 +105,50 @@ bool read_clip_speed(const Json::Value& object, double* speed, int* audio_mode, 
 	return true;
 }
 
+const char* transition_type_name(int type) {
+	if (type == TRANSITION_CROSSFADE)
+		return "crossfade";
+	if (type == TRANSITION_FADE)
+		return "fade";
+	return "cut";
+}
+
+// Reads the list of transitions that aren't cuts (project version 6), each naming its seam (see EditList), into a list with one
+// entry for every seam of the `clip_count` clips.
+bool read_transitions(const Json::Value& list, size_t clip_count, std::vector<Transition>* transitions, std::string* error) {
+	if (!list.isArray()) {
+		set_error(error, "The project file's \"transitions\" should be a list.");
+		return false;
+	}
+	transitions->assign(clip_count + 1, Transition());
+	for (Json::ArrayIndex i = 0; i < list.size(); i++) {
+		int64_t seam = 0;
+		int64_t ticks = 0;
+		if (!read_whole(list[i], "seam", 0, &seam, error) || !read_whole(list[i], "ticks", 0, &ticks, error))
+			return false;
+		if (seam > (int64_t)clip_count) {
+			set_error(error, "The project file has a transition at a place that is not in the edit.");
+			return false;
+		}
+		if (!list[i].isMember("type") || !list[i]["type"].isString()) {
+			set_error(error, "The project file has a transition without a \"type\".");
+			return false;
+		}
+		const std::string name = list[i]["type"].asString();
+		int type = TRANSITION_CUT;
+		if (name == "fade")
+			type = TRANSITION_FADE;
+		else if (name == "crossfade")
+			type = TRANSITION_CROSSFADE;
+		else if (name != "cut") {
+			set_error(error, "The project file has a transition whose \"type\" is not one of cut, fade or crossfade.");
+			return false;
+		}
+		(*transitions)[(size_t)seam] = Transition(type, ticks);
+	}
+	return true;
+}
+
 bool read_media_index(const Json::Value& object, size_t media_count, int* media, std::string* error) {
 	int64_t index = 0;
 	if (!read_whole(object, "media", 0, &index, error))
@@ -339,6 +383,22 @@ bool read_editing_state(const Json::Value& root, ProjectData* result, std::strin
 		}
 	}
 
+	if (root.isMember("transitions")) {
+		if (result->clips.empty()) {
+			set_error(error, "The project file has transitions but no clips for them to be between.");
+			return false;
+		}
+		if (!read_transitions(root["transitions"], result->clips.size(), &result->transitions, error))
+			return false;
+		bool any = false;
+		for (size_t i = 0; i < result->transitions.size(); i++) {
+			if (!result->transitions[i].is_cut())
+				any = true;
+		}
+		if (!any)
+			result->transitions.clear();
+	}
+
 	if (root.isMember("edit_started")) {
 		if (!root["edit_started"].isBool()) {
 			set_error(error, "The project file's \"edit_started\" should be true or false.");
@@ -513,6 +573,20 @@ std::string to_json(const ProjectData& project) {
 			clips.append(clip);
 		}
 		root["clips"] = clips;
+	}
+	if (project.transitions.size() == project.clips.size() + 1) {
+		Json::Value transitions(Json::arrayValue);
+		for (size_t seam = 0; seam < project.transitions.size(); seam++) {
+			if (project.transitions[seam].is_cut())
+				continue;
+			Json::Value transition(Json::objectValue);
+			transition["seam"] = (Json::UInt64)seam;
+			transition["type"] = transition_type_name(project.transitions[seam].type);
+			transition["ticks"] = Json::Value((Json::Int64)project.transitions[seam].ticks);
+			transitions.append(transition);
+		}
+		if (!transitions.empty())
+			root["transitions"] = transitions;
 	}
 	root["edit_started"] = project.edit_started;
 	if (!project.sync_anchors.empty()) {

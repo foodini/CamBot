@@ -22,6 +22,11 @@ MediaContainerMgr::MediaContainerMgr(MediaDecoder* decoder, const std::string& v
     m_height(decoder->height()),
     m_width(decoder->width()),
     m_rotation_angle(0.0),
+    m_second(nullptr),
+    m_composite(false),
+    m_shown(0),
+    m_first_lane(0),
+    m_second_lane(0),
     m_rewind_step_repeat_bucket(-1),
     m_advance_step_repeat_bucket(-1),
     m_center_ndc_x((extents[0].x + extents[3].x) / 2.0f),
@@ -44,6 +49,10 @@ MediaContainerMgr::MediaContainerMgr(MediaDecoder* decoder, const std::string& v
     m_audio_samples_encoded(0)
 {
     init_rendering(extents);
+
+    // A project opened with crossfades in it was given to the decoder before this object existed.
+    if (m_decoder->edit_list().has_crossfades())
+        edit_changed(m_decoder->pts());
 
     // Rotation nudge (held-repeat) and flip are this subsystem's own state (m_rotation_angle),
     // so they're bound here rather than in main() -- see InteractionMgr::bind_key()'s doc
@@ -102,6 +111,7 @@ MediaContainerMgr::~MediaContainerMgr() {
     // An export still in progress (the window was closed mid-export, say) gets a proper ending,
     // so what was written so far is a playable file.
     finalize_output();
+    drop_second();
 
     glDeleteVertexArrays(1, &m_VAO);
     glDeleteBuffers(1, &m_VBO);
@@ -141,8 +151,8 @@ void MediaContainerMgr::init_rendering(const glm::vec3* extents) {
     // VAOs requires a call to glBindVertexArray anyways so we generally don't unbind VAOs (nor VBOs) when it's not directly necessary.
     // glBindVertexArray(0);
 
-    glGenTextures(3, m_yuv_textures);
-    for (int channel = 0; channel < 3; channel++) {
+    glGenTextures(6, m_yuv_textures);
+    for (int channel = 0; channel < 6; channel++) {
         glBindTexture(GL_TEXTURE_2D, m_yuv_textures[channel]);
         // Set texture wrapping options
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
@@ -157,6 +167,9 @@ void MediaContainerMgr::init_rendering(const glm::vec3* extents) {
     glUniform1i(glGetUniformLocation(m_shader.ID, "texture0"), 0);
     glUniform1i(glGetUniformLocation(m_shader.ID, "texture1"), 1);
     glUniform1i(glGetUniformLocation(m_shader.ID, "texture2"), 2);
+    glUniform1i(glGetUniformLocation(m_shader.ID, "texture3"), 3);
+    glUniform1i(glGetUniformLocation(m_shader.ID, "texture4"), 4);
+    glUniform1i(glGetUniformLocation(m_shader.ID, "texture5"), 5);
 
 }
 
@@ -199,23 +212,15 @@ void MediaContainerMgr::render() {
 
     // The decoder's rows can be padded past the picture's width (linesize); tell GL, rather
     // than assuming the planes are tightly packed.
-    const AVFrame* frame = m_decoder->frame();
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_yuv_textures[0]);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, frame->linesize[0]);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, frame->data[0]);
-    glGenerateMipmap(GL_TEXTURE_2D);
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, m_yuv_textures[1]);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, frame->linesize[1]);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width / 2, height / 2, 0, GL_RED, GL_UNSIGNED_BYTE, frame->data[1]);
-    glGenerateMipmap(GL_TEXTURE_2D);
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, m_yuv_textures[2]);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, frame->linesize[2]);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width / 2, height / 2, 0, GL_RED, GL_UNSIGNED_BYTE, frame->data[2]);
-    glGenerateMipmap(GL_TEXTURE_2D);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    // In a crossfade the two pictures go to the shader together (units 0-2 and 3-5), and it mixes them.
+    if (blending()) {
+        upload_planes(lane(m_first_lane)->frame(), 0, width, height);
+        upload_planes(lane(m_second_lane)->frame(), 3, width, height);
+        m_shader.setFloat("mix_weight", (float)m_mix.weight);
+    } else {
+        upload_planes(shown()->frame(), 0, width, height);
+        m_shader.setFloat("mix_weight", 0.0f);
+    }
 
     // The rotated video's corners are clipped to the canvas (which is exactly the video rect: the
     // rectangle glReadPixels() captures for screenshots and export).
@@ -229,6 +234,27 @@ void MediaContainerMgr::render() {
     glDisable(GL_SCISSOR_TEST);
 }
 
+// Gives the three planes of `frame` to the three textures from `first_texture` on (which are on the texture units of the same numbers).
+// The decoder's rows can be padded past the picture's width (linesize); GL is told, rather than assuming the planes are tightly packed.
+void MediaContainerMgr::upload_planes(const AVFrame* frame, int first_texture, int width, int height) {
+    glActiveTexture(GL_TEXTURE0 + first_texture);
+    glBindTexture(GL_TEXTURE_2D, m_yuv_textures[first_texture]);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, frame->linesize[0]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, frame->data[0]);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glActiveTexture(GL_TEXTURE0 + first_texture + 1);
+    glBindTexture(GL_TEXTURE_2D, m_yuv_textures[first_texture + 1]);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, frame->linesize[1]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width / 2, height / 2, 0, GL_RED, GL_UNSIGNED_BYTE, frame->data[1]);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glActiveTexture(GL_TEXTURE0 + first_texture + 2);
+    glBindTexture(GL_TEXTURE_2D, m_yuv_textures[first_texture + 2]);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, frame->linesize[2]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width / 2, height / 2, 0, GL_RED, GL_UNSIGNED_BYTE, frame->data[2]);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+}
+
 bool MediaContainerMgr::advance_frame() {
     bool got_frame = false;
     if (m_recording && m_export_on_grid) {
@@ -236,12 +262,12 @@ bool MediaContainerMgr::advance_frame() {
         // footage has there (the same frame again where it is slowed down, a later one where it is sped up).
         const int64_t frame = m_decoder->frame_ticks();
         const int64_t next = m_export_ticks + frame;
-        if (next + frame / 2 <= m_decoder->total_ticks() && m_decoder->show_at(next)) {
+        if (next + frame / 2 <= m_decoder->total_ticks() && show_at(next)) {
             m_export_ticks = next;
             got_frame = true;
         }
     } else {
-        got_frame = m_decoder->read_frame();
+        got_frame = move(MOVE_READ, 0);
     }
     if (!got_frame) {
         // The picture is over; so is the sound, to the very end of the edit.
@@ -258,20 +284,20 @@ bool MediaContainerMgr::advance_frame() {
 }
 
 uint64_t MediaContainerMgr::get_presentation_timestamp() const {
-    int64_t pts = m_decoder->pts();
+    int64_t pts = shown()->pts();
     return pts < 0 ? 0 : (uint64_t)pts;
 }
 
 double MediaContainerMgr::get_presentation_timefloat() const {
-    return m_decoder->ticks_to_seconds(m_decoder->pts());
+    return m_decoder->ticks_to_seconds(shown()->pts());
 }
 
 float MediaContainerMgr::in_parametric() const {
-    return (float)((double)m_decoder->pts() / (double)m_decoder->total_ticks());
+    return (float)((double)shown()->pts() / (double)m_decoder->total_ticks());
 }
 
 float MediaContainerMgr::in_elapsed() const {
-    return (float)m_decoder->ticks_to_seconds(m_decoder->pts());
+    return (float)m_decoder->ticks_to_seconds(shown()->pts());
 }
 
 float MediaContainerMgr::in_duration() const {
@@ -287,18 +313,18 @@ float MediaContainerMgr::clip_start_parametric(int index) const {
 }
 
 int MediaContainerMgr::current_clip_index() const {
-    return m_decoder->current_clip();
+    return shown()->current_clip();
 }
 
 std::string MediaContainerMgr::current_media_name() const {
-    int clip = m_decoder->current_clip();
+    int clip = shown()->current_clip();
     if (clip < 0)
         return std::string();
     return fileio::base_name(m_decoder->media_path(m_decoder->edit_list().clip(clip).media));
 }
 
 int64_t MediaContainerMgr::current_ticks() const {
-    return m_decoder->pts();
+    return shown()->pts();
 }
 
 float MediaContainerMgr::frame_rate() const {
@@ -306,35 +332,189 @@ float MediaContainerMgr::frame_rate() const {
 }
 
 bool MediaContainerMgr::advance_to(int64_t timestamp) {
-    return m_decoder->advance_to(timestamp);
+    return move(MOVE_ADVANCE_TO, timestamp);
 }
 
 bool MediaContainerMgr::show_at(int64_t timestamp) {
-    return m_decoder->show_at(timestamp);
+    return move(MOVE_SHOW_AT, timestamp);
 }
 
 bool MediaContainerMgr::advance_to_parametric(float parametric) {
-    return m_decoder->advance_to((int64_t)((double)parametric * (double)m_decoder->total_ticks()));
+    return move(MOVE_ADVANCE_TO, (int64_t)((double)parametric * (double)m_decoder->total_ticks()));
 }
 
 bool MediaContainerMgr::seek_to_keyframe_near(int64_t timestamp) {
-    return m_decoder->seek_keyframe(timestamp);
+    return move(MOVE_SEEK_KEYFRAME, timestamp);
 }
 
 bool MediaContainerMgr::seek_to_parametric_fast(float parametric) {
-    return m_decoder->seek_keyframe((int64_t)((double)parametric * (double)m_decoder->total_ticks()));
+    return move(MOVE_SEEK_KEYFRAME, (int64_t)((double)parametric * (double)m_decoder->total_ticks()));
 }
 
 bool MediaContainerMgr::seek_by_frames_fast(int64_t frame_delta) {
-    return m_decoder->seek_by_frames_fast(frame_delta);
+    return move(MOVE_SEEK_BY, frame_delta);
 }
 
 bool MediaContainerMgr::advance_by(uint64_t frame_count) {
-    return m_decoder->step_frames((int64_t)frame_count);
+    return move(MOVE_STEP, (int64_t)frame_count);
 }
 
 bool MediaContainerMgr::rewind_by(uint64_t frame_count) {
-    return m_decoder->step_frames(-(int64_t)frame_count);
+    return move(MOVE_STEP, -(int64_t)frame_count);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Two decoders, for crossfades
+// ---------------------------------------------------------------------------------------------
+
+// The lane whose picture is of clip `clip`, or -1.
+int MediaContainerMgr::lane_showing(int clip) const {
+    for (int i = 0; i < 2; i++) {
+        if (lane(i) != nullptr && lane(i)->current_clip() == clip)
+            return i;
+    }
+    return -1;
+}
+
+bool MediaContainerMgr::open_second() {
+    std::vector<std::string> paths;
+    for (int i = 0; i < m_decoder->media_count(); i++)
+        paths.push_back(m_decoder->media_path(i));
+    MediaDecoder* decoder = new MediaDecoder();
+    decoder->set_quiet(true);
+    std::string error;
+    if (!decoder->open(paths, &error)) {
+        printf("Note: the files could not be opened a second time, for a crossfade: %s\n", error.c_str());
+        delete decoder;
+        return false;
+    }
+    m_second = decoder;
+    return true;
+}
+
+void MediaContainerMgr::drop_second() {
+    delete m_second;
+    m_second = nullptr;
+    m_composite = false;
+    m_shown = 0;
+    m_mix = EditList::Mix();
+}
+
+// The edit has just been given to the first decoder (which has shown the picture at `show_ticks`): sets up, or takes down, the second.
+void MediaContainerMgr::edit_changed(int64_t show_ticks) {
+    const EditList& edit = m_decoder->edit_list();
+    m_mix = EditList::Mix();
+    m_shown = 0;
+    if (!edit.has_crossfades()) {
+        drop_second();
+        return;
+    }
+    if (m_second == nullptr && !open_second())
+        return;   // No blending; the crossfades play as cuts at their middles.
+    if (!m_second->set_clips(edit, show_ticks)) {
+        drop_second();
+        return;
+    }
+    m_composite = true;
+    settle(show_ticks, 0, false);
+}
+
+bool MediaContainerMgr::set_clips(const std::vector<Clip>& clips, int64_t show_ticks) {
+    if (!m_decoder->set_clips(clips, show_ticks))
+        return false;
+    edit_changed(show_ticks);
+    return true;
+}
+
+bool MediaContainerMgr::set_clips(const EditList& edit, int64_t show_ticks) {
+    if (!m_decoder->set_clips(edit, show_ticks))
+        return false;
+    edit_changed(show_ticks);
+    return true;
+}
+
+// Moves, on the decoder that has the clip the time belongs to. Without crossfades that is simply the one decoder.
+bool MediaContainerMgr::move(Move kind, int64_t argument) {
+    if (!m_composite) {
+        switch (kind) {
+        case MOVE_ADVANCE_TO:    return m_decoder->advance_to(argument);
+        case MOVE_SHOW_AT:       return m_decoder->show_at(argument);
+        case MOVE_SEEK_KEYFRAME: return m_decoder->seek_keyframe(argument);
+        case MOVE_STEP:          return m_decoder->step_frames(argument);
+        case MOVE_SEEK_BY:       return m_decoder->seek_by_frames_fast(argument);
+        case MOVE_READ:          return m_decoder->read_frame();
+        }
+        return false;
+    }
+
+    const EditList& edit = m_decoder->edit_list();
+    const bool absolute = kind == MOVE_ADVANCE_TO || kind == MOVE_SHOW_AT || kind == MOVE_SEEK_KEYFRAME;
+    int64_t ticks = absolute ? argument : shown()->pts();
+    if (ticks < 0)
+        ticks = 0;
+    if (ticks > edit.total_ticks())
+        ticks = edit.total_ticks();
+    int mover = lane_showing(edit.clip_index_for(ticks));
+    if (mover < 0)
+        mover = m_shown;
+
+    MediaDecoder* decoder = lane(mover);
+    bool moved = false;
+    switch (kind) {
+    case MOVE_ADVANCE_TO:    moved = decoder->advance_to(argument); break;
+    case MOVE_SHOW_AT:       moved = decoder->show_at(argument); break;
+    case MOVE_SEEK_KEYFRAME: moved = decoder->seek_keyframe(argument); break;
+    case MOVE_STEP:          moved = decoder->step_frames(argument); break;
+    case MOVE_SEEK_BY:       moved = decoder->seek_by_frames_fast(argument); break;
+    case MOVE_READ:          moved = decoder->read_frame(); break;
+    }
+    if (!moved)
+        return false;
+    settle(absolute ? ticks : decoder->pts(), mover, kind == MOVE_SEEK_KEYFRAME || kind == MOVE_SEEK_BY);
+    return true;
+}
+
+// `mover` has just moved to the picture for `ticks` (or near it, for a stepping move). Makes sure the picture on screen is carried by the
+// decoder that has the clip `ticks` belongs to, and, in a crossfade, puts the other decoder on the other clip. `fast` is a scrub: the
+// other clip's picture then comes from the nearest keyframe, as the first's has.
+void MediaContainerMgr::settle(int64_t ticks, int mover, bool fast) {
+    const EditList& edit = m_decoder->edit_list();
+    const int clip = edit.clip_index_for(ticks);
+    int carrier = mover;
+    if (lane(mover)->current_clip() != clip) {
+        // Stepping has carried the mover across the middle of a crossfade: the other decoder, which has been showing the clip that
+        // takes over, takes over.
+        const int other = 1 - mover;
+        if (lane(other)->current_clip() == clip) {
+            carrier = other;
+            lane(other)->show_at(ticks);
+        } else {
+            lane(mover)->show_at(ticks);
+        }
+    }
+    m_shown = carrier;
+    m_mix = edit.mix_at(ticks);
+    m_first_lane = carrier;
+    m_second_lane = carrier;
+    MediaDecoder* partner = lane(1 - carrier);
+    if (m_mix.second < 0) {
+        partner->release_cache();   // Nothing to blend: don't hold on to a gigabyte of frames for it.
+        return;
+    }
+    const int other_clip = (clip == m_mix.first) ? m_mix.second : m_mix.first;
+    const bool placed = fast ? partner->seek_keyframe_clip(other_clip, ticks) : partner->show_clip_at(other_clip, ticks);
+    if (!placed) {
+        m_mix = EditList::Mix();   // Show the one picture there is.
+        m_mix.first = clip;
+        return;
+    }
+    if (clip == m_mix.first) {
+        m_first_lane = carrier;
+        m_second_lane = 1 - carrier;
+    } else {
+        m_first_lane = 1 - carrier;
+        m_second_lane = carrier;
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -451,13 +631,13 @@ bool MediaContainerMgr::start_output(const std::string& video_file_name, unsigne
     // happened to be sitting when it was started. seek_keyframe() always does a real seek
     // (never an answer from the frame cache, which would leave the demuxer wherever the
     // previous run stopped).
-    if (!m_decoder->seek_keyframe(0)) {
+    if (!seek_to_keyframe_near(0)) {
         m_last_error = "Could not go back to the start of the video.";
         return false;
     }
     // An edit with clips at other speeds is exported frame by frame on the timeline's own clock; one without is exported
     // frame by frame as the footage has them, as it always has been.
-    m_export_on_grid = m_decoder->edit_list().has_speed_changes();
+    m_export_on_grid = m_decoder->edit_list().has_speed_changes() || m_decoder->edit_list().has_crossfades();
     m_export_ticks = 0;
     if (m_output_audio_stream != nullptr) {
         m_audio_timeline.seek(0);
@@ -533,7 +713,7 @@ bool MediaContainerMgr::start_audio_output() {
 // The sound up to the end of the frame the decoder is on.
 void MediaContainerMgr::write_audio_for_current_frame() {
     const double seconds_per_tick = (double)m_decoder->time_base().num / (double)m_decoder->time_base().den;
-    const int64_t frame_end = (m_export_on_grid ? m_export_ticks : m_decoder->pts()) + m_decoder->frame_ticks();
+    const int64_t frame_end = (m_export_on_grid ? m_export_ticks : current_ticks()) + m_decoder->frame_ticks();
     write_audio_through(audio_plan::ticks_to_samples(frame_end, seconds_per_tick));
 }
 
@@ -670,7 +850,7 @@ bool MediaContainerMgr::output_video_frame(uint8_t* buf) {
               m_output_video_frame->data, m_output_video_frame->linesize);
     PrepareFlipFrameJ420(m_output_video_frame);
     // The decoder's global time for the frame on screen: continuous across all the input files.
-    m_output_video_frame->pts = m_export_on_grid ? m_export_ticks : m_decoder->pts();
+    m_output_video_frame->pts = m_export_on_grid ? m_export_ticks : current_ticks();
     err = avcodec_send_frame(m_output_video_codec_context, m_output_video_frame);
     if (err < 0) {
         printf("  ERROR sending new video frame output: ");

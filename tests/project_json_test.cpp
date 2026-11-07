@@ -31,6 +31,48 @@ static ProjectData sample_project() {
 	return project;
 }
 
+static std::string project_text(int version, const std::string& clips_json);
+
+static void test_transitions_in_the_file() {
+	ProjectData project = sample_project();
+	project.transitions.assign(project.clips.size() + 1, Transition());
+	project.transitions[0] = Transition(TRANSITION_FADE, 12000);
+	project.transitions[6] = Transition(TRANSITION_FADE, 3000);
+	const std::string text = project_io::to_json(project);
+	CHECK(text.find("\"transitions\"") != std::string::npos);
+	CHECK(text.find("\"fade\"") != std::string::npos);
+	ProjectData back;
+	std::string error;
+	CHECK_MSG(project_io::parse_json(text, &back, &error), "%s", error.c_str());
+	CHECK(back == project);
+	CHECK(back.transitions.size() == 7 && back.transitions[0] == project.transitions[0] && back.transitions[6] == project.transitions[6]);
+	CHECK(project_io::to_json(back) == text);
+	ProjectData changed = project;
+	changed.transitions[0].ticks = 13000;
+	CHECK(changed != project);
+	// A list with only cuts in it is no list at all.
+	ProjectData cuts = sample_project();
+	cuts.transitions.assign(cuts.clips.size() + 1, Transition());
+	CHECK(project_io::to_json(cuts).find("transitions") == std::string::npos);
+
+	// Bad ones.
+	const std::string two_clips = "[{\"media\":0,\"in\":0,\"out\":1000},{\"media\":0,\"in\":1000,\"out\":3000}]";
+	const std::string head = "{\"format\":\"cambot-project\",\"version\":6,\"video_files\":[\"a.mp4\"],\"time_base\":[1,25000],\"clips\":" + two_clips + ",\"transitions\":";
+	CHECK(project_io::parse_json(head + "[{\"seam\":0,\"type\":\"fade\",\"ticks\":100},{\"seam\":2,\"type\":\"fade\",\"ticks\":300}]}", &back, &error));
+	CHECK(back.transitions.size() == 3 && back.transitions[0].ticks == 100 && back.transitions[1].is_cut() && back.transitions[2].ticks == 300);
+	CHECK(!project_io::parse_json(head + "[{\"seam\":3,\"type\":\"fade\",\"ticks\":100}]}", &back, &error));
+	CHECK(error.find("not in the edit") != std::string::npos);
+	CHECK(!project_io::parse_json(head + "[{\"seam\":0,\"type\":\"wipe\",\"ticks\":100}]}", &back, &error));
+	CHECK(error.find("type") != std::string::npos);
+	CHECK(!project_io::parse_json(head + "[{\"seam\":0,\"ticks\":100}]}", &back, &error));
+	CHECK(!project_io::parse_json(head + "[{\"seam\":0,\"type\":\"fade\",\"ticks\":-1}]}", &back, &error));
+	CHECK(!project_io::parse_json(head + "{}}", &back, &error));
+	CHECK(!project_io::parse_json("{\"format\":\"cambot-project\",\"version\":6,\"video_files\":[\"a.mp4\"],\"time_base\":[1,25000],\"transitions\":[{\"seam\":0,\"type\":\"fade\",\"ticks\":5}]}", &back, &error));
+	// An older file has none, and reads as all cuts.
+	CHECK(project_io::parse_json(project_text(5, two_clips), &back, &error));
+	CHECK(back.transitions.empty());
+}
+
 static void test_speed_round_trip() {
 	ProjectData project = sample_project();
 	const std::string text = project_io::to_json(project);
@@ -52,7 +94,8 @@ static void test_speed_round_trip() {
 	const std::string plain_text = project_io::to_json(plain);
 	CHECK(plain_text.find("speed") == std::string::npos);
 	CHECK(plain_text.find("audio") == std::string::npos);
-	CHECK(plain_text.find("\"version\" : 5") != std::string::npos);
+	CHECK(plain_text.find("\"version\" : 6") != std::string::npos);
+	CHECK(plain_text.find("transitions") == std::string::npos);
 	// Written again, the text is the same: nothing creeps.
 	CHECK(project_io::to_json(back) == text);
 	// And a speed change shows as a change to the project.
@@ -112,6 +155,9 @@ static ProjectData full_project() {
 	project.sync_anchors.push_back(SyncAnchor(FileTime(0, 20000), 1755.5f));
 	project.sync_anchors.push_back(SyncAnchor(FileTime(1, 60000), 1801.25f));
 	project.launch_mark = FileTime(1, 12345);
+	project.transitions.assign(project.clips.size() + 1, Transition());
+	project.transitions[0] = Transition(TRANSITION_FADE, 12500);      // Half the first clip is 40000.
+	project.transitions[5] = Transition(TRANSITION_FADE, 15000);      // Half the last, which is 30000 (at normal speed).
 	TextBox first = text_box::default_box();
 	first.id = 3;
 	first.anchor = FileTime(1, 20000);
@@ -149,6 +195,7 @@ static void test_full_round_trip() {
 	CHECK(model.capture().order().size() == 3 && model.capture().order()[0] == 2 && model.capture().order()[1] == 0 && model.capture().order()[2] == 1);
 	CHECK(model.anchors().size() == 2);
 	CHECK(model.text_boxes().size() == 2);
+	CHECK(model.edit_list().transition(0) == project.transitions[0] && model.edit_list().transition(5) == project.transitions[5]);
 
 	ProjectData written = project;
 	project_io::fill_from_model(model, 1, 25000, &written);
@@ -169,6 +216,7 @@ static void test_full_round_trip() {
 	CHECK(again.capture().order() == model.capture().order());
 	CHECK(again.anchors() == model.anchors());
 	CHECK(again.text_boxes() == model.text_boxes());
+	CHECK(again.edit_list().transitions() == model.edit_list().transitions());
 	CHECK(again.launch_flight_seconds() == model.launch_flight_seconds());
 	CHECK(again.edit_started() == model.edit_started());
 	const int64_t total = model.edit_list().total_ticks();
@@ -198,7 +246,7 @@ static void test_older_and_bad_files() {
 	CHECK(project_io::parse_json(project_text(3, "[{\"media\":0,\"in\":0,\"out\":100}]"), &project, &error));
 	// A newer file is refused politely.
 	project = ProjectData();
-	CHECK(!project_io::parse_json(project_text(6, "[{\"media\":0,\"in\":0,\"out\":100}]"), &project, &error));
+	CHECK(!project_io::parse_json(project_text(7, "[{\"media\":0,\"in\":0,\"out\":100}]"), &project, &error));
 	CHECK(error.find("newer version") != std::string::npos);
 	// Speeds out of range or the wrong sort of thing are refused, with a sentence about it.
 	CHECK(!project_io::parse_json(project_text(5, "[{\"media\":0,\"in\":0,\"out\":100,\"speed\":0.05}]"), &project, &error));
@@ -216,8 +264,67 @@ static void test_older_and_bad_files() {
 	CHECK(project_io::parse_json(project_text(5, "[{\"media\":0,\"in\":0,\"out\":100,\"speed\":0.1},{\"media\":0,\"in\":0,\"out\":100,\"speed\":16}]"), &project, &error));
 }
 
+static void test_transitions_through_the_model() {
+	ProjectData project = sample_project();
+	project.clips.clear();
+	project.clips.push_back(Clip(0, 0, 50000));          // 2 seconds.
+	project.clips.push_back(Clip(1, 1000, 91000));       // 3.6 seconds.
+	project.transitions.assign(3, Transition());
+	project.transitions[0] = Transition(TRANSITION_FADE, 20000);     // Over the 25000 that half the first clip allows? No: under.
+	project.transitions[2] = Transition(TRANSITION_FADE, 45000);     // Exactly half of 90000.
+	project.edit_started = true;
+	std::vector<int64_t> durations;
+	durations.push_back(200000);
+	durations.push_back(150000);
+	EditModel model;
+	std::string error;
+	CHECK_MSG(project_io::apply_to_model(project, durations, 1, 25000, &model, &error), "%s", error.c_str());
+	CHECK(model.edit_list().transition(0) == project.transitions[0] && model.edit_list().transition(2) == project.transitions[2]);
+	// With another time base the lengths are converted.
+	EditModel other;
+	std::vector<int64_t> other_durations;
+	other_durations.push_back(400000);
+	other_durations.push_back(300000);
+	CHECK_MSG(project_io::apply_to_model(project, other_durations, 1, 50000, &other, &error), "%s", error.c_str());
+	CHECK(other.edit_list().transition(0).ticks == 40000 && other.edit_list().transition(2).ticks == 90000);
+	// A file that was edited to have too long a fade, or a kind of transition that isn't allowed there, is read all the same: shortened, or a cut.
+	ProjectData wrong = project;
+	wrong.transitions[0] = Transition(TRANSITION_FADE, 99999);
+	wrong.transitions[1] = Transition(TRANSITION_FADE, 100);
+	wrong.transitions[2] = Transition(TRANSITION_CROSSFADE, 100);
+	EditModel fixed;
+	CHECK_MSG(project_io::apply_to_model(wrong, durations, 1, 25000, &fixed, &error), "%s", error.c_str());
+	CHECK(fixed.edit_list().transition(0).type == TRANSITION_FADE && fixed.edit_list().transition(0).ticks == 25000);
+	CHECK(fixed.edit_list().transition(1).is_cut() && fixed.edit_list().transition(2).is_cut());
+	// A crossfade at a join is kept, shortened to what the two clips leave room for.
+	ProjectData crossed = project;
+	crossed.transitions[0] = Transition();
+	crossed.transitions[1] = Transition(TRANSITION_CROSSFADE, 99999);
+	crossed.transitions[2] = Transition();
+	EditModel joined;
+	CHECK_MSG(project_io::apply_to_model(crossed, durations, 1, 25000, &joined, &error), "%s", error.c_str());
+	CHECK(joined.edit_list().transition(1).type == TRANSITION_CROSSFADE);
+	CHECK(joined.edit_list().transition(1).ticks == joined.edit_list().max_transition_ticks(1) && joined.edit_list().transitions_valid());
+	// Written back out, what is in the model.
+	ProjectData written = project;
+	project_io::fill_from_model(model, 1, 25000, &written);
+	CHECK(written.transitions == project.transitions);
+	ProjectData cleared = project;
+	project_io::fill_from_model(fixed, 1, 25000, &cleared);
+	CHECK(cleared.transitions.size() == 3 && cleared.transitions[0].ticks == 25000);
+	EditModel plain;
+	ProjectData no_clips;
+	no_clips.video_files = project.video_files;
+	CHECK(project_io::apply_to_model(no_clips, durations, 1, 25000, &plain, &error));
+	ProjectData filled;
+	project_io::fill_from_model(plain, 1, 25000, &filled);
+	CHECK(filled.transitions.empty());
+}
+
 int main() {
 	test_speed_round_trip();
+	test_transitions_in_the_file();
+	test_transitions_through_the_model();
 	test_through_the_model();
 	test_full_round_trip();
 	test_older_and_bad_files();

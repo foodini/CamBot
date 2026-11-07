@@ -8,24 +8,10 @@ void TimelineSelection::note_clips(const EditList& list) {
 }
 
 int TimelineSelection::effective_clip(const EditList& list, int64_t playhead_ticks) const {
-	int inside = 0;
-	int first = -1;
-	bool picked_inside = false;
-	for (int i = 0; i < list.count(); i++) {
-		const int64_t start = list.start(i);
-		if (playhead_ticks >= start && playhead_ticks < start + list.clip(i).timeline_ticks()) {
-			inside++;
-			if (first < 0)
-				first = i;
-			if (m_kind == CLIP && i == m_clip)
-				picked_inside = true;
-		}
-	}
-	if (picked_inside)
+	if (list.count() == 0)
+		return -1;
+	if (m_kind == CLIP && m_clip >= 0 && m_clip < list.count() && playhead_ticks >= list.start(m_clip) && playhead_ticks < list.end(m_clip))
 		return m_clip;
-	if (inside == 1)
-		return first;
-	if (inside == 0)
-		return list.clip_index_for(playhead_ticks);    // Past the end, say: whatever the edit list makes of it.
-	return -1;
+	// Not picked, or the playhead has left it: the clip the playhead belongs to (in a crossfade, the one showing more of itself).
+	return list.clip_index_for(playhead_ticks);
 }

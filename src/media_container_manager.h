@@ -24,6 +24,10 @@ extern "C" {
 // Shows the frames a MediaDecoder produces (the OpenGL side), answers the rest of the program's
 // questions about "where are we in the video", and exports the result. Finding, decoding and
 // seeking frames, across however many files the flight was recorded in, is MediaDecoder's job.
+//
+// Where the edit has crossfades the picture is made from two clips at once, and two decoders are kept: one for each clip. (The
+// second is opened when the first crossfade appears and let go of when the last one goes.) Everywhere else only the first one works,
+// just as it always did.
 class MediaContainerMgr {
 public:
 	// `decoder` must already be open and must outlive this object.
@@ -69,12 +73,16 @@ public:
 	std::string current_media_name() const;                      // That clip's file, without its folder.
 	// Replaces the clips being played (see MediaDecoder::set_clips) and shows the frame at
 	// `show_ticks` of the new timeline. False, changing nothing, if the clips are not valid.
-	bool        set_clips(const std::vector<Clip>& clips, int64_t show_ticks) { return m_decoder->set_clips(clips, show_ticks); }
+	bool        set_clips(const std::vector<Clip>& clips, int64_t show_ticks);
+	// The same, with the transitions of the edit.
+	bool        set_clips(const EditList& edit, int64_t show_ticks);
 	// The tick count at the frame on screen (see MediaDecoder), for mapping it through the edit model.
 	int64_t     current_ticks() const;
 	// What one tick is, in seconds (numerator / denominator).
 	AVRational  tick_time_base() const { return m_decoder->time_base(); }
 	int64_t     frame_ticks() const { return m_decoder->frame_ticks(); }   // How long one frame lasts, in ticks.
+	// Whether the picture on screen is a blend of two clips (a crossfade is under the playhead), and how far into the second it is.
+	bool        blending() const { return m_composite && m_mix.second >= 0; }
 	// The edit being played and the files it is made of, for playing the sound that goes with it.
 	const EditList&    edit_list() const { return m_decoder->edit_list(); }
 	int                media_count() const { return m_decoder->media_count(); }
@@ -107,6 +115,13 @@ private:
 	uint32_t           m_height;
 	uint32_t           m_width;
 	float              m_rotation_angle;
+	// The second decoder, for the other clip of a crossfade; null while the edit has none. Lane 0 is m_decoder, lane 1 is this.
+	MediaDecoder*      m_second;
+	bool               m_composite;      // The edit has crossfades and both lanes are in use.
+	int                m_shown;          // The lane that carries the clip on screen (the one the time belongs to).
+	EditList::Mix      m_mix;            // What the two lanes show: clip m_mix.first (lane m_first_lane) fading into m_mix.second.
+	int                m_first_lane;
+	int                m_second_lane;
 	// Per-key auto-repeat state for the held-frame-step keys -- see ffsw::held_repeat_due().
 	int                m_rewind_step_repeat_bucket;
 	int                m_advance_step_repeat_bucket;
@@ -116,12 +131,25 @@ private:
 	float              m_center_ndc_x;
 	float              m_center_ndc_y;
 
-	unsigned int       m_yuv_textures[3];
+	unsigned int       m_yuv_textures[6];     // Y, U and V of the picture; then of the second picture of a blend.
 	Shader             m_shader;
 	unsigned int       m_VAO;
 	unsigned int       m_VBO;
 
 	void init_rendering(const glm::vec3* extents);
+	void upload_planes(const AVFrame* frame, int first_texture, int width, int height);
+
+	// Moving, with one or two decoders. Every move goes to the decoder that has the clip the time belongs to; then, in a crossfade,
+	// the other decoder is put on the other clip.
+	enum Move { MOVE_ADVANCE_TO, MOVE_SHOW_AT, MOVE_SEEK_KEYFRAME, MOVE_STEP, MOVE_SEEK_BY, MOVE_READ };
+	bool move(Move kind, int64_t argument);
+	void settle(int64_t ticks, int mover, bool fast);
+	MediaDecoder* lane(int index) const { return index == 0 ? m_decoder : m_second; }
+	const MediaDecoder* shown() const { return m_composite ? lane(m_shown) : m_decoder; }
+	int lane_showing(int clip) const;
+	bool open_second();
+	void drop_second();
+	void edit_changed(int64_t show_ticks);
 
 	// For writing the output video:
 	bool start_output(const std::string& video_file_name, unsigned int width, unsigned int height);

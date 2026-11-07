@@ -22,6 +22,31 @@ int64_t rescale_ticks(int64_t ticks, int from_num, int from_den, int to_num, int
 	return (int64_t)llroundl(seconds * (long double)to_den / (long double)to_num);
 }
 
+// The transitions of a project as they go with its clips in this run: in this run's time base, those that are of a kind their place
+// allows kept, and each shortened if need be to what its clips leave room for (the project file may have been edited, and a change of
+// time base rounds).
+std::vector<Transition> transitions_for(const ProjectData& project, const std::vector<Clip>& clips, int from_num, int from_den, int tb_num, int tb_den) {
+	std::vector<Transition> result(clips.size() + 1, Transition());
+	if (project.transitions.size() != project.clips.size() + 1 || project.clips.size() != clips.size())
+		return result;
+	EditList fit;
+	fit.set(clips);
+	const int count = (int)clips.size();
+	for (int seam = 0; seam <= count; seam++) {
+		const Transition& saved = project.transitions[seam];
+		const bool at_an_end = seam == 0 || seam == count;
+		if (saved.is_cut() || (at_an_end && saved.type != TRANSITION_FADE) || (!at_an_end && saved.type != TRANSITION_CROSSFADE))
+			continue;
+		int64_t ticks = rescale_ticks(saved.ticks, from_num, from_den, tb_num, tb_den);
+		const int64_t most = fit.max_transition_ticks(seam);
+		if (ticks > most)
+			ticks = most;
+		if (ticks > 0)
+			result[seam] = Transition(saved.type, ticks);
+	}
+	return result;
+}
+
 }  // namespace
 
 bool apply_to_model(const ProjectData& project, const std::vector<int64_t>& media_durations, int tb_num, int tb_den,
@@ -51,7 +76,7 @@ bool apply_to_model(const ProjectData& project, const std::vector<int64_t>& medi
 			clips.push_back(Clip(clip.media, rescale_ticks(clip.in_ticks, from_num, from_den, tb_num, tb_den),
 				rescale_ticks(clip.out_ticks, from_num, from_den, tb_num, tb_den), clip.speed, clip.audio_mode));
 		}
-		if (!model->set_clips(clips)) {
+		if (!model->set_edit(clips, transitions_for(project, clips, from_num, from_den, tb_num, tb_den))) {
 			// The usual cause is a file that has been replaced by a shorter one.
 			set_error(error, "The edit in this project uses part of a video file that is no longer there: a file is shorter than it "
 				"was when the project was saved, or the project file has been changed.");
@@ -105,6 +130,12 @@ void fill_from_model(const EditModel& model, int tb_num, int tb_den, ProjectData
 	project->time_base_den = tb_den;
 	project->capture_order = model.capture().order();
 	project->clips = model.clips_to_keep();
+	project->transitions.clear();
+	const std::vector<Transition>& transitions = model.transitions_to_keep();
+	for (size_t i = 0; i < transitions.size(); i++) {
+		if (!transitions[i].is_cut())
+			project->transitions = transitions;      // At least one that is not a cut: keep them all.
+	}
 	project->edit_started = model.edit_started_to_keep();
 
 	// One anchor at the very start of the flight that says the clocks agree is the same as

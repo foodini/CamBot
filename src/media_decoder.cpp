@@ -321,7 +321,7 @@ bool MediaDecoder::open(const std::vector<std::string>& paths, std::string* erro
 		std::vector<Clip> whole_files;
 		for (int i = 0; i < (int)m_paths.size(); i++)
 			whole_files.push_back(Clip(i, 0, m_media_durations[i]));
-		set_clip_lists(whole_files);
+		set_clip_lists(whole_files, std::vector<Transition>());
 	}
 
 	// Second pass: start at the beginning of the first.
@@ -718,8 +718,8 @@ void MediaDecoder::clear_clips() {
 	m_footage.clear();
 }
 
-void MediaDecoder::set_clip_lists(const std::vector<Clip>& clips) {
-	m_edit.set(clips);
+void MediaDecoder::set_clip_lists(const std::vector<Clip>& clips, const std::vector<Transition>& transitions) {
+	m_edit.set(clips, transitions);
 	// The same clips with the speed taken out: the decoder reads each file straight through, one frame after another, so it
 	// keeps its own idea of time (footage ticks) and the public functions below turn it into the edit's.
 	std::vector<Clip> at_normal_speed = clips;
@@ -791,7 +791,43 @@ bool MediaDecoder::show_footage(int64_t footage) {
 	return advance_to_footage(footage - m_frame_ticks + 1);
 }
 
+// A moment of clip `index` as a footage time that is surely inside it: its very end belongs to the clip after.
+int64_t MediaDecoder::footage_in_clip(int index, int64_t timeline_ticks) const {
+	int64_t footage = m_edit.footage_for_clip_at(index, timeline_ticks);
+	const int64_t last = m_edit.footage_start(index) + m_edit.clip(index).duration_ticks() - 1;
+	if (footage > last)
+		footage = last;
+	return footage;
+}
+
+bool MediaDecoder::show_clip_at(int clip, int64_t ticks) {
+	if (!is_open() || clip < 0 || clip >= m_edit.count())
+		return false;
+	return show_footage(footage_in_clip(clip, ticks));
+}
+
+bool MediaDecoder::seek_keyframe_clip(int clip, int64_t ticks) {
+	if (!is_open() || clip < 0 || clip >= m_edit.count())
+		return false;
+	int64_t footage = footage_in_clip(clip, ticks);
+	if (m_edit.clip(clip).speed != 1.0) {
+		// As footage_request() does: a frame's own time turned into the timeline and back can come out a little late.
+		footage -= (int64_t)ceil(m_edit.clip(clip).speed) + 1;
+		if (footage < m_edit.footage_start(clip))
+			footage = m_edit.footage_start(clip);
+	}
+	return seek_keyframe_footage(footage);
+}
+
 bool MediaDecoder::set_clips(const std::vector<Clip>& clips, int64_t show_ticks) {
+	return set_clips_and_transitions(clips, std::vector<Transition>(), show_ticks);
+}
+
+bool MediaDecoder::set_clips(const EditList& edit, int64_t show_ticks) {
+	return set_clips_and_transitions(edit.clips(), edit.transitions(), show_ticks);
+}
+
+bool MediaDecoder::set_clips_and_transitions(const std::vector<Clip>& clips, const std::vector<Transition>& transitions, int64_t show_ticks) {
 	if (!is_open() || clips.empty())
 		return false;
 	for (size_t i = 0; i < clips.size(); i++) {
@@ -803,7 +839,7 @@ bool MediaDecoder::set_clips(const std::vector<Clip>& clips, int64_t show_ticks)
 		if (!(clip.speed >= MIN_SPEED && clip.speed <= MAX_SPEED))
 			return false;
 	}
-	set_clip_lists(clips);
+	set_clip_lists(clips, transitions);
 	// Nothing decoded so far means anything in the new arrangement: forget it all, and force the
 	// next move to seek.
 	m_cache.clear();

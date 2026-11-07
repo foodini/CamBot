@@ -38,4 +38,5 @@ private:
 	int64_t            m_ticks_start;
 	int64_t            m_last_shown;     // The picture's time as we left it: if it isn't that, someone moved it.
 	std::vector<Clip>  m_clips;          // The edit we are playing: if it isn't that, it was changed.
+	std::vector<Transition> m_transitions;   // And its transitions (they change the sound).
 };

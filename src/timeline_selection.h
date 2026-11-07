@@ -6,9 +6,10 @@
 //
 // With nothing picked, the clip the playhead is in is the one the edits (Split, Trim and so on) and the Speed section act on, as
 // they always did. A clip that has been clicked stays the one for as long as the playhead is somewhere inside it; once the
-// playhead has left it, the clip the playhead is in is the one again. Where the playhead is in more than one clip at once
-// (while one fades into the next) and none of them is picked, there is no one clip to act on, and effective_clip() says so
-// with -1, so the buttons can be greyed out instead of guessing.
+// playhead has left it, the clip the playhead is in is the one again. Where the playhead is in two clips at once (while one
+// crossfades into the next) and neither is picked, it is the one showing more of itself (the first for the first half of the
+// crossfade, the second for the rest): so the one that is outlined, and acted on, changes as the video plays through a crossfade,
+// and a click on the other one picks it.
 //
 // A change to the clips themselves (a cut, a move, an undo) lets go of the pick, as the numbers it was made with no longer mean
 // the same clips.
@@ -43,8 +44,7 @@ public:
 	// Call each frame with the clips as they are: lets go of the pick if the clips have changed since the last call.
 	void note_clips(const EditList& list);
 
-	// The one clip the edits act on with the playhead at `playhead_ticks`, or -1 if there is none (no clips, or the playhead
-	// is in several and none of them is picked).
+	// The one clip the edits act on with the playhead at `playhead_ticks`, or -1 if there are no clips.
 	int effective_clip(const EditList& list, int64_t playhead_ticks) const;
 
 private:

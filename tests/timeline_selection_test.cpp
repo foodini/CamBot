@@ -44,6 +44,31 @@ static void test_a_clicked_clip_is_kept_while_the_playhead_is_in_it() {
 	CHECK(selection.effective_clip(list, 250) == 1);
 }
 
+static void test_in_a_crossfade() {
+	std::vector<Clip> clips;
+	clips.push_back(Clip(0, 0, 100));       // Timeline 0 .. 100.
+	clips.push_back(Clip(0, 100, 300));     // 80 .. 280 (the last 20 of the first are under the first 20 of this).
+	std::vector<Transition> transitions(3);
+	transitions[1] = Transition(TRANSITION_CROSSFADE, 20);
+	EditList list;
+	list.set(clips, transitions);
+	TimelineSelection selection;
+	// Not picked: the one showing more of itself.
+	CHECK(selection.effective_clip(list, 79) == 0);
+	CHECK(selection.effective_clip(list, 89) == 0);
+	CHECK(selection.effective_clip(list, 90) == 1);
+	CHECK(selection.effective_clip(list, 99) == 1);
+	// Picked: that one, wherever in it the playhead is.
+	selection.select_clip(0);
+	CHECK(selection.effective_clip(list, 95) == 0);
+	CHECK(selection.effective_clip(list, 99) == 0);
+	CHECK(selection.effective_clip(list, 100) == 1);      // Out of the first clip.
+	selection.select_clip(1);
+	CHECK(selection.effective_clip(list, 80) == 1);
+	CHECK(selection.effective_clip(list, 85) == 1);
+	CHECK(selection.effective_clip(list, 79) == 0);
+}
+
 static void test_a_transition_pick() {
 	const EditList list = three_clips();
 	TimelineSelection selection;
@@ -79,6 +104,7 @@ static void test_changes_to_the_clips_let_go() {
 int main() {
 	test_following_the_playhead();
 	test_a_clicked_clip_is_kept_while_the_playhead_is_in_it();
+	test_in_a_crossfade();
 	test_a_transition_pick();
 	test_changes_to_the_clips_let_go();
 	if (g_failures == 0)

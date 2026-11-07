@@ -735,7 +735,61 @@ static void test_keyframe_times() {
 	CHECK(shown_frame(decoder, s) == 20);
 }
 
+// In a crossfade two decoders each show one of the two clips, whichever one the time belongs to.
+static void test_clips_shown_by_name() {
+	int frames[] = { 60, 60 }, gops[] = { 8, 8 }, delays[] = { 2, 2 };
+	Setup s = make_setup(frames, gops, delays, 2);
+	std::vector<Clip> clips;
+	clips.push_back(Clip(0, 0 * FT, 40 * FT));      // Timeline 0 to 1200.
+	clips.push_back(Clip(1, 10 * FT, 50 * FT));     // Starts at 900 (a 300 crossfade), runs to 2100.
+	std::vector<Transition> transitions(3);
+	transitions[1] = Transition(TRANSITION_CROSSFADE, 10 * FT);
+	EditList edit;
+	edit.set(clips, transitions);
+	CHECK(edit.has_crossfades());
+	CHECK(edit.start(1) == 30 * FT && edit.total_ticks() == 70 * FT);
+
+	MediaDecoder first, second;
+	std::string error;
+	CHECK(first.open(s.paths, &error));
+	CHECK(second.open(s.paths, &error));
+	CHECK(first.set_clips(edit, 0));
+	CHECK(second.set_clips(edit, 0));
+
+	// At 1000 (frame 33 of the timeline) clip A is at its frame 33 and clip B, which began at 900, at its 10 + 3.
+	const int64_t t = 33 * FT + 5;
+	CHECK(first.show_clip_at(0, t));
+	CHECK(first.current_clip() == 0 && shown_frame(first, s) == 33);
+	CHECK(second.show_clip_at(1, t));
+	CHECK(second.current_clip() == 1 && shown_frame(second, s) == 60 + 13);
+	CHECK(second.pts() == 33 * FT);
+
+	// The other way round, and with the clips swapped over between the decoders; jumping about.
+	CHECK(second.show_clip_at(0, 31 * FT));
+	CHECK(second.current_clip() == 0 && shown_frame(second, s) == 31);
+	CHECK(first.show_clip_at(1, 35 * FT));
+	CHECK(first.current_clip() == 1 && shown_frame(first, s) == 60 + 15);
+
+	// Before the clip's start, and past its end: its first and its last frame, never the neighbour's.
+	CHECK(first.show_clip_at(1, 0));
+	CHECK(first.current_clip() == 1 && shown_frame(first, s) == 60 + 10);
+	CHECK(first.show_clip_at(0, 100 * FT));
+	CHECK(first.current_clip() == 0 && shown_frame(first, s) == 39);
+
+	// Fast: a keyframe of the clip, at or before the moment.
+	CHECK(first.seek_keyframe_clip(1, 35 * FT));
+	CHECK(first.current_clip() == 1);
+	CHECK(shown_frame(first, s) <= 60 + 15 && shown_frame(first, s) >= 60 + 10);
+	CHECK(first.seek_keyframe_clip(0, 38 * FT));
+	CHECK(first.current_clip() == 0 && shown_frame(first, s) <= 38 && shown_frame(first, s) >= 32);
+
+	CHECK(!first.show_clip_at(2, 0));
+	CHECK(!first.show_clip_at(-1, 0));
+	CHECK(!first.seek_keyframe_clip(2, 0));
+}
+
 int main() {
+	test_clips_shown_by_name();
 	test_keyframe_times();
 	test_single_file_sequential();
 	test_multi_file_sequential_no_frames_lost();

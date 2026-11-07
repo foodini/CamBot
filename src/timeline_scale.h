@@ -35,6 +35,10 @@ public:
 
 	// `factor` above 1 zooms in, below 1 out, and what is at x stays at x.
 	void zoom_at(float x, double factor);
+	// Where to zoom about when the cursor is at x: x itself, except that near the start or the end of the timeline (within
+	// timeline_zoom::NEAR_END_FRACTION of the strip's width of it, and only where that end is really showing) it is that end's own x, so zooming
+	// in there pins the end in place instead of leaving it to be panned to.
+	float zoom_anchor(float x) const;
 	// Moves the view later by `pixels` (earlier if negative), staying inside the timeline.
 	void pan_by_pixels(float pixels);
 	// If `ticks` isn't showing, moves the view to show it a quarter of the way in from the left.
@@ -60,6 +64,8 @@ namespace timeline_zoom {
 // counts in full; the part of a movement past one click counts for FAST_WHEEL_WEIGHT of a notch
 // each, so a quick flick zooms further than a click but not wildly further. Signed, like `wheel`.
 const double FAST_WHEEL_WEIGHT = 0.4;
+// How close to the start or the end of the timeline the cursor has to be, as a fraction of the strip's width, for zooming to be about that end.
+const float NEAR_END_FRACTION = 0.025f;
 double notches(double wheel);
 
 }  // namespace timeline_zoom

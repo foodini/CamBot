@@ -60,6 +60,9 @@ const ImU32 COLOR_SEAM_FILL = IM_COL32(20, 20, 26, 190);          // The icon at
 const ImU32 COLOR_SEAM_BORDER = IM_COL32(170, 170, 185, 255);
 const ImU32 COLOR_SEAM_HOT = IM_COL32(240, 240, 248, 255);        // With the mouse on it.
 const ImU32 COLOR_SEAM_PICKED = IM_COL32(70, 215, 235, 255);      // The one being edited.
+const ImU32 COLOR_SEAM_CROSS = IM_COL32(235, 235, 245, 255);      // The cross of a crossfade, in its icon.
+const ImU32 COLOR_OVERLAP_FILL = IM_COL32(255, 255, 255, 60);     // Where two clips are crossfaded, over both.
+const ImU32 COLOR_OVERLAP_LINE = IM_COL32(255, 255, 255, 170);
 const float SEAM_ROUNDING = 3.0f;
 const ImU32 COLOR_JOIN = IM_COL32(235, 200, 70, 255);
 const ImU32 COLOR_PLAYHEAD = IM_COL32(240, 70, 70, 255);
@@ -156,16 +159,24 @@ struct SeamBox {
 	float right;
 };
 
-// The stretch of the timeline a transition takes up, as times: from `*zone_start` to `*zone_end`. Every one is a plain cut for now,
-// which takes no time, so they are a single moment, the join itself (or the start or end of the video).
+// The stretch of the timeline a transition takes up, as times: from `*zone_start` to `*zone_end`. A cut takes no time, so it is a
+// single moment, the join itself (or the start or end of the video); a fade at the start runs from the start for its length, and
+// one at the end back from the end.
 void seam_zone(const EditList& clips, int seam, int64_t* zone_start, int64_t* zone_end) {
-	int64_t moment = 0;
-	if (seam >= clips.count())
-		moment = clips.total_ticks();
-	else if (seam > 0)
-		moment = clips.start(seam);
-	*zone_start = moment;
-	*zone_end = moment;
+	const Transition transition = clips.transition(seam);
+	const int64_t length = transition.is_cut() ? 0 : transition.ticks;
+	if (seam >= clips.count()) {
+		*zone_start = clips.total_ticks() - length;
+		*zone_end = clips.total_ticks();
+		return;
+	}
+	if (seam == 0) {
+		*zone_start = 0;
+		*zone_end = length;
+		return;
+	}
+	*zone_start = clips.start(seam);
+	*zone_end = *zone_start + clips.overlap_ticks(seam);      // A crossfade: from where the clip after begins to where the one before ends.
 }
 
 // Where to take the playhead to show a transition: the start of the clip after a join, the first or the last frame at the ends.
@@ -217,7 +228,7 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 	if (editor != nullptr) {
 		ImGui::SameLine(0.0f, 16.0f);
 		if (edit_button("Split", !exporting && editor->can_split(model, media), "Cut the clip in two at the playhead (S)"))
-			editor->split(&model, &media, selection);
+			editor->split(&model, &media);
 		ImGui::SameLine();
 		if (edit_button("Trim Left", !exporting && editor->can_trim_left(model, media), "Delete the clip from its start up to the playhead frame ([)"))
 			editor->trim_left(&model, &media);
@@ -364,7 +375,7 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 	const float mouse_x = io.MousePos.x - origin.x;
 
 	if (!exporting) {
-		// The wheel: zoom about the cursor, or with Shift (or a sideways wheel) move along.
+		// The wheel: zoom about the cursor (about the very start or end of the video, if the cursor is close to it), or with Shift (or a sideways wheel) move along.
 		if (hovered) {
 			if (io.MouseWheel != 0.0f || io.MouseWheelH != 0.0f)
 				m_follow = false;
@@ -374,7 +385,7 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 					m_scale.pan_by_pixels(-wheel * PAN_PIXELS_PER_WHEEL_NOTCH);
 			} else {
 				if (io.MouseWheel != 0.0f)
-					m_scale.zoom_at(mouse_x, powf(ZOOM_PER_WHEEL_NOTCH, (float)timeline_zoom::notches((double)io.MouseWheel)));
+					m_scale.zoom_at(m_scale.zoom_anchor(mouse_x), powf(ZOOM_PER_WHEEL_NOTCH, (float)timeline_zoom::notches((double)io.MouseWheel)));
 				if (io.MouseWheelH != 0.0f)
 					m_scale.pan_by_pixels(io.MouseWheelH * PAN_PIXELS_PER_WHEEL_NOTCH);
 			}
@@ -739,6 +750,21 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 		draw->AddRect(ImVec2(left, track_top - 1.0f), ImVec2(right, track_bottom + 1.0f), COLOR_CURRENT_CLIP, CLIP_ROUNDING, 0, 2.0f);
 	}
 
+	// Where two clips overlap in a crossfade: a pale band over both, crossed from corner to corner, one clip going out and the other in.
+	for (int seam = 1; seam < clips.count(); seam++) {
+		if (clips.overlap_ticks(seam) <= 0)
+			continue;
+		const float band_left = origin.x + m_scale.tick_to_x((double)clips.start(seam));
+		const float band_right = origin.x + m_scale.tick_to_x((double)(clips.start(seam) + clips.overlap_ticks(seam)));
+		if (band_right < strip_min.x || band_left > strip_max.x || band_right - band_left < 2.0f)
+			continue;
+		draw->PushClipRect(ImVec2(band_left, track_top), ImVec2(band_right, track_bottom), true);
+		draw->AddRectFilled(ImVec2(band_left, track_top), ImVec2(band_right, track_bottom), COLOR_OVERLAP_FILL);
+		draw->AddLine(ImVec2(band_left, track_bottom), ImVec2(band_right, track_top), COLOR_OVERLAP_LINE, 1.5f);
+		draw->AddLine(ImVec2(band_left, track_top), ImVec2(band_right, track_bottom), COLOR_OVERLAP_LINE, 1.5f);
+		draw->PopClipRect();
+	}
+
 	// The transitions' icons: an empty box for a plain cut.
 	for (size_t i = 0; i < seam_boxes.size(); i++) {
 		const SeamBox& box = seam_boxes[i];
@@ -748,9 +774,41 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 		const ImVec2 corner_min(box.left, seam_top);
 		const ImVec2 corner_max(box.right, seam_top + seam_side);
 		draw->AddRectFilled(corner_min, corner_max, COLOR_SEAM_FILL, rounding);
+		const Transition transition = clips.transition(box.seam);
+		if (!transition.is_cut() && transition.type == TRANSITION_CROSSFADE) {
+			// A crossfade shows as a cross: the one clip going out, the other coming in.
+			const float pad = 3.0f;
+			const float cross_left = corner_min.x + pad;
+			const float cross_right = corner_max.x - pad;
+			if (cross_right > cross_left) {
+				draw->AddLine(ImVec2(cross_left, corner_min.y + pad), ImVec2(cross_right, corner_max.y - pad), COLOR_SEAM_CROSS, 2.0f);
+				draw->AddLine(ImVec2(cross_left, corner_max.y - pad), ImVec2(cross_right, corner_min.y + pad), COLOR_SEAM_CROSS, 2.0f);
+			}
+		}
+		if (!transition.is_cut() && transition.type == TRANSITION_FADE) {
+			// A fade shows as a ramp from black to clear (a fade in) or clear to black (a fade out) across the box.
+			const float pad = 2.0f;
+			const ImVec2 ramp_min(corner_min.x + pad, corner_min.y + pad);
+			const ImVec2 ramp_max(corner_max.x - pad, corner_max.y - pad);
+			if (ramp_max.x > ramp_min.x) {
+				const bool fading_in = box.seam == 0;
+				const ImU32 dark = IM_COL32(15, 15, 15, 255);
+				const ImU32 light = IM_COL32(230, 230, 230, 255);
+				draw->AddRectFilledMultiColor(ramp_min, ramp_max, fading_in ? dark : light, fading_in ? light : dark,
+					fading_in ? light : dark, fading_in ? dark : light);
+			}
+		}
 		draw->AddRect(corner_min, corner_max, picked ? COLOR_SEAM_PICKED : (hot ? COLOR_SEAM_HOT : COLOR_SEAM_BORDER), rounding, 0, picked ? 2.0f : 1.0f);
-		if (hot)
-			ImGui::SetTooltip("No transition. Click to edit.");
+		if (hot) {
+			if (transition.is_cut()) {
+				ImGui::SetTooltip("No transition. Click to edit.");
+			} else if (transition.type == TRANSITION_CROSSFADE) {
+				ImGui::SetTooltip("Crossfade over %.2f s. Click to edit.", model.ticks_to_seconds(transition.ticks));
+			} else {
+				ImGui::SetTooltip("%s over %.2f s. Click to edit.", box.seam == 0 ? "Fade in from black" : "Fade out to black",
+					model.ticks_to_seconds(transition.ticks));
+			}
+		}
 	}
 
 	// A clip being carried: a copy of it follows the mouse, and a mark shows where it would be dropped.

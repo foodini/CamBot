@@ -20,7 +20,18 @@ class MediaContainerMgr;
 
 class TimelineEditor {
 public:
-	TimelineEditor() : m_box_edit_pending(false) {}
+	TimelineEditor() : m_selection(nullptr), m_box_edit_pending(false) {}
+
+	// What is picked on the timeline (see timeline_selection.h). The cuts and the speed act on the clip picked, if one is, and
+	// otherwise on the clip the playhead belongs to; a trim or a split picks the transition it has made or moved. Without one,
+	// the clip the playhead belongs to is always the one.
+	void set_selection(TimelineSelection* selection) { m_selection = selection; }
+	// The clip an edit would act on now: -1 if there are no clips.
+	int  target_clip(const EditModel& model, const MediaContainerMgr& media) const;
+
+	// Whether the video is playing. The cuts and the speed are not done then, and their buttons are off: where the playhead is as it
+	// plays is no way to choose a frame. A key for one of them pauses the video and says so instead (see EnvConfig::say).
+	bool playing() const;
 
 	bool can_split(const EditModel& model, const MediaContainerMgr& media) const;
 	bool can_trim_left(const EditModel& model, const MediaContainerMgr& media) const;
@@ -33,7 +44,8 @@ public:
 
 	// Each returns whether anything was done.
 	// A split picks the join it has made (in `selection`, if one is given), so that its transition is at once the one being edited.
-	bool split(EditModel* model, MediaContainerMgr* media, TimelineSelection* selection = nullptr);
+	bool split(EditModel* model, MediaContainerMgr* media);
+	// A trim picks the transition at the edge it has moved (the clip's start for Trim Left, its end for Trim Right).
 	bool trim_left(EditModel* model, MediaContainerMgr* media);
 	bool trim_right(EditModel* model, MediaContainerMgr* media);
 	bool remove_clip(EditModel* model, MediaContainerMgr* media);
@@ -43,6 +55,14 @@ public:
 	// Plays the clip under the playhead at `speed` (an AudioMode says what happens to its sound), as one undoable step. The picture
 	// on screen stays the same frame.
 	bool set_clip_speed(EditModel* model, MediaContainerMgr* media, double speed, int audio_mode);
+	// Gives seam `seam` (see EditList) a transition of `type` lasting `ticks` of the timeline, as one undoable step; a cut (or no
+	// ticks) takes the transition away. False, changing nothing, if that is no change or is not allowed (see EditList::transitions_valid).
+	bool set_transition(EditModel* model, MediaContainerMgr* media, int seam, int type, int64_t ticks);
+	// Gives every transition of the kind `type` a transition of that type lasting `ticks` (or as long as the seam allows, if that is
+	// less; whole frames), as one undoable step: for TRANSITION_CROSSFADE the joins between clips, for TRANSITION_FADE the start and the
+	// end of the video. With `only_unset` the ones that have no transition now are given one and the others left as they are. Joins where
+	// the footage carries straight on (EditModel::join_is_continuous) are left alone. Returns how many seams were changed.
+	int  set_all_transitions(EditModel* model, MediaContainerMgr* media, int type, int64_t ticks, bool only_unset);
 	bool undo(EditModel* model, MediaContainerMgr* media);
 	bool redo(EditModel* model, MediaContainerMgr* media);
 
@@ -69,6 +89,8 @@ public:
 	void end_box_edit(const EditModel& model, const MediaContainerMgr& media);
 
 private:
+	// If the video is playing, pauses it and tells the user that `what` was not done; true if it was playing.
+	bool stop_for_edit(const char* what);
 	enum Operation { SPLIT, TRIM_LEFT, TRIM_RIGHT, REMOVE };
 	bool edit(Operation operation, EditModel* model, MediaContainerMgr* media);
 	// Makes `state` the one being played and edited. False, changing nothing, if it can't be.
@@ -77,7 +99,8 @@ private:
 	// Makes the typing in progress (if any) a step of the history.
 	void commit_box_edit(const EditModel& model, const MediaContainerMgr& media);
 
-	EditHistory m_history;
+	EditHistory        m_history;
+	TimelineSelection* m_selection;
 	bool        m_box_edit_pending;
 	EditState   m_box_edit_before;    // The state when the edit began.
 };

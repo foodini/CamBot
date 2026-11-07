@@ -60,6 +60,8 @@ public:
 	// Replaces the edit list and shows the frame at `show_ticks` of the new timeline. False,
 	// changing nothing, if a clip names a missing file or lies outside its file.
 	bool set_clips(const std::vector<Clip>& clips, int64_t show_ticks);
+	// The same, with the transitions that go with the clips (they are kept in edit_list(), for the sound and the fades to ask about).
+	bool set_clips(const EditList& edit, int64_t show_ticks);
 	// The most recent problem met while decoding after open() (a file that vanished mid-flight,
 	// say), for the UI to show. Empty if none.
 	const std::string& last_error() const { return m_last_error; }
@@ -107,6 +109,11 @@ public:
 	bool show_at(int64_t ticks);
 	// Moves `count` frames of the footage (negative: backward), exactly.
 	bool step_frames(int64_t count);
+	// Shows clip `clip`'s picture at `ticks` of the timeline, which is not necessarily the clip that time belongs to: in a
+	// crossfade both clips are on screen, and each decoder shows one of them. False if there is no such clip.
+	bool show_clip_at(int clip, int64_t ticks);
+	// The same, fast and approximate like seek_keyframe(): the keyframe at or before that moment of the clip.
+	bool seek_keyframe_clip(int clip, int64_t ticks);
 	// Fast, approximate: lands on the keyframe at or before `ticks`, decoding just that frame.
 	bool seek_keyframe(int64_t ticks);
 	// About `count` frames from here, using keyframes when one is in the way.
@@ -137,8 +144,10 @@ private:
 	bool seek_keyframe_footage(int64_t footage_ticks);
 	bool show_footage(int64_t footage_ticks);
 	int64_t footage_request(int64_t timeline_ticks) const;
+	int64_t footage_in_clip(int index, int64_t timeline_ticks) const;
 	void clear_clips();
-	void set_clip_lists(const std::vector<Clip>& clips);
+	void set_clip_lists(const std::vector<Clip>& clips, const std::vector<Transition>& transitions);
+	bool set_clips_and_transitions(const std::vector<Clip>& clips, const std::vector<Transition>& transitions, int64_t show_ticks);
 
 	// Frames.
 	bool decode_next();
