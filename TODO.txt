@@ -5,22 +5,17 @@
 * Altitude graph needs the blue dot to be more opaque at the center/stand out more.
 * Add something to the scrub widget to display the center of right-click scrubbing, and
   potentially the frame rate being traversed.
-* When playing forward, hold on to a bunch of frames so reverse scrubbing will have them
-  cached.
+* Allow the right-click scrub gesture on the video preview as well as the map and the timeline.
 * Make climb/sink rate look like an avionic? 
-* Require user to hold down control key to affect TelemetryScrubWidget, since a mis-click
-  there requires the user to re-sync the telemetry.
-* Don't allow export while telemetry is still loading.
 * While telemetry is loading, just put "Loading Telemetry - XX%" in huge letters somewhere. 
   * Don't render any of it during this time?
-* Orient the glider on the map according to magnetic telemetry so you can see it skidding?
+* Orient the glider on the map according to magnetic telemetry so you can see it skidding/crabbing?
 * As the rotate buttons are used, report back to the user how much rotation they've  
   accumulated.
 * "Export Done" or "Export Cancelled" should probably be a popup requiring confirmation.
+* Make the export done/cancelled larger and wide enough to avoid wrapping.
 * When moused over the timeline, show a small preview frame of that location. (Where?)
 * Slightly darken "future" flight track vs past.
-* The first frame of exported video should default to duration 0:00:00 if the user hasn't
-  set a launch point. It's fine for the first frame to be negative, just probably not positive.
 * Add a fade-in/fade-out mode for text: Blur/fade. Fading in still is an alpha process, but 
   each frame has less and less blur to it. Fading out increases blur as transparency incresas. 
 * After cancelling an export, the first open of the file in Windows Media Player (Store app) often fails with 0x80070323
@@ -31,27 +26,30 @@
 ==== FEATURE LIST (from the Nov 6 brainstorm) ====
 
 HIGH PRIORITY
-* DJI camera metadata debug pane: read the djmd and dbgi data streams of the camera files (protobuf, no schema for the Osmo Action 6
-  exists, so a generic wire decoder), show every field as a tree for the frame on screen, and plot any one field across the clip.
-  Find out what is useful (orientation quaternions at 1 kHz, exposure, ...). Needs a real flight clip, not a desk test.
-  FIRST VERSION IS IN (left panel, "Camera Data (debug)"). Next: look at a clip with GPS (fields 3.4.2.*), and at orientation in a turn.
 * Pin things to the ground: lock a label to a landmark (peak, LZ, a feature on the ground) so a text box floats with it, or a leader
   line runs from a text box to it. Needs the camera's orientation (camera IMU + collector heading) and elevation data.
 * Tag and track things in the air (other gliders, hawks): a name/label that follows the target pixel for pixel, with a leader line
   option. Near the top. Tracker + user keyframe fixes when it loses the target.
-* Vario audio: a climb/sink beep synthesized from the telemetry and mixed into the export. Also meant as a platform for trying out
-  the stereo vario (3 baro sensors) before it goes into firmware.
+  * I need to get another collector assembled so I can do a flight with a tracker on multiple gliders.
+* Wind estimate from circling drift, and a lift map from wind + terrain slope: experiment. At funston, this may be tricky. Orientation,
+  ground speed, and angle of attack of the glider might give us some help.
 
 MEDIUM / EXPERIMENT
+* Map as a way to find a point in the video: click the flight trace on a map and the playhead goes to that moment (e.g. the top of
+  a thermal's spiral, the extremes of a flight). The sync view already picks a telemetry moment from a click on the path (nearest
+  candidate to the current one when the trace crosses itself), so much of this exists; it needs a map in the editor, and a click on
+  a moment the edit has cut out has to go to the nearest footage the edit still uses. Maybe colour/mark the highest point, the
+  lowest, the fastest.
 * 3D trail ribbon coloured by climb rate, to show the spiral of a thermal (best for another pilot's flight).
-* Wind estimate from circling drift, and a lift map from wind + terrain slope: experiment.
 * Interesting-moment marker without extra hardware: recognise a gesture (see notes) instead of a button on the control bar. Then
   the highlight finder (score the flight, propose cuts with crossfades and speed ramps) can use the marks too.
 * Replace the map with a 3D terrain view (flyby style).
 * Ghost glider: overlay an earlier flight (especially a previous flight in a competition format).
+* G-force gauge under the distance flown.
 
 LATER
-* Glide-horizon line / reach-to-landing-fields overlay (terrain-aware; a lot involved).
+* Vario audio: a climb/sink beep synthesized from the telemetry and mixed into the export. Also meant as a platform for trying out
+  the stereo vario (3 baro sensors) before it goes into firmware.* Glide-horizon line / reach-to-landing-fields overlay (terrain-aware; a lot involved).
 * Real distance and closing speed to a tagged glider, once a second collector is flying.
 * Landmark labels from OpenStreetMap peaks/lakes + elevation data, hidden behind ridges.
 

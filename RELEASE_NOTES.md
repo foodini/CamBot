@@ -336,12 +336,37 @@
   (the part at the playhead first) and keeps it in memory, so after that any other field of the stream plots at once. The files name no schema we can read for the Osmo Action 6, so
   the messages are decoded without one and the odd field may be shown as the wrong kind of thing. It does nothing while the section is
   closed or an export runs.
+- **Text boxes stay with the frame they were added on.** A new text box fades in so that it is fully shown at the frame on screen
+  when **Add** is pressed, and it is tied to that frame, not to the frame the fade in begins on. So when the fade in starts in the
+  clip before (or before the start of the video), the box still belongs to the clip it was added on, and goes wherever that clip
+  goes; changing the fade in moves where the box begins, not the frame it is tied to. This changes the project format (7); older
+  projects are converted when opened, with every box showing at the same times as before.
+- **Left panel headers.** The section headers (Source Material, Speed, Transition, Text, Camera Data) are half as big again as the
+  text, on a teal background of their own, and what is under each is indented by 4% of the panel's width, so it is clear which
+  section a control belongs to.
 - **Tests.** `tests/run_tests.sh` (run it with `wsl ./tests/run_tests.sh`) builds and runs
   the unit tests: climb filters, map zoom, flight statistics, altitude references, user
   settings, the source timeline and file ordering, project reading, and the multi-file
   decoder (against a fake FFmpeg that serves small synthetic files). New: speed (edit
   arithmetic, cuts, decoder frame choice), the audio stretcher, and the project file's JSON
   (read and written with jsoncpp's source, from the vcpkg folder; skipped if that isn't there).
+
+### Known limitations (editing and transitions)
+
+- In a crossfade the overlays and telemetry belong to whichever clip is showing more of itself, so they jump at the middle of it.
+- A crossfade runs two decoders, so playback can stutter at the start of one, most on slower machines. Sync recovers by itself.
+- While a slowed-down clip is held on one frame, the overlay (telemetry, text fades) changes only when the frame does.
+- Sound at off-normal speed with **Keep pitch** is a simple time-domain stretch: fine for speech and wind between about 0.5x and 2x,
+  increasingly stuttery beyond that. There is no reverse playback.
+- Exports with speed changes or crossfades are cut at the timeline's frame times (the frame grid of the output), so they take
+  longer than a plain export.
+- After cancelling an export, Windows Media Player sometimes refuses the unfinished file the first time it is opened (error
+  0x80070323) and plays it the second time. It is on `TODO.txt`.
+- **Camera Data (debug)** reads the camera's streams without a schema, so some fields may be shown as the wrong kind of thing, and the
+  few names given are from ExifTool's list or are guesses (those end in "?"). The units of the barometric altitude (decimetres) are
+  worked out from comparing it with the collector, not from DJI. A stream is kept in memory up to 256 MB; past that the plot shows
+  only the part that fitted. Nothing in it is used for overlays yet.
+- The feature wish list, including labels pinned to ground landmarks, tracking other gliders and a vario tone, is in `TODO.txt`.
 
 ## 1.0.0 (October 2026)
 

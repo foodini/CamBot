@@ -484,6 +484,7 @@ bool parse_json(const std::string& text, ProjectData* project, std::string* erro
 	}
 
 	ProjectData result;
+	result.text_anchors_at_fade_start = version < 7;
 	if (root.isMember("video_files")) {
 		const Json::Value& files = root["video_files"];
 		if (!files.isArray()) {

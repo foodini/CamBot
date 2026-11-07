@@ -206,6 +206,41 @@ static void test_text_boxes_round_trip() {
 	CHECK(without.text_boxes().empty());
 }
 
+// A text box in a project older than version 7 was tied to the frame it began fading in on; now it is the frame it is fully in at.
+static void test_old_text_anchors_move_on() {
+	std::vector<int64_t> durations;
+	durations.push_back(30000 * 20);
+	durations.push_back(30000 * 10);
+	ProjectData project = make_project(2);
+	project.time_base_num = 1;
+	project.time_base_den = 30000;
+	TextBox box = text_box::default_box();
+	box.id = 3;
+	box.anchor = FileTime(1, 30000 * 3);
+	box.fade_in_ticks = 15000;
+	box.dwell_ticks = 30000 * 4;
+	box.fade_out_ticks = 15000;
+	project.text_boxes.push_back(box);
+	project.text_anchors_at_fade_start = true;
+	EditModel model;
+	std::string error;
+	CHECK(project_io::apply_to_model(project, durations, 1, 30000, &model, &error));
+	CHECK(model.text_boxes().size() == 1);
+	CHECK(model.text_boxes()[0].anchor == FileTime(1, 30000 * 3 + 15000));
+	// Where it shows from is where it showed from before.
+	int64_t start = 0;
+	int64_t end = 0;
+	model.text_box_span(model.text_boxes()[0], &start, &end);
+	CHECK(start == 30000 * 20 + 30000 * 3);
+	// Written out again, it is in the new form, and reading that back moves nothing.
+	ProjectData written = project;          // (the files are not something fill_from_model fills in)
+	project_io::fill_from_model(model, 1, 30000, &written);
+	CHECK(!written.text_anchors_at_fade_start);
+	EditModel again;
+	CHECK(project_io::apply_to_model(written, durations, 1, 30000, &again, &error));
+	CHECK(again.text_boxes()[0].anchor == model.text_boxes()[0].anchor);
+}
+
 // Whether the user has marked launch survives saving and loading; until they have, nothing is written for it.
 static void test_launch_marked_round_trip() {
 	std::vector<int64_t> durations;
@@ -304,6 +339,7 @@ int main(int argc, char** argv) {
 	test_bad_projects_are_refused();
 	test_time_base_change();
 	test_text_boxes_round_trip();
+	test_old_text_anchors_move_on();
 	test_launch_marked_round_trip();
 	test_paths();
 	test_file_io(dir);

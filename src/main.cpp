@@ -39,6 +39,7 @@
 #include "timeline_selection.h"
 #include "transition_panel.h"
 #include "camera_panel.h"
+#include "panel_section.h"
 #include "text_panel.h"
 #include "text_renderer.h"
 #include "fade_overlay.h"
@@ -594,7 +595,8 @@ static bool draw_left_panel(const LayoutRect& rect, const EditModel& edit_model,
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus;
     if (ImGui::Begin("Panel", nullptr, flags)) {
-        if (ImGui::CollapsingHeader("Source Material")) {
+        ImGui::Indent(panel_section::indent_width());   // See panel_section.h: each section's header steps back out.
+        if (panel_section::header("Source Material")) {
             ImGui::TextUnformatted("Video (in the order recorded)");
             const std::vector<int>& order = edit_model.capture().order();
             for (int i = 0; i < (int)order.size(); i++) {
@@ -638,6 +640,7 @@ static bool draw_left_panel(const LayoutRect& rect, const EditModel& edit_model,
         transition_panel->draw(can_change);
         text_panel->draw(can_change);
         camera_panel->draw();
+        ImGui::Unindent(panel_section::indent_width());
     }
     ImGui::End();
     return load_telemetry;

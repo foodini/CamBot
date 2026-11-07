@@ -4,10 +4,11 @@
 // when it shows. Plain data with no FreeType or OpenGL in it, so it can be tested (drawing it is
 // text_renderer.h's job).
 //
-// A text box belongs to a frame of the footage: `anchor` is the moment of a media file it begins on, so cutting
-// or moving the clip it is on carries it along. How long it shows is its own: it fades in, holds (the
-// "dwell"), and fades out, one after the other, in ticks of the edit timeline (see edit_model.h; the
-// project file keeps them as ticks, with the time base).
+// A text box belongs to a frame of the footage: `anchor` is the moment of a media file it is first fully shown at (the frame
+// that was on screen when it was added), so cutting or moving the clip it is on carries it along. How long it shows is its own: it
+// fades in (ending at the anchor, so it begins `fade_in_ticks` before it, and that may be in another clip, or before the start of the
+// video), holds (the "dwell"), and fades out, one after the other, in ticks of the edit timeline (see edit_model.h; the project
+// file keeps them as ticks, with the time base).
 //
 // The box's place and size are fractions of the frame (x and w of its width, y and h of its height, with
 // y counted down from the top), and the type's size and the shadow's offset are fractions of its height,
@@ -41,7 +42,7 @@ struct TextStyle {
 
 struct TextBox {
 	int         id;              // Names it while the project is open (and in the project file); unique among the project's boxes.
-	FileTime    anchor;          // The frame of the footage it begins on.
+	FileTime    anchor;          // The frame of the footage it is first fully shown at (its fade in ends there).
 	int64_t     fade_in_ticks;
 	int64_t     dwell_ticks;
 	int64_t     fade_out_ticks;
@@ -53,7 +54,7 @@ struct TextBox {
 	TextStyle   style;
 
 	TextBox();
-	// How long it shows, from the first frame it fades in on to where it has gone.
+	// How long it shows, from the first frame it fades in on (that many ticks before the anchor) to where it has gone.
 	int64_t total_ticks() const { return fade_in_ticks + dwell_ticks + fade_out_ticks; }
 	bool operator==(const TextBox& other) const;
 	bool operator!=(const TextBox& other) const { return !(*this == other); }

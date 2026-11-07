@@ -190,6 +190,7 @@
     <ClCompile Include="text_layout.cpp" />
     <ClCompile Include="camera_metadata.cpp" />
     <ClCompile Include="camera_panel.cpp" />
+    <ClCompile Include="panel_section.cpp" />
     <ClCompile Include="fade_overlay.cpp" />
     <ClCompile Include="text_panel.cpp" />
     <ClCompile Include="text_renderer.cpp" />
@@ -290,6 +291,7 @@
     <ClInclude Include="text_layout.h" />
     <ClInclude Include="camera_metadata.h" />
     <ClInclude Include="camera_panel.h" />
+    <ClInclude Include="panel_section.h" />
     <ClInclude Include="fade_overlay.h" />
     <ClInclude Include="text_panel.h" />
     <ClInclude Include="text_renderer.h" />

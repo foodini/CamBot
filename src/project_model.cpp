@@ -114,6 +114,11 @@ bool apply_to_model(const ProjectData& project, const std::vector<int64_t>& medi
 		box.fade_in_ticks = rescale_ticks(box.fade_in_ticks, from_num, from_den, tb_num, tb_den);
 		box.dwell_ticks = rescale_ticks(box.dwell_ticks, from_num, from_den, tb_num, tb_den);
 		box.fade_out_ticks = rescale_ticks(box.fade_out_ticks, from_num, from_den, tb_num, tb_den);
+		if (project.text_anchors_at_fade_start) {
+			// An older project tied the box to the frame its fade in began on; now it is the frame the fade in ends on.
+			const int64_t fully_in = model->timeline_ticks_nearest(box.anchor) + box.fade_in_ticks;
+			box.anchor = model->edit_list().source_for(fully_in);
+		}
 		text_boxes.push_back(box);
 	}
 	model->set_text_boxes(text_boxes);
@@ -151,6 +156,7 @@ void fill_from_model(const EditModel& model, int tb_num, int tb_den, ProjectData
 	project->launch_mark = model.launch_marked() ? model.launch_mark() : FileTime(-1, 0);
 	project->text_boxes = model.text_boxes();
 	project->has_version2_sync = false;
+	project->text_anchors_at_fade_start = false;
 	project->version2_offset_s = 0.0f;
 	project->version2_launch_s = 0.0f;
 }

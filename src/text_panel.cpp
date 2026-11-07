@@ -8,6 +8,8 @@
 
 #include "imgui/imgui.h"
 
+#include "panel_section.h"
+
 #include "env_config.h"
 #include "media_container_manager.h"
 #include "text_box_geometry.h"
@@ -104,7 +106,7 @@ void TextPanel::follow_changes() {
 
 void TextPanel::draw(bool can_change) {
 	follow_changes();
-	if (!ImGui::CollapsingHeader("Text"))
+	if (!panel_section::header("Text"))
 		return;
 	if (m_selected != 0 && m_model->find_text_box(m_selected) == NULL)
 		m_selected = 0;
@@ -121,12 +123,13 @@ void TextPanel::draw(bool can_change) {
 		box.h = m_defaults.h;
 		box.style = m_defaults.style;
 		// The box is fully in at the frame being shown, so what is typed is seen at once: the fade in comes before it (or, with
-		// less than that much video before it, is as long as there is).
+		// less than that much video before it, is as long as there is). It is tied to the frame being shown, whichever clip the
+		// fade in starts in.
 		const int64_t now_ticks = m_media->current_ticks();
 		int64_t fade_in_ticks = m_model->seconds_to_ticks(m_defaults.fade_in_seconds);
 		if (fade_in_ticks > now_ticks)
 			fade_in_ticks = (now_ticks > 0) ? now_ticks : 0;
-		box.anchor = m_model->edit_list().source_for(now_ticks - fade_in_ticks);
+		box.anchor = m_model->edit_list().source_for(now_ticks);
 		box.fade_in_ticks = fade_in_ticks;
 		box.dwell_ticks = m_model->seconds_to_ticks(m_defaults.dwell_seconds);
 		box.fade_out_ticks = m_model->seconds_to_ticks(m_defaults.fade_out_seconds);
@@ -298,6 +301,12 @@ void TextPanel::draw_properties(const TextBox& box) {
 		begin_edit_if_activated();
 		if (changed) {
 			ticks[n] = m_model->seconds_to_ticks(seconds);
+			if (n == 0) {
+				// The fade in ends at the anchor, so it can't be longer than the video before that.
+				const int64_t before = m_model->timeline_ticks_nearest(box.anchor);
+				if (ticks[0] > before)
+					ticks[0] = before > 0 ? before : 0;
+			}
 			m_editor->set_timing(m_model, id, box.anchor, ticks[0], ticks[1], ticks[2]);
 		}
 		end_edit_if_deactivated();

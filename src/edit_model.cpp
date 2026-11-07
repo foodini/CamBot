@@ -419,7 +419,8 @@ const TextBox* EditModel::find_text_box(int id) const {
 }
 
 void EditModel::text_box_span(const TextBox& box, int64_t* start_ticks, int64_t* end_ticks) const {
-	const int64_t start = timeline_ticks_nearest(box.anchor);
+	// The anchor is where the fade in ends, so the box begins a fade in before it (that may be before the start of the timeline).
+	const int64_t start = timeline_ticks_nearest(box.anchor) - box.fade_in_ticks;
 	*start_ticks = start;
 	*end_ticks = start + box.total_ticks();
 }

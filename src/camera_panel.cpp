@@ -8,6 +8,8 @@
 
 #include "imgui/imgui.h"
 
+#include "panel_section.h"
+
 #include "file_io.h"
 #include "media_container_manager.h"
 
@@ -23,7 +25,7 @@ CameraPanel::CameraPanel(MediaContainerMgr* media)
 }
 
 void CameraPanel::draw() {
-	if (!ImGui::CollapsingHeader("Camera Data (debug)"))
+	if (!panel_section::header("Camera Data (debug)"))
 		return;
 	if (m_media->recording()) {
 		ImGui::TextDisabled("Not shown while exporting.");

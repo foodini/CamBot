@@ -6,6 +6,8 @@
 
 #include "imgui/imgui.h"
 
+#include "panel_section.h"
+
 #include "media_container_manager.h"
 #include "timeline_editor.h"
 #include "timeline_selection.h"
@@ -43,7 +45,7 @@ void TransitionPanel::draw(bool can_change) {
 		m_last_seam = seam;
 		m_all_count = -1;
 	}
-	if (!ImGui::CollapsingHeader("Transition"))
+	if (!panel_section::header("Transition"))
 		return;
 	const int count = m_model->edit_list().count();
 	if (seam < 0 || seam > count)

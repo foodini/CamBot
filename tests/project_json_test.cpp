@@ -94,7 +94,7 @@ static void test_speed_round_trip() {
 	const std::string plain_text = project_io::to_json(plain);
 	CHECK(plain_text.find("speed") == std::string::npos);
 	CHECK(plain_text.find("audio") == std::string::npos);
-	CHECK(plain_text.find("\"version\" : 6") != std::string::npos);
+	CHECK(plain_text.find("\"version\" : 7") != std::string::npos);
 	CHECK(plain_text.find("transitions") == std::string::npos);
 	// Written again, the text is the same: nothing creeps.
 	CHECK(project_io::to_json(back) == text);
@@ -246,7 +246,7 @@ static void test_older_and_bad_files() {
 	CHECK(project_io::parse_json(project_text(3, "[{\"media\":0,\"in\":0,\"out\":100}]"), &project, &error));
 	// A newer file is refused politely.
 	project = ProjectData();
-	CHECK(!project_io::parse_json(project_text(7, "[{\"media\":0,\"in\":0,\"out\":100}]"), &project, &error));
+	CHECK(!project_io::parse_json(project_text(8, "[{\"media\":0,\"in\":0,\"out\":100}]"), &project, &error));
 	CHECK(error.find("newer version") != std::string::npos);
 	// Speeds out of range or the wrong sort of thing are refused, with a sentence about it.
 	CHECK(!project_io::parse_json(project_text(5, "[{\"media\":0,\"in\":0,\"out\":100,\"speed\":0.05}]"), &project, &error));

@@ -119,8 +119,8 @@ static void test_span() {
 	int64_t start = 0;
 	int64_t end = 0;
 	model.text_box_span(box, &start, &end);
-	CHECK(start == 1200);
-	CHECK(end == 1400);
+	CHECK(start == 1150);     // The fade in (50) ends at the frame, so it begins before it.
+	CHECK(end == 1350);
 
 	// Cut the first 300 ticks out of the first file: the box's footage moves earlier, and it goes with it.
 	std::vector<Clip> clips;
@@ -128,8 +128,8 @@ static void test_span() {
 	clips.push_back(Clip(1, 0, 1000));
 	CHECK(model.set_clips(clips));
 	model.text_box_span(box, &start, &end);
-	CHECK(start == 900);
-	CHECK(end == 1100);
+	CHECK(start == 850);
+	CHECK(end == 1050);
 
 	// Swap the clips round: the box follows its footage to the front.
 	clips.clear();
@@ -137,8 +137,8 @@ static void test_span() {
 	clips.push_back(Clip(0, 300, 1000));
 	CHECK(model.set_clips(clips));
 	model.text_box_span(box, &start, &end);
-	CHECK(start == 200);
-	CHECK(end == 400);
+	CHECK(start == 150);
+	CHECK(end == 350);
 
 	// Cut the box's own frame out: it moves to the nearest footage that is left.
 	clips.clear();
@@ -146,8 +146,25 @@ static void test_span() {
 	clips.push_back(Clip(1, 500, 1000));
 	CHECK(model.set_clips(clips));
 	model.text_box_span(box, &start, &end);
-	CHECK(start == 1000);   // The start of the surviving footage of its file, the nearest to it.
-	CHECK(end == 1200);
+	CHECK(start == 950);    // The start of the surviving footage of its file, the nearest to it.
+	CHECK(end == 1150);
+}
+
+// A box added at the very start of a clip fades in during the end of the clip before, and stays tied to the clip it was added on.
+static void test_fade_in_before_its_clip() {
+	EditModel model = make_model();
+	TextBox box = timed_box(50, 100, 50);
+	box.anchor = FileTime(1, 0);
+	int64_t start = 0;
+	int64_t end = 0;
+	model.text_box_span(box, &start, &end);
+	CHECK(start == 950 && end == 1150);     // In the last 50 ticks of the first file.
+	// With the first file gone, the box is still on the second: its fade in begins before the start of the video.
+	std::vector<Clip> clips;
+	clips.push_back(Clip(1, 0, 1000));
+	CHECK(model.set_clips(clips));
+	model.text_box_span(box, &start, &end);
+	CHECK(start == -50 && end == 150);
 }
 
 static void test_set_total_ticks() {
@@ -177,6 +194,7 @@ int main() {
 	test_defaults();
 	test_list();
 	test_span();
+	test_fade_in_before_its_clip();
 	printf(g_failures ? "FAILED\n" : "all ok\n");
 	return g_failures ? 1 : 0;
 }

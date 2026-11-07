@@ -6,6 +6,8 @@
 
 #include "imgui/imgui.h"
 
+#include "panel_section.h"
+
 #include "media_container_manager.h"
 #include "timeline_edit.h"
 #include "timeline_editor.h"
@@ -24,7 +26,7 @@ SpeedPanel::SpeedPanel(EditModel* model, MediaContainerMgr* media, TimelineEdito
 }
 
 void SpeedPanel::draw(bool can_change) {
-	if (!ImGui::CollapsingHeader("Speed"))
+	if (!panel_section::header("Speed"))
 		return;
 	const EditList& list = m_model->edit_list();
 	const int index = m_editor->target_clip(*m_model, *m_media);

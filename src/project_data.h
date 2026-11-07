@@ -2,7 +2,7 @@
 
 // Everything a CamBot project file stores, as plain data, plus reading and writing it.
 //
-// Project files are JSON (format "cambot-project", version 6; versions 2 to 5 are still read. Version 5 added a speed and a
+// Project files are JSON (format "cambot-project", version 7; versions 2 to 6 are still read. Version 5 added a speed and a
 // sound treatment to each clip; older projects read as normal speed. Version 6 added the transitions: a fade at the start and
 // the end of the video, kept as a list of the ones that aren't plain cuts; older projects have none). The editing
 // parts of a project (the library, the capture order, the clips, the sync anchors, the text boxes) are described
@@ -41,8 +41,13 @@ struct ProjectData {
 	float                    version2_offset_s;
 	float                    version2_launch_s;
 
+	// Only when the project was read from a file older than version 7, whose text boxes were tied to the frame they began fading in on
+	// (from version 7 it is the frame they are fully in at, see text_box.h). apply_to_model() moves those anchors on by the fade in and
+	// fill_from_model() clears this. Not part of the project's content, so not compared.
+	bool                     text_anchors_at_fade_start;
+
 	ProjectData() : time_base_num(0), time_base_den(0), edit_started(false), launch_mark(-1, 0), window_start_elapsed_s(0.0f), rotation_rad(0.0f),
-		has_version2_sync(false), version2_offset_s(0.0f), version2_launch_s(0.0f) {}
+		has_version2_sync(false), version2_offset_s(0.0f), version2_launch_s(0.0f), text_anchors_at_fade_start(false) {}
 
 	// Used to tell whether the project has changed since it was saved. The numbers only ever
 	// change when the user changes them, so comparing floats exactly is what's wanted here.
@@ -61,7 +66,7 @@ struct ProjectData {
 
 namespace project_io {
 
-const int CURRENT_VERSION = 6;
+const int CURRENT_VERSION = 7;
 
 bool parse_json(const std::string& text, ProjectData* project, std::string* error);
 std::string to_json(const ProjectData& project);

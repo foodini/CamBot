@@ -478,9 +478,10 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 			const int64_t delta = (int64_t)llround((double)(io.MousePos.x - m_text_drag_origin_x) * m_scale.ticks_per_pixel());
 			const text_lanes::Span span = text_lanes::dragged(m_text_drag_span, m_text_drag_part, delta, clips.total_ticks(), media.frame_ticks());
 			TextBox updated = m_text_drag_original;
-			if (span.start != m_text_drag_span.start)
-				updated.anchor = clips.source_for(span.start);     // (An end that stays put keeps its anchor as it was.)
 			text_box::set_total_ticks(&updated, span.length());
+			// The anchor is where the fade in ends. (A box whose start and fade in are as they were keeps its anchor as it was.)
+			if (span.start != m_text_drag_span.start || updated.fade_in_ticks != m_text_drag_original.fade_in_ticks)
+				updated.anchor = clips.source_for(span.start + updated.fade_in_ticks);
 			editor->set_timing(&model, m_text_drag_id, updated.anchor, updated.fade_in_ticks, updated.dwell_ticks, updated.fade_out_ticks);
 			ImGui::SetMouseCursor(m_text_drag_part == text_lanes::BODY ? ImGuiMouseCursor_ResizeAll : ImGuiMouseCursor_ResizeEW);
 		} else {
