@@ -1605,10 +1605,26 @@ int main()
                 StringAndProperties::V_ALIGN::V_CENTER, StringAndProperties::H_ALIGN::H_CENTER));
         */
         if (has_telemetry) {
+            // Distance flown and ground speed, stacked in the upper left. Both are the same size, spaced the way a
+            // text box spaces its lines (the font's own line height), with the first line's baseline where a text box
+            // at the top edge would put it. The distance has two decimals and the speed one, so its field is one
+            // character narrower (%6.2f against %5.1f), which puts the decimal point in the same column in this
+            // fixed-width font.
+            const float READOUT_SCALE = 40.0f / 48.0f;   // 40 px type at 1080 lines, the size the text boxes use.
+            const float baseline_px = font_manager.ascent_pixels(READOUT_SCALE);
+            const float pitch_px = font_manager.line_height_pixels(READOUT_SCALE);
+            // V_TOP puts the baseline one nominal font height below the position given.
+            const float top_px = baseline_px - READOUT_SCALE * (float)font_manager.font_size();
+            const TelemetrySlice& readout_slice = env_config.telemetry_slice();
             font_manager.add_string(
                 StringAndProperties(
-                    ffsw::format("%6.2fkm", env_config.telemetry_distance_flown()),
-                    0, glm::vec2(-.99, 1.0f - 6.0f * 2.0f / (float)SCR_HEIGHT), glm::vec3(1.0, 1.0, 1.0), 1.0, 2.0,
+                    ffsw::format("%6.2fmi", env_config.telemetry_distance_flown() * flight_stats::KM_TO_MILES),
+                    0, glm::vec2(-.99f, 1.0f - top_px * 2.0f / (float)SCR_HEIGHT), glm::vec3(1.0, 1.0, 1.0), READOUT_SCALE, 2.0,
+                    StringAndProperties::V_ALIGN::V_TOP, StringAndProperties::H_ALIGN::H_LEFT));
+            font_manager.add_string(
+                StringAndProperties(
+                    ffsw::format("%5.1fmph", readout_slice.speed_mph()),
+                    0, glm::vec2(-.99f, 1.0f - (top_px + pitch_px) * 2.0f / (float)SCR_HEIGHT), glm::vec3(1.0, 1.0, 1.0), READOUT_SCALE, 2.0,
                     StringAndProperties::V_ALIGN::V_TOP, StringAndProperties::H_ALIGN::H_LEFT));
         }
 

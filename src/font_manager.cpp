@@ -148,6 +148,17 @@ void FontManager::render_string(const StringAndProperties& sap) {
     }
 }
 
+float FontManager::ascent_pixels(float scale) const {
+    return (float)m_ft_face->size->metrics.ascender / 64.0f * scale;
+}
+
+float FontManager::line_height_pixels(float scale) const {
+    float height = (float)m_ft_face->size->metrics.height / 64.0f;
+    if (height < 1.0f)
+        height = (float)m_size * 1.2f;
+    return height * scale;
+}
+
 float FontManager::get_string_width(const std::string& str) {
     std::string::const_iterator c;
     float width = 0.0;

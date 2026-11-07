@@ -257,10 +257,6 @@ void MapWidget::render() {
 	const TelemetrySlice& ts = env_config->telemetry_slice();
 	env_config->font_mgr->add_string(
 		StringAndProperties(
-			ffsw::format("%5.1fmph", ts.speed_mph()),
-			0, glm::vec2(m_x_pos, m_y_pos), glm::vec3(1.0, 1.0, 1.0), 0.5, 2.5));
-	env_config->font_mgr->add_string(
-		StringAndProperties(
 			ffsw::format("%3.0f ", ts.m_course_deg),
 			0, glm::vec2(m_x_pos + m_width, m_y_pos), glm::vec3(1.0, 1.0, 1.0), 0.5, 2.5,
 			StringAndProperties::V_ALIGN::V_BOTTOM, StringAndProperties::H_ALIGN::H_RIGHT));

@@ -99,6 +99,11 @@ public:
 	// given scale, and the font's nominal height in pixels at scale 1.
 	float string_width_pixels(const std::string& str, float scale) { return get_string_width(str) * scale; }
 	int   font_size() const { return m_size; }
+	// The font's own vertical metrics at a given scale, in pixels: how far a line's baseline sits below
+	// the top of its line, and the baseline-to-baseline distance for stacking lines. These are the
+	// same numbers the text boxes lay their lines out with, so stacked overlay text spaces like a text box.
+	float ascent_pixels(float scale) const;
+	float line_height_pixels(float scale) const;
 
 private:
 	typedef std::pair<StringAndProperties, std::string> QueuePair;
