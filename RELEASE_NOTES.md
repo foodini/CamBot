@@ -1,20 +1,71 @@
 # CamBot release notes
 
-## Unreleased
+## 1.0.0 (November 2026)
 
-### Multi-file flights, JSON projects
+CamBot overlays custom flight telemetry (altitude graph, map, climb/sink rate, date/time, and so on) onto video from a camera on a
+glider, and is a single-track video editor around that: cut, reorder and speed up or slow down clips, fade and crossfade between
+them, put text on the video, line the telemetry up with the picture on a map, and export the result as an MP4 with sound.
+Windows only; export needs an NVIDIA GPU.
 
-### Editing model (no visible change yet)
+### What it does
+
+- **Editing.** The footage of a flight is played as one video and cut with Split, Trim Left / Right and Delete, clips are moved with
+  Ctrl+drag, each clip has a speed (0.1x to 16x) and a treatment for its sound, and each join and the two ends can be a fade or a
+  crossfade. Everything is undone with Ctrl+Z.
+- **Text.** Text boxes with fades, fonts, colours and shadows are placed on the picture and timed on a track of their own.
+- **Sound.** The sound of the edit is played in the preview and exported.
+- **Camera Data (debug).** A pane for looking inside the metadata of DJI cameras. Details below.
+- Loads the video files of a flight (as one continuous video) and, if there is one, a telemetry log, and lets you scrub both
+  together on the timeline, including right-click scrubbing.
+- Sync telemetry to video in the Sync / Reorder view, by clicking the map's path when the video is on a moment you can
+  recognize, and set the launch point from the Edit menu.
+- Rotate and zoom the video to level the horizon. The rotation angle is saved in the
+  project file, and the exposed edges and corners are trimmed so the rotated frame never
+  pokes into the UI.
+- Save and reload projects (`.ffsw`), including the telemetry offset, launch point and
+  rotation.
+- Save a raw video frame, or a frame with the telemetry overlay.
+- Export the edited video with the overlay and the sound of the edit (AAC), on the GPU.
+- **Smoothed climb rate.** The map trace and the climb indicator show a smoothed climb
+  rate instead of the raw (and very noisy) barometer rate. Choose between a trailing-window
+  slope and a critically damped alpha-beta filter, and set its window or time constant;
+  the settings window shows the noise and lag each choice costs. Both filters are strictly
+  causal (a sample's rate depends only on that sample and earlier ones), so the overlay
+  shows what an instrument could have shown at that moment. The filters live in
+  `climb_filter.h`, with no dependencies, so they can be lifted into the collector firmware.
+  The color range of the map and the indicator is adjustable too.
+- **Map trace and zoom.** The flown part of the trace is drawn wide for the last stretch
+  (30-600 s, configurable) and thinner for older track, with the most recent trace drawn
+  opaque on top. Track the glider hasn't flown yet is muted. The map stays centered on the
+  pilot, shows a wide view in straight flight, and zooms in to keep the last circles in
+  view once the glider has turned a full circle within 45 s, easing back out when the
+  turning stops. The closest and farthest widths (0.2-20 km) and the transition time are
+  settings. The zoom is computed per telemetry sample, so scrubbing and export agree.
+- **Altitude references.** Enter the true altitude at the start and end of the video
+  (View > Altitude Reference...) and the barometric altitude is shifted to match, with the
+  shift changing smoothly from one to the other, so slow sensor drift disappears. The
+  window shows how far the barometer drifted between the two, and warns if it is
+  implausibly large. This correction is for presentation and is not causal; the climb rate
+  always uses the barometer as logged. Saved in the project file.
+- **Flight summary.** The last seconds of the video (10 by default) show a "Flight
+  Summary", fading in over one second: flight time, distance flown, min and max altitude,
+  max height above launch, max climb and sink, and max ground speed. An option adds
+  cross-country statistics: distance covered, best ground glide, complete circles, and time
+  circling. The statistics cover the same stretch of telemetry as the altitude graph.
+- **User settings.** The climb filter, color range, map trace and zoom settings, and the
+  flight summary options are saved per user (`%APPDATA%\CamBot\user_settings.txt`) rather
+  than per project, so a look you dial in carries over from video to video.
+
+### Editing, sync, sound and text
 
 - The program now keeps the footage as a *library* of files, a *capture order* (the order they
   were recorded, which is the flight clock telemetry is synchronised to) and a list of *clips*
-  (the edit timeline). Today the clips are simply every file whole, in capture order, so the
-  program looks and behaves as before; this is groundwork for cutting and rearranging.
+  (the edit timeline). A new project's clips are every file whole, in capture order; cutting,
+  moving and changing clips edits that list, and the telemetry follows the footage.
 - Telemetry sync is now stored as sync points tied to a file and a moment in it, instead of one
   number for the whole flight, so clips will show the right telemetry wherever they are placed,
-  and a camera clock that runs fast or slow can later be spread evenly between two points. One
-  sync point behaves exactly like the old single offset (Up/Down nudge, dragging the telemetry
-  bar). The launch marker is likewise tied to a file and a moment in it.
+  and a camera clock that runs fast or slow is spread evenly between two points. One
+  sync point behaves like a single offset for the whole flight (the Up/Down nudge in the Sync / Reorder view). The launch marker is likewise tied to a file and a moment in it.
 - **New window layout.** The window is resizable (minimum 900x600) and opens at the size, and
   maximized or not, it had when last closed (first run: 1200x900). The video and its overlays
   are shown as a preview that is as big as the window's height allows while keeping its shape,
@@ -22,12 +73,9 @@
   and the divider between them can be dragged to make the panel wider (and the preview smaller),
   with the width remembered. A transport bar sits under the preview: the position as `h:mm:ss#frame / length (@29.97fps)`
   and the two screenshot buttons on the top row, and Start, -1, Play/Pause, +1, End below.
-  Reverse, slow and fast play are shown but off until playback supports them. The left panel is a placeholder for the
-  media list and the telemetry sync controls. For now the preview still includes the strip
-  under the video with the telemetry scrub bar, which, with the right-click scan and
-  click-to-pause, works as before. Everything is drawn through ImGui, so none of it ends up in exports.
-- Each frame is now drawn into an off-screen picture (the video, the telemetry and the scrub-bar
-  strip, 1920x1214 as before) and then copied to the window. Exports and both screenshot
+  Reverse, slow and fast play are shown but off (playback only goes forward). The left panel holds the sections (Source
+  Material, Speed, Transition, Text and Camera Data). Everything is drawn through ImGui, so none of it ends up in exports.
+- Each frame is drawn into an off-screen picture (the video with its overlays, 1920x1080) and then copied to the window. Exports and both screenshot
   buttons read that picture rather than the window, so the saved frame no longer depends on
   the window. Nothing should look different.
 - **Timeline.** A timeline now runs the full width of the window along the bottom,
@@ -39,8 +87,7 @@
   the old scrub bar), mouse wheel to zoom around the cursor (or around the very start or end of the video, when the cursor is
   within a few percent of the timeline's width of it), Shift+wheel, middle-drag or a left-drag on the ruler to pan,
   and the Fit button to show everything. The timeline follows the playhead during playback.
-  This replaces the video scrub bar that used to sit under the video; the telemetry scrub bar
-  is unchanged for now.
+  This replaces the video scrub bar that used to sit under the video.
 - **Opening and switching projects.** CamBot now starts with the project that was open last time
   (if its file is still there), or the one named on the command line (so a project file can be
   dropped on CamBot.exe); if neither can be opened it asks, as before. The File menu has **New
@@ -59,8 +106,7 @@
   `Ctrl+Shift+Z`) step back and forward through the edits, restoring the playhead too. Edits
   pause playback, are not possible during an export, and are saved with the project (the title bar
   shows the `*`). The telemetry stays matched to the footage wherever it ends up, since it is
-  tied to when each piece was recorded. Cuts in the middle of a file can make a small click in
-  the exported sound for now. Dragging clip edges to trim is not planned.
+  tied to when each piece was recorded. Dragging clip edges to trim is not planned.
 - **The telemetry follows the edit.** The map, the altitude graph, the scrub widget and the
   flight summary now cover only the stretch of telemetry from the start of the first piece of
   video you use to the end of the last, found through the sync. Telemetry from before take-off
@@ -82,7 +128,7 @@
   same even though its place on the timeline changes. It can be undone like the cuts. A Ctrl+click
   that doesn't move does nothing. Turning the mouse wheel quickly now zooms the timeline a good deal
   less than it did (a click or less counts in full, the rest of a fast flick at 40%).
-- **Sync / Reorder view (first part).** **Sync / Reorder...** in Source Material now opens a view
+- **Sync / Reorder view.** **Sync / Reorder...** in Source Material now opens a view
   that takes over the window, for lining up the telemetry and putting the video files in order. It
   plays *all* the footage, every file whole in the order recorded, whatever your edit is (the edit
   is kept aside, saved with the project as usual, and comes back, showing the frame it was on, when
@@ -94,7 +140,7 @@
   asks first if the new order would change the telemetry under clips you have already cut; Cancel
   puts the order, the sync and the launch mark back as they were when the view was opened. Editing
   keys, Undo and Export are off while it is open; the Up/Down sync nudge keys still work, and the
-  strip under the video is for looking only. Setting the sync from the map is the next part.
+  strip under the video is for looking only.
 - **Timeline buttons.** The Fit, Split, Trim, Delete, Undo and Redo buttons above the timeline did not
   respond to the mouse (the keys always worked): the thin divider above the timeline was an invisible
   window ImGui made 32 pixels tall, which reached down over the buttons and took their clicks. The
@@ -190,8 +236,7 @@
   of seconds decides which side; a quick turn back on itself, such as a wingover, cancels out so the map
   stays put). Dragging the map
   or pressing **Fit** (the whole flight) stops that until the arrow next moves near an edge; **Center**
-  puts the arrow in the middle and follows right away (the button is lit while following). There is no map picture under the path
-  yet (that is the next piece). Between the map and the
+  puts the arrow in the middle and follows right away (the button is lit while following). Between the map and the
   video is a new strip with the **Set Activity Start** button, which makes the frame on screen the start
   of the activity (the same as Edit > Mark Launch Point), with the time it is set to underneath.
 - **One flight, many video files.** Cameras split a long recording into pieces; a new
@@ -202,8 +247,8 @@
   `GX020123`, ...) and numbered names are put in recording order automatically, and the
   order is shown for confirmation. Audio is carried across the joins; where one file's
   sound overlaps the next by a few milliseconds the overlap is trimmed.
-- **Projects are JSON now.** The `.ffsw` file is readable JSON (version 3). Version 2
-  projects open and are converted when next saved; older ones are not read. Saving writes to a temporary file and swaps
+- **Projects are JSON now.** The `.ffsw` file is readable JSON (now format version 7). Versions 2 to 6
+  open and are converted when next saved; older ones are not read. Saving writes to a temporary file and swaps
   it in (retrying briefly if a virus scanner or editor has the file), so a crash or a full
   disk can't leave a half-written project.
 - **Saving is explicit.** The project is only written by File > Save Project or Ctrl+S
@@ -214,9 +259,6 @@
   never replaces the project itself, and a normal exit deletes it.
 - **Menus and help.** Edit > Rotate 180 Degrees / Rotate Left a Little / Rotate Right a
   Little. Help > Keyboard Shortcuts lists every key and mouse binding.
-- **Joins are visible.** The video scrub bar shows a thin yellow bar at each point where one
-  source file ends and the next begins, and the right end of the bar names the file the
-  frame on screen comes from (with its place in the sequence, such as "2 of 5").
 - **No frame lost at a join.** Garmin VIRB files mark their last frame "discard" and FFmpeg
   then drops it, which cost one frame at every join. CamBot now keeps it. Stepping backward
   across a join also works when a file's last frame isn't where its length says it should be.
@@ -235,7 +277,7 @@
   jumping ahead, and stepping forward past the cached frames and back no longer skips.
 - **10-bit video** (e.g. HEVC from newer cameras) is shown by converting to 8-bit. A proper
   high-bit-depth path comes with the output-resolution work.
-- **Text on the video (first piece).** The left panel has a new Text section. *Add* puts a
+- **Text on the video.** The left panel has a new Text section. *Add* puts a
   text box ("Lorem Ipsum") on the picture, that is fully in at the frame being shown (it fades in over the half
   second before, so what you type is seen at once), holds for four seconds and fades out over half a second. Type what it should say in the field
   below the list, and *Delete Box* (or the Delete key, while a box is selected in the list) removes
@@ -254,7 +296,7 @@
   where it fades in and out) with the start of its words in it, on separate rows where boxes overlap (make the timeline
   taller to see more rows). Click a block to select the box and take the playhead to where the box is fully showing (the end of its fade in); hold Ctrl and drag a block to move the box
   in time, or drag either end of a block to make it start earlier or later or stop sooner or later. The box stays tied to
-  a frame of the video, so it is re-tied to whichever frame it now starts on; moving an end changes the dwell (and shrinks
+  a frame of the video, so it is re-tied to whichever frame it is now fully shown at; moving an end changes the dwell (and shrinks
   the fades only if there is no longer room for them). Each drag is one undo step.
   **Looks and timing.** With a box selected, the Text section also has its *Timing* (fade in, dwell and fade out, in
   seconds), *Type* (font from Arial, Segoe UI, Verdana, Times New Roman, Georgia, Courier New and Impact; size in pixels on
@@ -281,8 +323,7 @@
   plays the clips one after another with a 10 ms fade each side of every cut (none where a clip just carries on from the
   one before, as after a split), and encodes the result as AAC (48 kHz stereo, 192 kbit/s). The sound is laid out from the
   edit itself, so it stays in step with the picture however the clips are cut and arranged. A file whose sound can't be
-  read comes out silent, and the export says so when it finishes. (This is also the groundwork for hearing the sound while
-  you edit and for changing a clip's speed.)
+  read comes out silent, and the export says so when it finishes.
 - **Sound while you edit, and real-time playback.** Play now plays the sound of the edit through the speakers (Windows'
   built-in audio, no new files to install), with a **Mute** button and a **Volume** slider at the end of the transport bar's
   lower row; both are remembered for next time and affect only what you hear, never an export. Playback also now keeps real
@@ -351,73 +392,7 @@
   arithmetic, cuts, decoder frame choice), the audio stretcher, and the project file's JSON
   (read and written with jsoncpp's source, from the vcpkg folder; skipped if that isn't there).
 
-### Known limitations (editing and transitions)
-
-- In a crossfade the overlays and telemetry belong to whichever clip is showing more of itself, so they jump at the middle of it.
-- A crossfade runs two decoders, so playback can stutter at the start of one, most on slower machines. Sync recovers by itself.
-- While a slowed-down clip is held on one frame, the overlay (telemetry, text fades) changes only when the frame does.
-- Sound at off-normal speed with **Keep pitch** is a simple time-domain stretch: fine for speech and wind between about 0.5x and 2x,
-  increasingly stuttery beyond that. There is no reverse playback.
-- Exports with speed changes or crossfades are cut at the timeline's frame times (the frame grid of the output), so they take
-  longer than a plain export.
-- After cancelling an export, Windows Media Player sometimes refuses the unfinished file the first time it is opened (error
-  0x80070323) and plays it the second time. It is on `TODO.txt`.
-- **Camera Data (debug)** reads the camera's streams without a schema, so some fields may be shown as the wrong kind of thing, and the
-  few names given are from ExifTool's list or are guesses (those end in "?"). The units of the barometric altitude (decimetres) are
-  worked out from comparing it with the collector, not from DJI. A stream is kept in memory up to 256 MB; past that the plot shows
-  only the part that fitted. Nothing in it is used for overlays yet.
-- The feature wish list, including labels pinned to ground landmarks, tracking other gliders and a vario tone, is in `TODO.txt`.
-
-## 1.0.0 (October 2026)
-
-First release. CamBot overlays custom flight telemetry (altitude graph, map, climb/sink
-rate, date/time, and so on) onto GoPro video for glider flying, lets you sync the two by
-hand, and exports the result as an MP4.
-
-### What it does
-
-- Loads a video and a telemetry log, and lets you scrub both together, including
-  right-click scrubbing through the video.
-- Sync telemetry to video with the telemetry scrub widget, and mark the launch point
-  from the menu.
-- Rotate and zoom the video to level the horizon. The rotation angle is saved in the
-  project file, and the exposed edges and corners are trimmed so the rotated frame never
-  pokes into the UI.
-- Save and reload projects (`.ffsw`), including the telemetry offset, launch point and
-  rotation.
-- Save a raw video frame, or a frame with the telemetry overlay.
-- Export the full video with the overlay, keeping the original audio untouched.
-- **Smoothed climb rate.** The map trace and the climb indicator show a smoothed climb
-  rate instead of the raw (and very noisy) barometer rate. Choose between a trailing-window
-  slope and a critically damped alpha-beta filter, and set its window or time constant;
-  the settings window shows the noise and lag each choice costs. Both filters are strictly
-  causal (a sample's rate depends only on that sample and earlier ones), so the overlay
-  shows what an instrument could have shown at that moment. The filters live in
-  `climb_filter.h`, with no dependencies, so they can be lifted into the collector firmware.
-  The color range of the map and the indicator is adjustable too.
-- **Map trace and zoom.** The flown part of the trace is drawn wide for the last stretch
-  (30-600 s, configurable) and thinner for older track, with the most recent trace drawn
-  opaque on top. Track the glider hasn't flown yet is muted. The map stays centered on the
-  pilot, shows a wide view in straight flight, and zooms in to keep the last circles in
-  view once the glider has turned a full circle within 45 s, easing back out when the
-  turning stops. The closest and farthest widths (0.2-20 km) and the transition time are
-  settings. The zoom is computed per telemetry sample, so scrubbing and export agree.
-- **Altitude references.** Enter the true altitude at the start and end of the video
-  (View > Altitude Reference...) and the barometric altitude is shifted to match, with the
-  shift changing smoothly from one to the other, so slow sensor drift disappears. The
-  window shows how far the barometer drifted between the two, and warns if it is
-  implausibly large. This correction is for presentation and is not causal; the climb rate
-  always uses the barometer as logged. Saved in the project file.
-- **Flight summary.** The last seconds of the video (10 by default) show a "Flight
-  Summary", fading in over one second: flight time, distance flown, min and max altitude,
-  max height above launch, max climb and sink, and max ground speed. An option adds
-  cross-country statistics: distance covered, best ground glide, complete circles, and time
-  circling. The statistics cover the same stretch of telemetry as the altitude graph.
-- **User settings.** The climb filter, color range, map trace and zoom settings, and the
-  flight summary options are saved per user (`%APPDATA%\CamBot\user_settings.txt`) rather
-  than per project, so a look you dial in carries over from video to video.
-
-### Changes since the previous builds
+### Changes from the earlier builds
 
 - **The telemetry window now spans the video.** The map, altitude graph and scrub-widget
   cutoff markers used to start at the launch marker and run one video-length from there,
@@ -451,12 +426,10 @@ hand, and exports the result as an MP4.
 
 - Windows and Visual Studio only, and an NVIDIA GPU is required for export.
 - Export still renders at 1920x1080 whatever the source resolution; an output-size choice
-  is the next piece of work.
+  is planned.
 - Telemetry loading is single-threaded. A 2-3 hour log (about 72,000-96,000 lines) still
   takes several seconds. Multithreaded parsing or a faster file format is the likely next
   step if that matters.
-- Exporting while telemetry is still loading is not blocked yet.
-- An empty telemetry file is not handled gracefully.
 - The circling detector and the best-glide measure in the flight summary use first-guess
   thresholds (a full turn within 45 s to start zooming; 360 degrees of one-direction turning
   to count a circle; a 60-second glide that loses at least 100 ft). They have not yet been
@@ -465,5 +438,17 @@ hand, and exports the result as an MP4.
   wind inflates or deflates it.
 - The telemetry timezone correction is computed once per file, so a log that spans a DST
   change will be off by an hour after the change.
-- See `TODO.txt` for the wish list, including an executable icon, audio while in UI mode,
-  and a map aesthetic pass.
+- In a crossfade the overlays and telemetry belong to whichever clip is showing more of itself, so they jump at the middle of it.
+- A crossfade runs two decoders, so playback can stutter at the start of one, most on slower machines. Sync recovers by itself.
+- While a slowed-down clip is held on one frame, the overlay (telemetry, text fades) changes only when the frame does.
+- Sound at off-normal speed with **Keep pitch** is a simple time-domain stretch: fine for speech and wind between about 0.5x and 2x,
+  increasingly stuttery beyond that. There is no reverse playback.
+- Exports with speed changes or crossfades are cut at the timeline's frame times (the frame grid of the output), so they take
+  longer than a plain export.
+- After cancelling an export, Windows Media Player sometimes refuses the unfinished file the first time it is opened (error
+  0x80070323) and plays it the second time. It is on `TODO.txt`.
+- **Camera Data (debug)** reads the camera's streams without a schema, so some fields may be shown as the wrong kind of thing, and the
+  few names given are from ExifTool's list or are guesses (those end in "?"). The units of the barometric altitude (decimetres) are
+  worked out from comparing it with the collector, not from DJI. A stream is kept in memory up to 256 MB; past that the plot shows
+  only the part that fitted. Nothing in it is used for overlays yet.
+- See `TODO.txt` for the wish list, including labels pinned to ground landmarks, tracking other gliders, a vario tone, an executable icon and a map aesthetic pass.
