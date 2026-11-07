@@ -234,6 +234,9 @@
     <ClCompile Include="imgui\imgui_impl_opengl3.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ResourceCompile Include="cambot.rc" />
+  </ItemGroup>
+  <ItemGroup>
     <None Include="3.3.shader.frag" />
     <None Include="3.3.shader.vert" />
     <None Include="border_shader.frag" />

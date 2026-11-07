@@ -1,0 +1,7 @@
+// CamBot's Windows resources.
+//
+// GLFW looks for an icon resource named GLFW_ICON when it registers its window class, so
+// this one entry gives both the window (title bar, taskbar) and the .exe in Explorer the
+// same icon. Named resources sort ahead of numbered ones, which keeps it the file icon.
+
+GLFW_ICON ICON "cambot.ico"
