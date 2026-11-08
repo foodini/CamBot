@@ -142,18 +142,26 @@ static void test_sync_layout() {
 		if (w < 100 || h < 100)
 			continue;
 		// The panes share the width: the strip is its own width, the map and the video split the rest
-		// (the video takes an odd pixel), and the bars run the whole width.
+		// (the video takes an odd pixel) unless the video's column needs more than that for the transport bar
+		// under it, and the header, divider and timeline run the whole width.
 		CHECK(layout.map.x == 0.0f && layout.map.w + layout.strip.w + layout.preview_area.w == w);
 		CHECK(layout.strip.x == layout.map.w && layout.strip.w == window_layout::SYNC_STRIP_WIDTH);
 		CHECK(layout.preview_area.x == layout.strip.x + layout.strip.w);
-		CHECK(layout.preview_area.w - layout.map.w <= 1.0f && layout.preview_area.w >= layout.map.w);
+		CHECK(layout.preview_area.w >= layout.map.w);
+		if (w >= 1400.0f)
+			CHECK(layout.preview_area.w - layout.map.w <= 1.0f);
+		if (w >= window_layout::SYNC_STRIP_WIDTH + window_layout::MIN_PREVIEW_COLUMN_WIDTH)
+			CHECK(layout.preview_area.w >= window_layout::MIN_PREVIEW_COLUMN_WIDTH);
 		CHECK(layout.strip.y == layout.map.y && layout.strip.h == layout.map.h);
-		CHECK(layout.header.w == w && layout.transport.w == w && layout.splitter.w == w && layout.timeline.w == w);
+		CHECK(layout.header.w == w && layout.splitter.w == w && layout.timeline.w == w);
+		// The transport bar is the bottom of the video's column, as wide as it, with the map and the strip as tall as both.
+		CHECK(layout.transport.x == layout.preview_area.x && layout.transport.w == layout.preview_area.w);
+		CHECK(layout.transport.y == layout.preview_area.y + layout.preview_area.h);
+		CHECK(fabsf(layout.transport.y + layout.transport.h - (layout.map.y + layout.map.h)) < 0.01f);
 		// Stacked top to bottom with nothing missing, ending at the bottom of the window.
 		CHECK(layout.header.y == MENU);
 		CHECK(layout.map.y == layout.header.y + layout.header.h);
-		CHECK(layout.transport.y == layout.map.y + layout.map.h);
-		CHECK(layout.splitter.y == layout.transport.y + layout.transport.h);
+		CHECK(layout.splitter.y == layout.map.y + layout.map.h);
 		CHECK(layout.timeline.y == layout.splitter.y + layout.splitter.h);
 		CHECK(fabsf(layout.timeline.y + layout.timeline.h - h) < 0.01f);
 		// The timeline's height is the one asked for, held between its limits (when the window has room for them).

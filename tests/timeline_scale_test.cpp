@@ -156,6 +156,33 @@ static void test_scan_curve() {
 	CHECK(near(scan_gesture::drag_for_pixels(960.0f), 1.0, 1e-6));
 }
 
+static void test_scan_steps() {
+	const float native = 30.0f;
+	scan_gesture::Scan scan;
+	CHECK(!scan.active());
+	CHECK(scan.step(500.0f, native, 1.0f) == 0);   // Not begun: nothing moves.
+	scan.begin(100.0f);
+	CHECK(scan.active());
+	CHECK(scan.step(100.0f, native, 1.0f) == 0);   // Still at the place it went down: the deadzone.
+	CHECK(scan.step(104.0f, native, 1.0f) == 0);
+	// Well to the right: a frame a step, forward, however long the step.
+	CHECK(scan.step(900.0f, native, 1.0f / 60.0f) == 1);
+	CHECK(scan.step(900.0f, native, 1.0f / 60.0f) == 1);
+	// Well to the left (a new scan; the one above is still owed frames it has no use for): back.
+	scan.begin(100.0f);
+	CHECK(scan.step(-700.0f, native, 1.0f / 60.0f) == -1);
+	CHECK(scan.step(-700.0f, native, 1.0f / 60.0f) == -1);
+	// A slow rate takes several short steps to add up to a frame, and pays out exactly one when it does.
+	scan.begin(0.0f);
+	int moved = 0;
+	for (int i = 0; i < 30; i++)
+		moved += scan.step(30.0f, native, 1.0f / 60.0f);
+	CHECK(moved >= 2 && moved <= 4);
+	scan.end();
+	CHECK(!scan.active());
+	CHECK(scan.step(900.0f, native, 1.0f) == 0);
+}
+
 static void test_wheel_notches() {
 	CHECK(timeline_zoom::notches(0.0) == 0.0);
 	CHECK(near(timeline_zoom::notches(1.0), 1.0, 1e-12));
@@ -176,6 +203,7 @@ int main() {
 	test_reveal();
 	test_ruler();
 	test_scan_curve();
+	test_scan_steps();
 	test_wheel_notches();
 	printf(g_failures ? "FAILED\n" : "all ok\n");
 	return g_failures;

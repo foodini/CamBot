@@ -108,21 +108,23 @@ SyncLayout compute_sync(float window_width, float window_height, float menu_heig
 	if (timeline_used + splitter_height > left)
 		timeline_used = at_least_zero(left - splitter_height);
 	left -= timeline_used + splitter_height;
-	const float panes_height = at_least_zero(left);
+	// The transport bar goes in the video's column, under the picture, so the panes take back the height it was given.
+	const float panes_height = at_least_zero(left) + transport_height;
 
 	float y = menu_height;
 	layout.header = LayoutRect(0.0f, y, width, header_height);
 	y += header_height;
-	// The strip keeps its width and the map and the video share what is left, the video taking the odd pixel.
+	// The strip keeps its width and the map and the video share what is left, the video taking the odd pixel. The
+	// video's column holds the transport bar, so it is never narrower than that needs (the map gives up the difference
+	// in a narrow window, down to nothing).
 	const float strip_width = smaller(SYNC_STRIP_WIDTH, width);
-	const float map_width = floorf((width - strip_width) / 2.0f);
+	const float map_width = at_least_zero(smaller(floorf((width - strip_width) / 2.0f), width - strip_width - MIN_PREVIEW_COLUMN_WIDTH));
 	layout.map = LayoutRect(0.0f, y, map_width, panes_height);
 	layout.strip = LayoutRect(map_width, y, strip_width, panes_height);
 	const float preview_left = map_width + strip_width;
-	layout.preview_area = LayoutRect(preview_left, y, width - preview_left, panes_height);
+	layout.preview_area = LayoutRect(preview_left, y, width - preview_left, panes_height - transport_height);
+	layout.transport = LayoutRect(preview_left, y + panes_height - transport_height, width - preview_left, transport_height);
 	y += panes_height;
-	layout.transport = LayoutRect(0.0f, y, width, transport_height);
-	y += transport_height;
 	layout.splitter = LayoutRect(0.0f, y, width, splitter_height);
 	y += splitter_height;
 	layout.timeline = LayoutRect(0.0f, y, width, timeline_used);

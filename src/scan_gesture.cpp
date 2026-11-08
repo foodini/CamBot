@@ -23,4 +23,19 @@ float drag_for_pixels(float pixels) {
 	return 2.0f * pixels / REFERENCE_WIDTH_PIXELS;
 }
 
+int Scan::step(float mouse_x_pixels, float native_rate, float seconds) {
+	if (!m_active)
+		return 0;
+	m_owed += rate_for_offset(drag_for_pixels(mouse_x_pixels - m_origin_x), native_rate) * seconds;
+	if (m_owed >= 1.0f) {
+		m_owed -= 1.0f;
+		return 1;
+	}
+	if (m_owed <= -1.0f) {
+		m_owed += 1.0f;
+		return -1;
+	}
+	return 0;
+}
+
 }  // namespace scan_gesture

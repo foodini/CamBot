@@ -21,6 +21,7 @@
 #include "env_config.h"
 #include "file_io.h"
 #include "flight_summary_overlay.h"
+#include "scan_gesture.h"
 #include "font_manager.h"
 #include "interaction_manager.h"
 #include "lines.h"
@@ -207,6 +208,9 @@ static void draw_shortcuts_window(bool* open) {
     ImGui::Text("On the video bar and the telemetry bar:");
     ImGui::BulletText("Left-click and hold: jump there. On the telemetry bar this re-syncs\nthe telemetry to the frame on screen.");
     ImGui::BulletText("Right-click and drag: scan forward / back. The farther you drag from\nwhere you clicked, the faster it goes.");
+    ImGui::Spacing();
+    ImGui::Text("On the video itself:");
+    ImGui::BulletText("Click: pause or play. Right-click and drag: scan forward / back, the same as\non the bars.");
     ImGui::End();
 }
 
@@ -646,6 +650,78 @@ static bool draw_left_panel(const LayoutRect& rect, const EditModel& edit_model,
     return load_telemetry;
 }
 
+// The pictures on the transport bar's buttons. They are drawn as shapes, not letters from a font, so they look the same on
+// every machine, scale with the button and can be the pictures the controls call for (the frame steps, a triangle against a bar,
+// have no character of their own).
+enum class TransportIcon { START, STEP_BACK, PLAY, PAUSE, STEP_FORWARD, END };
+
+// A button with `icon` on it, and a tooltip. True when it is clicked. The shapes take their color from the text color, so
+// they dim with the button when it is disabled.
+static bool transport_icon_button(const char* id, TransportIcon icon, const ImVec2& size, const char* tooltip) {
+    const bool clicked = ImGui::Button(id, size);
+    if (tooltip != nullptr)
+        ImGui::SetItemTooltip("%s", tooltip);
+
+    const ImVec2 low = ImGui::GetItemRectMin();
+    const ImVec2 high = ImGui::GetItemRectMax();
+    const float center_x = floorf((low.x + high.x) * 0.5f);
+    const float center_y = floorf((low.y + high.y) * 0.5f);
+    // The picture fits a square as tall as the button less a margin at the top and bottom, with the pieces laid out across it
+    // (the button is wider than the widest picture by more than the margin).
+    const float margin = 2.0f;
+    const float side = floorf((size.y - 2.0f * margin) * 0.5f) * 2.0f;
+    const float half = side * 0.5f;
+    const float bar_width = floorf(side * 0.16f) < 2.0f ? 2.0f : floorf(side * 0.16f);
+    const float triangle_width = floorf(side * 0.46f);
+    const float top = center_y - half;
+    const float bottom = center_y + half;
+    const ImU32 color = ImGui::GetColorU32(ImGuiCol_Text);
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+
+    // The pieces of each picture, left to right, as widths: a bar, a triangle pointing right, or one pointing left. The
+    // whole row is centered on the button, a triangle's apex being its end that points the way.
+    enum PieceKind { BAR, POINTS_RIGHT, POINTS_LEFT };
+    PieceKind pieces[3];
+    int count = 0;
+    switch (icon) {
+    case TransportIcon::START:        pieces[0] = BAR; pieces[1] = POINTS_LEFT; pieces[2] = POINTS_LEFT; count = 3; break;
+    case TransportIcon::STEP_BACK:    pieces[0] = BAR; pieces[1] = POINTS_LEFT; count = 2; break;
+    case TransportIcon::PLAY:         pieces[0] = POINTS_RIGHT; count = 1; break;
+    case TransportIcon::PAUSE:        pieces[0] = BAR; pieces[1] = BAR; count = 2; break;
+    case TransportIcon::STEP_FORWARD: pieces[0] = POINTS_RIGHT; pieces[1] = BAR; count = 2; break;
+    case TransportIcon::END:          pieces[0] = POINTS_RIGHT; pieces[1] = POINTS_RIGHT; pieces[2] = BAR; count = 3; break;
+    }
+    // A lone triangle (play) is wider than one that is part of a pair, so it reads as the main shape.
+    const float lone_triangle_width = floorf(side * 0.8f);
+    const float pause_gap = bar_width;   // Between the two bars of pause, as wide as a bar.
+    float row_width = 0.0f;
+    for (int i = 0; i < count; i++) {
+        if (pieces[i] == BAR)
+            row_width += bar_width;
+        else
+            row_width += (count == 1) ? lone_triangle_width : triangle_width;
+    }
+    if (icon == TransportIcon::PAUSE)
+        row_width += pause_gap;
+    float x = center_x - floorf(row_width * 0.5f);
+    for (int i = 0; i < count; i++) {
+        if (pieces[i] == BAR) {
+            draw->AddRectFilled(ImVec2(x, top), ImVec2(x + bar_width, bottom), color);
+            x += bar_width;
+            if (icon == TransportIcon::PAUSE && i == 0)
+                x += pause_gap;
+        } else {
+            const float width = (count == 1) ? lone_triangle_width : triangle_width;
+            if (pieces[i] == POINTS_RIGHT)
+                draw->AddTriangleFilled(ImVec2(x, top), ImVec2(x + width, center_y), ImVec2(x, bottom), color);
+            else
+                draw->AddTriangleFilled(ImVec2(x + width, top), ImVec2(x, center_y), ImVec2(x + width, bottom), color);
+            x += width;
+        }
+    }
+    return clicked;
+}
+
 // The bar under the preview: where the video is now and the two screenshot buttons (the same as the
 // File menu's, they set the path the render loop saves to), and below them the buttons to move around
 // and play.
@@ -692,27 +768,31 @@ static void draw_transport_bar(const LayoutRect& rect, MediaContainerMgr& media,
             *overlay_screenshot_path = ffsw::file_dialog(L"png", L"Save Frame with Telemetry Overlay As (*.png)", false);
         }
 
-        // Bottom row: moving around and playing.
+        // Bottom row: moving around and playing. Taller than the default buttons, and the picture buttons nearly square.
+        const float row_height = 32.0f;
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(style.FramePadding.x, floorf((row_height - ImGui::GetFontSize()) * 0.5f)));
+        const ImVec2 icon_button_size(36.0f, ImGui::GetFrameHeight());
         ImGui::BeginDisabled(exporting);
-        if (ImGui::Button("Start", button_size)) {
+        if (transport_icon_button("##start", TransportIcon::START, icon_button_size, "Go to the start")) {
             paused = true;
             media.advance_to_parametric(0.0f);
         }
         ImGui::SameLine();
-        if (ImGui::Button("-1", button_size)) {
+        if (transport_icon_button("##back", TransportIcon::STEP_BACK, icon_button_size, "Back one frame (Left arrow)")) {
             paused = true;
             media.rewind_by(1);
         }
         ImGui::SameLine();
-        if (ImGui::Button(paused ? "Play" : "Pause", button_size))
+        if (transport_icon_button("##play", paused ? TransportIcon::PLAY : TransportIcon::PAUSE, icon_button_size,
+                paused ? "Play (Space)" : "Pause (Space)"))
             paused = !paused;
         ImGui::SameLine();
-        if (ImGui::Button("+1", button_size)) {
+        if (transport_icon_button("##forward", TransportIcon::STEP_FORWARD, icon_button_size, "Forward one frame (Right arrow)")) {
             paused = true;
             media.advance_by(1);
         }
         ImGui::SameLine();
-        if (ImGui::Button("End", button_size)) {
+        if (transport_icon_button("##end", TransportIcon::END, icon_button_size, "Go to the end")) {
             paused = true;
             media.advance_to_parametric(1.0f);
         }
@@ -742,6 +822,7 @@ static void draw_transport_bar(const LayoutRect& rect, MediaContainerMgr& media,
         if (ImGui::IsItemDeactivatedAfterEdit())
             *sound_settled = true;
         ImGui::EndDisabled();
+        ImGui::PopStyleVar();
     }
     ImGui::End();
 }
@@ -930,6 +1011,7 @@ int main()
     // Restore whatever rotation was saved with this project (see EnvConfig::save_project()
     // and the "Save Project" menu item below for where it's written back out).
     media_container_mgr.rotation_angle(project_file_mgr.get_rotation_angle());
+    scan_gesture::Scan preview_scan;   // A right-button scan of the video preview, if one is going on.
     FontManager font_manager("c:\\Windows\\Fonts\\courbd.ttf", 48, SCR_WIDTH, SCR_HEIGHT);
     //TODO(P1) Hand the telemetry_mgr, instead of its vector, into the env_config.
     EnvConfig env_config(&media_container_mgr, &font_manager, &project_file_mgr, &edit_model, (float)SCR_WIDTH, (float)SCR_HEIGHT);
@@ -1590,6 +1672,29 @@ int main()
                     paused = !paused;
                 }
             }
+        }
+
+        // Right-click and drag anywhere on the video scans it, the way it does on the timeline: the farther the mouse is
+        // from where the button went down, the faster the video runs that way. It starts only where ImGui isn't using the
+        // mouse (InteractionMgr::tick() sees to that), but once started it follows the button itself, so dragging out over a
+        // panel doesn't end it. Not while exporting. The same in the Sync / Reorder view as in the editing view.
+        if (!preview_scan.active()) {
+            if (interaction_mgr->mouse_right_button_down() && !media_container_mgr.recording()) {
+                const float mouse_x = interaction_mgr->mouse_x_pos();
+                const float mouse_y = interaction_mgr->mouse_y_pos();
+                if (mouse_x >= -1.0f && mouse_x <= 1.0f && mouse_y >= -1.0f && mouse_y <= 1.0f) {
+                    preview_scan.begin(ImGui::GetIO().MousePos.x);
+                    paused = true;
+                }
+            }
+        } else if (ImGui::IsMouseDown(ImGuiMouseButton_Right) && !media_container_mgr.recording()) {
+            const int frames = preview_scan.step(ImGui::GetIO().MousePos.x, media_container_mgr.frame_rate(), ImGui::GetIO().DeltaTime);
+            if (frames > 0)
+                media_container_mgr.advance_by(1);
+            else if (frames < 0)
+                media_container_mgr.rewind_by(1);
+        } else {
+            preview_scan.end();
         }
 
         // Let the font manager know that it's time to clear out expired strings:

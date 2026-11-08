@@ -33,16 +33,17 @@ struct WindowLayout {
 // The sync view, which takes over the whole window while the telemetry is being lined up with the
 // video and the files put in order. From the top: a bar with the Done and Cancel buttons; the panes
 // side by side, the map on the left, a narrow strip of buttons in the middle (they apply to both the
-// map and the video) and the video (with its telemetry) on the right; the transport bar, across all
-// of them; and the timeline of the files, with a divider above it to make it taller or shorter,
+// map and the video) and the video (with its telemetry) on the right, with the transport bar under
+// the video (it moves the video and the telemetry together, so it goes with the part that does the
+// same); and the timeline of the files, with a divider above it to make it taller or shorter,
 // where they can be scrubbed through and put in order.
 struct SyncLayout {
 	LayoutRect header;
 	LayoutRect map;            // The left of the panes.
 	LayoutRect strip;          // Between the map and the video.
-	LayoutRect preview_area;   // The right of the panes.
+	LayoutRect preview_area;   // The right of the panes, above the transport bar.
 	LayoutRect preview;        // The picture itself, as large as fits, centered in preview_area.
-	LayoutRect transport;
+	LayoutRect transport;      // Under the video, as wide as its column.
 	LayoutRect splitter;       // The divider between the panes and the timeline.
 	LayoutRect timeline;
 };
