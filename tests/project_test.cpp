@@ -206,6 +206,68 @@ static void test_text_boxes_round_trip() {
 	CHECK(without.text_boxes().empty());
 }
 
+// Paths ride along with the rest of the editing state: the times of their points follow a change of time base, and those of files that are
+// not there are left out; the next one added gets an id nobody has.
+static void test_tracked_paths_round_trip() {
+	std::vector<int64_t> durations;
+	durations.push_back(30000 * 20);
+	durations.push_back(30000 * 10);
+	ProjectData project = make_project(2);
+	project.time_base_num = 1;
+	project.time_base_den = 30000;
+	TrackedPath path;
+	path.id = 4;
+	path.name = "Hawk";
+	path.media = 1;
+	path.curve.set_point(30000, 0.25, 0.5);
+	path.curve.set_point(60000, 0.75, 0.4);
+	path.curve.set_orientation_aware(false);
+	path.circle.enabled = true;
+	path.circle.radius = 0.05f;
+	path.circle.color[0] = 0.2f;
+	project.paths.push_back(path);
+	project.path_fov_degrees = 120.0;
+	ProjectData other = project;
+	CHECK(project == other);
+	other.paths[0].curve.set_point(90000, 0.1, 0.1);
+	CHECK(project != other);
+	other = project;
+	other.path_fov_degrees = 100.0;
+	CHECK(project != other);
+
+	EditModel model;
+	std::string error;
+	CHECK(project_io::apply_to_model(project, durations, 1, 30000, &model, &error));
+	CHECK(model.paths().size() == 1 && model.paths()[0] == path);
+	CHECK(model.path_fov_degrees() == 120.0);
+	const int added = model.add_path(TrackedPath());
+	CHECK(added == 5);
+	CHECK(model.find_path(5) != NULL && model.find_path(4) != NULL && model.find_path(6) == NULL);
+	CHECK(model.remove_path(added) && !model.remove_path(added));
+	ProjectData written;
+	project_io::fill_from_model(model, 1, 30000, &written);
+	CHECK(written.paths == project.paths && written.path_fov_degrees == 120.0);
+
+	// With another time base the times of the points are converted, and nothing else changes.
+	EditModel converted;
+	CHECK(project_io::apply_to_model(project, durations, 1, 90000, &converted, &error));
+	CHECK(converted.paths().size() == 1);
+	CHECK(converted.paths()[0].curve.points().size() == 2);
+	CHECK(converted.paths()[0].curve.points()[0].ticks == 90000 && converted.paths()[0].curve.points()[1].ticks == 180000);
+	CHECK(converted.paths()[0].curve.points()[1].u == 0.75 && converted.paths()[0].name == "Hawk");
+	CHECK(!converted.paths()[0].curve.orientation_aware());
+
+	// A path on a file that isn't there is left out rather than refused.
+	ProjectData stray = project;
+	stray.paths[0].media = 5;
+	EditModel without;
+	CHECK(project_io::apply_to_model(stray, durations, 1, 30000, &without, &error));
+	CHECK(without.paths().empty());
+	// A new project starts with the default lens.
+	EditModel fresh;
+	CHECK(fresh.path_fov_degrees() == DEFAULT_PATH_FOV_DEGREES);
+}
+
 // A text box in a project older than version 7 was tied to the frame it began fading in on; now it is the frame it is fully in at.
 static void test_old_text_anchors_move_on() {
 	std::vector<int64_t> durations;
@@ -339,6 +401,7 @@ int main(int argc, char** argv) {
 	test_bad_projects_are_refused();
 	test_time_base_change();
 	test_text_boxes_round_trip();
+	test_tracked_paths_round_trip();
 	test_old_text_anchors_move_on();
 	test_launch_marked_round_trip();
 	test_paths();

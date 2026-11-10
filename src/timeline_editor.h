@@ -15,6 +15,8 @@
 #include "edit_model.h"
 #include "text_box.h"
 #include "timeline_selection.h"
+#include "tracked_path.h"
+#include "tracking_path.h"
 
 class MediaContainerMgr;
 
@@ -87,6 +89,25 @@ public:
 	// When it shows: the frame it begins on, and the lengths of its fade in, dwell and fade out.
 	void set_timing(EditModel* model, int id, const FileTime& anchor, int64_t fade_in_ticks, int64_t dwell_ticks, int64_t fade_out_ticks);
 	void end_box_edit(const EditModel& model, const MediaContainerMgr& media);
+
+	// ---- Paths (see tracked_path.h) ----
+	// Adding, removing, trimming and taking a point out are undoable steps like the cuts (and don't count as starting to edit the video).
+	// add_path gives the id the path was given, or 0 if it couldn't be added.
+	int  add_path(EditModel* model, MediaContainerMgr* media, const TrackedPath& path);
+	bool remove_path(EditModel* model, MediaContainerMgr* media, int id);
+	// Makes path `id` begin (`left`) or end at the footage frame being shown (see tracking::TrackingPath::trim_left); false, changing
+	// nothing, if that frame is not of the path's file or there is nothing to cut.
+	bool trim_path(EditModel* model, MediaContainerMgr* media, int id, bool left, const tracking::CameraLens& lens,
+		const tracking::CameraOrientations& orientations);
+	bool remove_path_point(EditModel* model, MediaContainerMgr* media, int id, int64_t ticks);
+	// The tick of the footage of file `file` being shown, or -1 when what is shown is of another file.
+	int64_t footage_ticks_at_playhead(const EditModel& model, const MediaContainerMgr& media, int file) const;
+	// Placing and dragging points, and setting how a path looks, take any number of changes and are one undo step, like typing in a
+	// text box: call begin_box_edit() first and end_box_edit() last (the same pair), and these in between.
+	void set_path_point(EditModel* model, int id, int64_t ticks, double u, double v);
+	void set_path_circle(EditModel* model, int id, const PathCircle& circle);
+	void set_path_name(EditModel* model, int id, const std::string& name);
+	void set_path_orientation_aware(EditModel* model, int id, bool aware);
 
 private:
 	// If the video is playing, pauses it and tells the user that `what` was not done; true if it was playing.

@@ -207,6 +207,11 @@
     <ClCompile Include="render_target.cpp" />
     <ClCompile Include="edit_history.cpp" />
     <ClCompile Include="scan_gesture.cpp" />
+    <ClCompile Include="tracking_path.cpp" />
+    <ClCompile Include="dji_orientation.cpp" />
+    <ClCompile Include="orientation_loader.cpp" />
+    <ClCompile Include="frame_mapping.cpp" />
+    <ClCompile Include="path_panel.cpp" />
     <ClCompile Include="timeline_edit.cpp" />
     <ClCompile Include="sync_view.cpp" />
     <ClCompile Include="timeline_editor.cpp" />
@@ -310,6 +315,12 @@
     <ClInclude Include="edit_history.h" />
     <ClInclude Include="recent_projects.h" />
     <ClInclude Include="scan_gesture.h" />
+    <ClInclude Include="tracking_path.h" />
+    <ClInclude Include="tracked_path.h" />
+    <ClInclude Include="dji_orientation.h" />
+    <ClInclude Include="orientation_loader.h" />
+    <ClInclude Include="frame_mapping.h" />
+    <ClInclude Include="path_panel.h" />
     <ClInclude Include="timeline_edit.h" />
     <ClInclude Include="sync_view.h" />
     <ClInclude Include="timeline_editor.h" />

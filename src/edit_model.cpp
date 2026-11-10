@@ -346,7 +346,7 @@ FileTime CaptureSequence::file_time_for(int64_t flight_ticks) const {
 // ---------------------------------------------------------------------------------------------
 
 EditModel::EditModel() : m_seconds_per_tick(1.0 / 90000.0), m_edit_started(false), m_in_source_view(false), m_stashed_edit_started(false),
-	m_launch_marked(false), m_text_boxes(), m_next_text_id(1) {
+	m_launch_marked(false), m_text_boxes(), m_next_text_id(1), m_paths_of_targets(), m_next_path_id(1), m_path_fov_degrees(DEFAULT_PATH_FOV_DEGREES) {
 }
 
 int64_t EditModel::seconds_to_ticks(double seconds) const {
@@ -373,6 +373,8 @@ void EditModel::set_media(const std::vector<std::string>& paths, const std::vect
 	m_launch_marked = false;
 	m_text_boxes.clear();
 	m_next_text_id = 1;
+	m_paths_of_targets.clear();
+	m_next_path_id = 1;
 	rebuild_sync();
 }
 
@@ -400,6 +402,48 @@ bool EditModel::remove_text_box(int id) {
 		}
 	}
 	return false;
+}
+
+void EditModel::set_paths(const std::vector<TrackedPath>& paths) {
+	m_paths_of_targets = paths;
+	m_next_path_id = 1;
+	for (size_t i = 0; i < m_paths_of_targets.size(); i++) {
+		if (m_paths_of_targets[i].id >= m_next_path_id)
+			m_next_path_id = m_paths_of_targets[i].id + 1;
+	}
+}
+
+int EditModel::add_path(const TrackedPath& path) {
+	TrackedPath added = path;
+	added.id = m_next_path_id++;
+	m_paths_of_targets.push_back(added);
+	return added.id;
+}
+
+bool EditModel::remove_path(int id) {
+	for (size_t i = 0; i < m_paths_of_targets.size(); i++) {
+		if (m_paths_of_targets[i].id == id) {
+			m_paths_of_targets.erase(m_paths_of_targets.begin() + i);
+			return true;
+		}
+	}
+	return false;
+}
+
+TrackedPath* EditModel::find_path(int id) {
+	for (size_t i = 0; i < m_paths_of_targets.size(); i++) {
+		if (m_paths_of_targets[i].id == id)
+			return &m_paths_of_targets[i];
+	}
+	return nullptr;
+}
+
+const TrackedPath* EditModel::find_path(int id) const {
+	for (size_t i = 0; i < m_paths_of_targets.size(); i++) {
+		if (m_paths_of_targets[i].id == id)
+			return &m_paths_of_targets[i];
+	}
+	return nullptr;
 }
 
 TextBox* EditModel::find_text_box(int id) {

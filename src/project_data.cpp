@@ -290,6 +290,102 @@ bool read_text_boxes(const Json::Value& list, size_t media_count, std::vector<Te
 	return true;
 }
 
+bool read_paths(const Json::Value& list, size_t media_count, std::vector<TrackedPath>* paths, std::string* error) {
+	if (!list.isArray()) {
+		set_error(error, "The project file's \"paths\" should be a list.");
+		return false;
+	}
+	for (Json::ArrayIndex i = 0; i < list.size(); i++) {
+		const Json::Value& entry = list[i];
+		if (!entry.isObject()) {
+			set_error(error, "The project file has a path that is not in the expected form.");
+			return false;
+		}
+		TrackedPath path;
+		int64_t id = 0;
+		if (!read_whole(entry, "id", 0, &id, error) || !read_media_index(entry, media_count, &path.media, error) ||
+			!read_string(entry, "name", &path.name, error))
+			return false;
+		path.id = (int)id;
+		if (entry.isMember("orientation_aware")) {
+			if (!entry["orientation_aware"].isBool()) {
+				set_error(error, "The project file's path \"orientation_aware\" should be true or false.");
+				return false;
+			}
+			path.curve.set_orientation_aware(entry["orientation_aware"].asBool());
+		}
+		if (entry.isMember("circle")) {
+			const Json::Value& circle = entry["circle"];
+			if (!circle.isObject()) {
+				set_error(error, "The project file's path \"circle\" is not in the expected form.");
+				return false;
+			}
+			if (circle.isMember("enabled")) {
+				if (!circle["enabled"].isBool()) {
+					set_error(error, "The project file's circle \"enabled\" should be true or false.");
+					return false;
+				}
+				path.circle.enabled = circle["enabled"].asBool();
+			}
+			if (!read_number(circle, "radius", &path.circle.radius, error) || !read_color(circle, "color", path.circle.color, error))
+				return false;
+			if (!(path.circle.radius > 0.0f && path.circle.radius <= 1.0f)) {
+				set_error(error, "The project file has a circle with a \"radius\" that is out of range.");
+				return false;
+			}
+		}
+		if (entry.isMember("points")) {
+			const Json::Value& points = entry["points"];
+			if (!points.isArray()) {
+				set_error(error, "The project file's path \"points\" should be a list.");
+				return false;
+			}
+			std::vector<tracking::PathPoint> read;
+			for (Json::ArrayIndex k = 0; k < points.size(); k++) {
+				const Json::Value& point = points[k];
+				if (!point.isArray() || point.size() != 3 || !point[0].isInt64() || !point[1].isNumeric() || !point[2].isNumeric()) {
+					set_error(error, "The project file has a path point that should be three numbers: the time, then across and down.");
+					return false;
+				}
+				read.push_back(tracking::PathPoint((int64_t)point[0].asInt64(), point[1].asDouble(), point[2].asDouble()));
+			}
+			path.curve.set_points(read);
+		}
+		for (size_t other = 0; other < paths->size(); other++) {
+			if ((*paths)[other].id == path.id) {
+				set_error(error, "The project file has two paths with the same \"id\".");
+				return false;
+			}
+		}
+		paths->push_back(path);
+	}
+	return true;
+}
+
+Json::Value path_to_json(const TrackedPath& path) {
+	Json::Value entry(Json::objectValue);
+	entry["id"] = path.id;
+	entry["media"] = path.media;
+	entry["name"] = path.name;
+	entry["orientation_aware"] = path.curve.orientation_aware();
+	Json::Value circle(Json::objectValue);
+	circle["enabled"] = path.circle.enabled;
+	circle["radius"] = (double)path.circle.radius;
+	circle["color"] = color_to_json(path.circle.color);
+	entry["circle"] = circle;
+	Json::Value points(Json::arrayValue);
+	for (size_t i = 0; i < path.curve.points().size(); i++) {
+		const tracking::PathPoint& point = path.curve.points()[i];
+		Json::Value item(Json::arrayValue);
+		item.append(Json::Value((Json::Int64)point.ticks));
+		item.append(point.u);
+		item.append(point.v);
+		points.append(item);
+	}
+	entry["points"] = points;
+	return entry;
+}
+
 Json::Value text_box_to_json(const TextBox& box) {
 	Json::Value entry(Json::objectValue);
 	entry["id"] = box.id;
@@ -443,6 +539,22 @@ bool read_editing_state(const Json::Value& root, ProjectData* result, std::strin
 			set_error(error, "The project file has text boxes but no \"time_base\" to measure them in.");
 			return false;
 		}
+	}
+
+	if (root.isMember("paths")) {
+		if (!read_paths(root["paths"], media_count, &result->paths, error))
+			return false;
+		if (!result->paths.empty() && result->time_base_num == 0) {
+			set_error(error, "The project file has paths but no \"time_base\" to measure them in.");
+			return false;
+		}
+	}
+	if (root.isMember("path_fov")) {
+		if (!root["path_fov"].isNumeric() || !(root["path_fov"].asDouble() > 1.0 && root["path_fov"].asDouble() < 179.0)) {
+			set_error(error, "The project file's \"path_fov\" should be a number of degrees between 1 and 179.");
+			return false;
+		}
+		result->path_fov_degrees = root["path_fov"].asDouble();
 	}
 	return true;
 }
@@ -614,6 +726,15 @@ std::string to_json(const ProjectData& project) {
 			boxes.append(text_box_to_json(project.text_boxes[i]));
 		root["text_boxes"] = boxes;
 	}
+
+	if (!project.paths.empty()) {
+		Json::Value paths(Json::arrayValue);
+		for (size_t i = 0; i < project.paths.size(); i++)
+			paths.append(path_to_json(project.paths[i]));
+		root["paths"] = paths;
+	}
+	if (project.path_fov_degrees != DEFAULT_PATH_FOV_DEGREES)
+		root["path_fov"] = project.path_fov_degrees;
 
 	root["telemetry_file"] = project.telemetry_file;
 	root["window_start_elapsed_s"] = (double)project.window_start_elapsed_s;

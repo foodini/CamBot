@@ -123,6 +123,24 @@ bool apply_to_model(const ProjectData& project, const std::vector<int64_t>& medi
 	}
 	model->set_text_boxes(text_boxes);
 
+	// Paths: the times of their points in this run's time base, and only those of files that are there, with a name and the points in order
+	// (reading the points puts them in order and keeps one to a frame).
+	std::vector<TrackedPath> paths;
+	for (size_t i = 0; i < project.paths.size(); i++) {
+		TrackedPath path = project.paths[i];
+		if (path.media < 0 || path.media >= model->media_count())
+			continue;
+		std::vector<tracking::PathPoint> points;
+		for (size_t k = 0; k < path.curve.points().size(); k++) {
+			const tracking::PathPoint& point = path.curve.points()[k];
+			points.push_back(tracking::PathPoint(rescale_ticks(point.ticks, from_num, from_den, tb_num, tb_den), point.u, point.v));
+		}
+		path.curve.set_points(points);
+		paths.push_back(path);
+	}
+	model->set_paths(paths);
+	model->set_path_fov_degrees(project.path_fov_degrees);
+
 	if (project.has_version2_sync) {
 		model->set_offset((double)project.version2_offset_s);
 		model->set_launch_flight_seconds((double)project.version2_launch_s);
@@ -155,6 +173,8 @@ void fill_from_model(const EditModel& model, int tb_num, int tb_den, ProjectData
 	}
 	project->launch_mark = model.launch_marked() ? model.launch_mark() : FileTime(-1, 0);
 	project->text_boxes = model.text_boxes();
+	project->paths = model.paths();
+	project->path_fov_degrees = model.path_fov_degrees();
 	project->has_version2_sync = false;
 	project->text_anchors_at_fade_start = false;
 	project->version2_offset_s = 0.0f;

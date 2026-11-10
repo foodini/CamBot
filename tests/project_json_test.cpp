@@ -94,7 +94,7 @@ static void test_speed_round_trip() {
 	const std::string plain_text = project_io::to_json(plain);
 	CHECK(plain_text.find("speed") == std::string::npos);
 	CHECK(plain_text.find("audio") == std::string::npos);
-	CHECK(plain_text.find("\"version\" : 7") != std::string::npos);
+	CHECK(plain_text.find("\"version\" : 8") != std::string::npos);
 	CHECK(plain_text.find("transitions") == std::string::npos);
 	// Written again, the text is the same: nothing creeps.
 	CHECK(project_io::to_json(back) == text);
@@ -173,6 +173,24 @@ static ProjectData full_project() {
 	second.text = "Short";
 	project.text_boxes.push_back(first);
 	project.text_boxes.push_back(second);
+	TrackedPath hawk;
+	hawk.id = 2;
+	hawk.name = "Hawk \"A\"";
+	hawk.media = 1;
+	hawk.curve.set_point(10000, 0.125, 0.5);
+	hawk.curve.set_point(20000, 0.5, 0.25);
+	hawk.curve.set_point(90000, 0.875, 0.75);
+	hawk.circle.enabled = true;
+	hawk.circle.radius = 0.0625f;
+	hawk.circle.color[1] = 0.5f;
+	TrackedPath still;
+	still.id = 5;
+	still.media = 0;
+	still.curve.set_orientation_aware(false);
+	still.curve.set_point(0, 0.5, 0.5);
+	project.paths.push_back(hawk);
+	project.paths.push_back(still);
+	project.path_fov_degrees = 97.5;
 	project.telemetry_file = "D:\\flights\\2026.09.27 Fort Funston.LOG";
 	project.window_start_elapsed_s = 12.5f;
 	project.rotation_rad = 3.14159274f;
@@ -195,6 +213,8 @@ static void test_full_round_trip() {
 	CHECK(model.capture().order().size() == 3 && model.capture().order()[0] == 2 && model.capture().order()[1] == 0 && model.capture().order()[2] == 1);
 	CHECK(model.anchors().size() == 2);
 	CHECK(model.text_boxes().size() == 2);
+	CHECK(model.paths().size() == 2 && model.paths()[0] == project.paths[0]);
+	CHECK(model.path_fov_degrees() == 97.5);
 	CHECK(model.edit_list().transition(0) == project.transitions[0] && model.edit_list().transition(5) == project.transitions[5]);
 
 	ProjectData written = project;
@@ -216,6 +236,7 @@ static void test_full_round_trip() {
 	CHECK(again.capture().order() == model.capture().order());
 	CHECK(again.anchors() == model.anchors());
 	CHECK(again.text_boxes() == model.text_boxes());
+	CHECK(again.paths() == model.paths() && again.path_fov_degrees() == model.path_fov_degrees());
 	CHECK(again.edit_list().transitions() == model.edit_list().transitions());
 	CHECK(again.launch_flight_seconds() == model.launch_flight_seconds());
 	CHECK(again.edit_started() == model.edit_started());
@@ -246,8 +267,23 @@ static void test_older_and_bad_files() {
 	CHECK(project_io::parse_json(project_text(3, "[{\"media\":0,\"in\":0,\"out\":100}]"), &project, &error));
 	// A newer file is refused politely.
 	project = ProjectData();
-	CHECK(!project_io::parse_json(project_text(8, "[{\"media\":0,\"in\":0,\"out\":100}]"), &project, &error));
+	CHECK(!project_io::parse_json(project_text(9, "[{\"media\":0,\"in\":0,\"out\":100}]"), &project, &error));
 	CHECK(error.find("newer version") != std::string::npos);
+	// Paths: older files have none; bad ones are refused with a sentence about it.
+	const std::string base = "{\"format\":\"cambot-project\",\"version\":8,\"video_files\":[\"a.mp4\"],\"time_base\":[1,25000],\"clips\":[{\"media\":0,\"in\":0,\"out\":100}],\"paths\":";
+	CHECK_MSG(project_io::parse_json(base + "[{\"id\":1,\"media\":0,\"points\":[[200,0.5,0.5],[100,0.1,0.2]]}]}", &project, &error), "%s", error.c_str());
+	CHECK(project.paths.size() == 1 && project.paths[0].curve.points().size() == 2 && project.paths[0].curve.first_ticks() == 100);
+	CHECK(project.paths[0].curve.orientation_aware() && !project.paths[0].circle.enabled && project.path_fov_degrees == DEFAULT_PATH_FOV_DEGREES);
+	CHECK(!project_io::parse_json(base + "[{\"id\":1,\"media\":0},{\"id\":1,\"media\":0}]}", &project, &error));
+	CHECK(error.find("same") != std::string::npos);
+	CHECK(!project_io::parse_json(base + "[{\"id\":1,\"media\":3}]}", &project, &error));
+	CHECK(!project_io::parse_json(base + "[{\"id\":1,\"media\":0,\"points\":[[1,0.5]]}]}", &project, &error));
+	CHECK(error.find("point") != std::string::npos);
+	CHECK(!project_io::parse_json(base + "[{\"id\":1,\"media\":0,\"circle\":{\"radius\":0}}]}", &project, &error));
+	CHECK(!project_io::parse_json(base + "{}}", &project, &error));
+	CHECK(!project_io::parse_json("{\"format\":\"cambot-project\",\"version\":8,\"video_files\":[\"a.mp4\"],\"clips\":[{\"media\":0,\"in\":0,\"out\":100}],\"paths\":[{\"id\":1,\"media\":0}]}", &project, &error));
+	CHECK(error.find("time_base") != std::string::npos);
+	CHECK(!project_io::parse_json("{\"format\":\"cambot-project\",\"version\":8,\"video_files\":[\"a.mp4\"],\"path_fov\":500}", &project, &error));
 	// Speeds out of range or the wrong sort of thing are refused, with a sentence about it.
 	CHECK(!project_io::parse_json(project_text(5, "[{\"media\":0,\"in\":0,\"out\":100,\"speed\":0.05}]"), &project, &error));
 	CHECK(error.find("speed") != std::string::npos);

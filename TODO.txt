@@ -1,12 +1,6 @@
-* The .exe needs an icon.
-* Pull ground speed out of the map and put it above km.
-* Tell the user that frames are currently being cached while doing a right-click scrub
-  if the next required frame is being delayed.
 * Altitude graph needs the blue dot to be more opaque at the center/stand out more.
 * Add something to the scrub widget to display the center of right-click scrubbing, and
   potentially the frame rate being traversed.
-* Allow the right-click scrub gesture on the video preview as well as the map and the timeline.
-* Make climb/sink rate look like an avionic? 
 * While telemetry is loading, just put "Loading Telemetry - XX%" in huge letters somewhere. 
   * Don't render any of it during this time?
 * Orient the glider on the map according to magnetic telemetry so you can see it skidding/crabbing?
@@ -22,6 +16,8 @@
   ("can't get to your local storage"); the second try works. CamBot closes the file (avio_close) before the "cancelled" message, so
   probably Defender/indexer/OneDrive touching the new file. Check Associated Handles in Resource Monitor when it happens; test a
   completed export and an export outside OneDrive.
+* Tell the user that frames are currently being cached while doing a right-click scrub
+  if the next required frame is being delayed.
 
 ==== FEATURE LIST (from the Nov 6 brainstorm) ====
 
@@ -46,6 +42,7 @@ MEDIUM / EXPERIMENT
 * Replace the map with a 3D terrain view (flyby style).
 * Ghost glider: overlay an earlier flight (especially a previous flight in a competition format).
 * G-force gauge under the distance flown.
+* Make climb/sink rate look like an avionic? 
 
 LATER
 * Vario audio: a climb/sink beep synthesized from the telemetry and mixed into the export. Also meant as a platform for trying out

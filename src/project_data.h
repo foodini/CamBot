@@ -2,7 +2,8 @@
 
 // Everything a CamBot project file stores, as plain data, plus reading and writing it.
 //
-// Project files are JSON (format "cambot-project", version 7; versions 2 to 6 are still read. Version 5 added a speed and a
+// Project files are JSON (format "cambot-project", version 8; versions 2 to 7 are still read. Version 8 added the paths that follow
+// things through the picture and the lens's field of view they use; older projects have none. Version 5 added a speed and a
 // sound treatment to each clip; older projects read as normal speed. Version 6 added the transitions: a fade at the start and
 // the end of the video, kept as a list of the ones that aren't plain cuts; older projects have none). The editing
 // parts of a project (the library, the capture order, the clips, the sync anchors, the text boxes) are described
@@ -29,6 +30,8 @@ struct ProjectData {
 	std::vector<SyncAnchor>  sync_anchors;    // What ties the footage to the telemetry; see edit_model.h.
 	FileTime                 launch_mark;     // Where the user marked launch. media < 0: not marked yet.
 	std::vector<TextBox>     text_boxes;      // The text laid over the video; see text_box.h.
+	std::vector<TrackedPath> paths;           // What follows things that move through the picture; see tracked_path.h.
+	double                   path_fov_degrees; // The lens's field of view across the picture, for those paths.
 	std::string              telemetry_file;
 	float                    window_start_elapsed_s;
 	float                    rotation_rad;
@@ -46,8 +49,8 @@ struct ProjectData {
 	// fill_from_model() clears this. Not part of the project's content, so not compared.
 	bool                     text_anchors_at_fade_start;
 
-	ProjectData() : time_base_num(0), time_base_den(0), edit_started(false), launch_mark(-1, 0), window_start_elapsed_s(0.0f), rotation_rad(0.0f),
-		has_version2_sync(false), version2_offset_s(0.0f), version2_launch_s(0.0f), text_anchors_at_fade_start(false) {}
+	ProjectData() : time_base_num(0), time_base_den(0), edit_started(false), launch_mark(-1, 0), path_fov_degrees(DEFAULT_PATH_FOV_DEGREES),
+		window_start_elapsed_s(0.0f), rotation_rad(0.0f), has_version2_sync(false), version2_offset_s(0.0f), version2_launch_s(0.0f), text_anchors_at_fade_start(false) {}
 
 	// Used to tell whether the project has changed since it was saved. The numbers only ever
 	// change when the user changes them, so comparing floats exactly is what's wanted here.
@@ -56,6 +59,7 @@ struct ProjectData {
 			capture_order == other.capture_order && clips == other.clips && transitions == other.transitions &&
 			edit_started == other.edit_started &&
 			sync_anchors == other.sync_anchors && launch_mark == other.launch_mark && text_boxes == other.text_boxes &&
+			paths == other.paths && path_fov_degrees == other.path_fov_degrees &&
 			telemetry_file == other.telemetry_file &&
 			window_start_elapsed_s == other.window_start_elapsed_s && rotation_rad == other.rotation_rad &&
 			altitude_refs == other.altitude_refs && has_version2_sync == other.has_version2_sync &&
@@ -66,7 +70,7 @@ struct ProjectData {
 
 namespace project_io {
 
-const int CURRENT_VERSION = 7;
+const int CURRENT_VERSION = 8;
 
 bool parse_json(const std::string& text, ProjectData* project, std::string* error);
 std::string to_json(const ProjectData& project);

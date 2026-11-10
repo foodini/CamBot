@@ -12,6 +12,7 @@ EditState current_state(const EditModel& model, const MediaContainerMgr& media) 
 	state.clips = model.edit_list().clips();
 	state.transitions = model.edit_list().transitions();
 	state.text_boxes = model.text_boxes();
+	state.paths = model.paths();
 	state.edit_started = model.edit_started();
 	state.playhead_ticks = media.current_ticks();
 	return state;
@@ -69,15 +70,18 @@ bool TimelineEditor::apply_state(const EditState& state, EditModel* model, Media
 	const std::vector<Clip> old_clips = model->edit_list().clips();
 	const std::vector<Transition> old_transitions = model->edit_list().transitions();
 	const std::vector<TextBox> old_text_boxes = model->text_boxes();
+	const std::vector<TrackedPath> old_paths = model->paths();
 	const bool old_started = model->edit_started();
 	if (!model->set_edit(state.clips, state.transitions))
 		return false;
 	model->set_edit_started(state.edit_started);
 	model->set_text_boxes(state.text_boxes);
+	model->set_paths(state.paths);
 	if (!media->set_clips(model->edit_list(), state.playhead_ticks)) {
 		model->set_edit(old_clips, old_transitions);    // The decoder said no (the model's check should have caught it); put things back.
 		model->set_edit_started(old_started);
 		model->set_text_boxes(old_text_boxes);
+		model->set_paths(old_paths);
 		return false;
 	}
 	return true;
@@ -316,7 +320,7 @@ void TimelineEditor::commit_box_edit(const EditModel& model, const MediaContaine
 	if (!m_box_edit_pending)
 		return;
 	m_box_edit_pending = false;
-	if (model.text_boxes() != m_box_edit_before.text_boxes)
+	if (model.text_boxes() != m_box_edit_before.text_boxes || model.paths() != m_box_edit_before.paths)
 		m_history.record(m_box_edit_before);
 }
 
@@ -328,6 +332,84 @@ int TimelineEditor::add_text_box(EditModel* model, MediaContainerMgr* media, con
 	const int id = model->add_text_box(box);
 	m_history.record(before);
 	return id;
+}
+
+int TimelineEditor::add_path(EditModel* model, MediaContainerMgr* media, const TrackedPath& path) {
+	if (media->recording())
+		return 0;
+	commit_box_edit(*model, *media);
+	const EditState before = current_state(*model, *media);
+	const int id = model->add_path(path);
+	m_history.record(before);
+	return id;
+}
+
+bool TimelineEditor::remove_path(EditModel* model, MediaContainerMgr* media, int id) {
+	if (media->recording() || model->find_path(id) == NULL)
+		return false;
+	commit_box_edit(*model, *media);
+	const EditState before = current_state(*model, *media);
+	model->remove_path(id);
+	m_history.record(before);
+	return true;
+}
+
+bool TimelineEditor::trim_path(EditModel* model, MediaContainerMgr* media, int id, bool left, const tracking::CameraLens& lens,
+	const tracking::CameraOrientations& orientations) {
+	TrackedPath* path = model->find_path(id);
+	if (media->recording() || path == NULL || path->curve.empty())
+		return false;
+	commit_box_edit(*model, *media);
+	const EditState before = current_state(*model, *media);
+	const int64_t at = footage_ticks_at_playhead(*model, *media, path->media);
+	if (at < 0)
+		return false;
+	const bool done = left ? path->curve.trim_left(at, lens, orientations) : path->curve.trim_right(at, lens, orientations);
+	if (!done || current_state(*model, *media).paths == before.paths)
+		return false;
+	m_history.record(before);
+	return true;
+}
+
+bool TimelineEditor::remove_path_point(EditModel* model, MediaContainerMgr* media, int id, int64_t ticks) {
+	TrackedPath* path = model->find_path(id);
+	if (media->recording() || path == NULL)
+		return false;
+	commit_box_edit(*model, *media);
+	const EditState before = current_state(*model, *media);
+	if (!path->curve.remove_point(ticks))
+		return false;
+	m_history.record(before);
+	return true;
+}
+
+int64_t TimelineEditor::footage_ticks_at_playhead(const EditModel& model, const MediaContainerMgr& media, int file) const {
+	const FileTime now = model.edit_list().source_for(media.current_ticks());
+	return now.media == file ? now.local_ticks : -1;
+}
+
+void TimelineEditor::set_path_point(EditModel* model, int id, int64_t ticks, double u, double v) {
+	TrackedPath* path = model->find_path(id);
+	if (path != NULL)
+		path->curve.set_point(ticks, u, v);
+}
+
+void TimelineEditor::set_path_circle(EditModel* model, int id, const PathCircle& circle) {
+	TrackedPath* path = model->find_path(id);
+	if (path != NULL)
+		path->circle = circle;
+}
+
+void TimelineEditor::set_path_name(EditModel* model, int id, const std::string& name) {
+	TrackedPath* path = model->find_path(id);
+	if (path != NULL)
+		path->name = name;
+}
+
+void TimelineEditor::set_path_orientation_aware(EditModel* model, int id, bool aware) {
+	TrackedPath* path = model->find_path(id);
+	if (path != NULL)
+		path->curve.set_orientation_aware(aware);
 }
 
 bool TimelineEditor::remove_text_box(EditModel* model, MediaContainerMgr* media, int id) {

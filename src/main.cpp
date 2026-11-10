@@ -42,6 +42,7 @@
 #include "camera_panel.h"
 #include "panel_section.h"
 #include "text_panel.h"
+#include "path_panel.h"
 #include "text_renderer.h"
 #include "fade_overlay.h"
 #include "thumbnail_store.h"
@@ -587,10 +588,10 @@ static void draw_altitude_window(bool* open, bool* resync, bool exporting) {
 // the buttons to change that. Returns true when the "Load Telemetry..." button was clicked; the
 // caller does the loading, as it means restarting. `open_sync_view` is set when the "Sync / Reorder..."
 // button was clicked. `can_change` is false while an export runs, as that needs everything left as it is.
-// Below Source Material are the Speed section (see speed_panel.h), the Transition section (see transition_panel.h) and the Text
-// section (see text_panel.h).
+// Below Source Material are the Speed section (see speed_panel.h), the Transition section (see transition_panel.h), the Text
+// section (see text_panel.h) and the Paths section (see path_panel.h).
 static bool draw_left_panel(const LayoutRect& rect, const EditModel& edit_model,
-    const ProjectFileManager& project_file_mgr, SpeedPanel* speed_panel, TransitionPanel* transition_panel, TextPanel* text_panel, CameraPanel* camera_panel, bool can_change, bool* open_sync_view) {
+    const ProjectFileManager& project_file_mgr, SpeedPanel* speed_panel, TransitionPanel* transition_panel, TextPanel* text_panel, PathPanel* path_panel, CameraPanel* camera_panel, bool can_change, bool* open_sync_view) {
     bool load_telemetry = false;
     if (rect.w < 1.0f || rect.h < 1.0f)
         return false;
@@ -643,6 +644,7 @@ static bool draw_left_panel(const LayoutRect& rect, const EditModel& edit_model,
         speed_panel->draw(can_change);
         transition_panel->draw(can_change);
         text_panel->draw(can_change);
+        path_panel->draw(can_change);
         camera_panel->draw();
         ImGui::Unindent(panel_section::indent_width());
     }
@@ -729,7 +731,7 @@ static bool transport_icon_button(const char* id, TransportIcon icon, const ImVe
 // (not of exports) and a mute button; *sound_settled is set when one has just been finished with, so it can be saved. While an
 // export runs the controls are off, as it needs the video to itself.
 static void draw_transport_bar(const LayoutRect& rect, MediaContainerMgr& media, SoundSettings* sound, bool* sound_settled,
-    std::string* raw_screenshot_path, std::string* overlay_screenshot_path) {
+    std::string* raw_screenshot_path, std::string* overlay_screenshot_path, const std::string& note) {
     if (rect.w < 1.0f || rect.h < 1.0f)
         return;
     ImGui::SetNextWindowPos(ImVec2(rect.x, rect.y));
@@ -754,12 +756,22 @@ static void draw_transport_bar(const LayoutRect& rect, MediaContainerMgr& media,
         const std::string rate = timecode::format_frame_rate(tick.num, tick.den, media.frame_ticks());
         ImGui::AlignTextToFramePadding();
         ImGui::Text("%s / %s (@%sfps)", now.c_str(), total.c_str(), rate.c_str());
+        const float timecode_end = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x;
 
         const char* raw_label = "Save Frame...";
         const char* overlay_label = "Save Frame with Telemetry...";
         const float raw_width = ImGui::CalcTextSize(raw_label).x + 2.0f * style.FramePadding.x;
         const float overlay_width = ImGui::CalcTextSize(overlay_label).x + 2.0f * style.FramePadding.x;
-        ImGui::SameLine(ImGui::GetWindowWidth() - style.WindowPadding.x - overlay_width - style.ItemSpacing.x - raw_width);
+        const float buttons_x = ImGui::GetWindowWidth() - style.WindowPadding.x - overlay_width - style.ItemSpacing.x - raw_width;
+        // A note (about the path point under the mouse) goes just before the buttons, if there is room for it.
+        if (!note.empty()) {
+            const float note_x = buttons_x - ImGui::CalcTextSize(note.c_str()).x - 2.0f * style.ItemSpacing.x;
+            if (note_x > timecode_end + style.ItemSpacing.x) {
+                ImGui::SameLine(note_x);
+                ImGui::TextUnformatted(note.c_str());
+            }
+        }
+        ImGui::SameLine(buttons_x);
         if (ImGui::Button(raw_label)) {
             *raw_screenshot_path = ffsw::file_dialog(L"png", L"Save Raw Video Frame As (*.png)", false);
         }
@@ -1029,6 +1041,7 @@ int main()
     // Black laid over the finished frame for the edit's fade in at its start and fade out at its end.
     FadeOverlay fade_overlay;
     TextPanel text_panel(&edit_model, &media_container_mgr, &timeline_editor, &env_config);
+    PathPanel path_panel(&edit_model, &media_container_mgr, &timeline_editor, &text_panel);
     CameraPanel camera_panel(&media_container_mgr);
     SpeedPanel speed_panel(&edit_model, &media_container_mgr, &timeline_editor);
     // What is picked on the timeline (a clip, or a transition's icon), and the section of the left panel for the transition.
@@ -1120,23 +1133,29 @@ int main()
         nullptr,
         nullptr);
     interaction_mgr->bind_char('[', GLFW_KEY_LEFT_BRACKET,
-        [&timeline_editor, &edit_model, &media_container_mgr, &sync_view]() {
-            if (!ImGui::GetIO().WantTextInput && !sync_view.active())
+        [&timeline_editor, &edit_model, &media_container_mgr, &sync_view, &path_panel]() {
+            if (ImGui::GetIO().WantTextInput || sync_view.active())
+                return;
+            if (!path_panel.trim_pressed(true))
                 timeline_editor.trim_left(&edit_model, &media_container_mgr);
         },
         nullptr,
         nullptr);
     interaction_mgr->bind_char(']', GLFW_KEY_RIGHT_BRACKET,
-        [&timeline_editor, &edit_model, &media_container_mgr, &sync_view]() {
-            if (!ImGui::GetIO().WantTextInput && !sync_view.active())
+        [&timeline_editor, &edit_model, &media_container_mgr, &sync_view, &path_panel]() {
+            if (ImGui::GetIO().WantTextInput || sync_view.active())
+                return;
+            if (!path_panel.trim_pressed(false))
                 timeline_editor.trim_right(&edit_model, &media_container_mgr);
         },
         nullptr,
         nullptr);
     // Delete removes the text box selected in the Text section if there is one, and otherwise the clip at the playhead.
     interaction_mgr->bind_key(GLFW_KEY_DELETE,
-        [&timeline_editor, &edit_model, &media_container_mgr, &sync_view, &text_panel]() {
+        [&timeline_editor, &edit_model, &media_container_mgr, &sync_view, &text_panel, &path_panel]() {
             if (ImGui::GetIO().WantTextInput || sync_view.active())
+                return;
+            if (path_panel.delete_pressed())
                 return;
             const int text_id = text_panel.selected_id();
             if (text_id != 0)
@@ -1518,12 +1537,12 @@ int main()
                 shown_preview = sync_layout.preview;
                 draw_splitter(sync_layout.splitter, &timeline_height);
                 const SyncView::Outcome outcome = sync_view.draw(sync_layout, edit_model, media_container_mgr, has_telemetry);
-                draw_transport_bar(sync_layout.transport, media_container_mgr, &sound_state, &sound_settled, &pending_raw_screenshot_path, &pending_overlay_screenshot_path);
+                draw_transport_bar(sync_layout.transport, media_container_mgr, &sound_state, &sound_settled, &pending_raw_screenshot_path, &pending_overlay_screenshot_path, std::string());
                 // Done may be answered with a question (about telemetry the change moved under the edit).
                 if (outcome == SyncView::CANCEL || (outcome == SyncView::DONE && sync_view.confirm_done(edit_model)))
                     sync_view.leave(outcome == SyncView::DONE, &edit_model, &media_container_mgr);
             } else {
-                if (draw_left_panel(layout.left_panel, edit_model, project_file_mgr, &speed_panel, &transition_panel, &text_panel, &camera_panel, !media_container_mgr.recording(), &open_sync_view_requested))
+                if (draw_left_panel(layout.left_panel, edit_model, project_file_mgr, &speed_panel, &transition_panel, &text_panel, &path_panel, &camera_panel, !media_container_mgr.recording(), &open_sync_view_requested))
                     load_telemetry_requested = true;
                 draw_panel_splitter(layout.panel_splitter, layout.widest_panel, &panel_width);
                 draw_splitter(layout.splitter, &timeline_height);
@@ -1536,8 +1555,9 @@ int main()
                     timeline_height = taller_timeline;
                 if (reorder.requested)
                     timeline_editor.move_clip(&edit_model, &media_container_mgr, reorder.from, reorder.to);
-                draw_transport_bar(layout.transport, media_container_mgr, &sound_state, &sound_settled, &pending_raw_screenshot_path, &pending_overlay_screenshot_path);
+                draw_transport_bar(layout.transport, media_container_mgr, &sound_state, &sound_settled, &pending_raw_screenshot_path, &pending_overlay_screenshot_path, path_panel.hover_text());
                 text_panel.draw_on_preview(layout.preview, !media_container_mgr.recording());
+                path_panel.draw_on_preview(layout.preview, !media_container_mgr.recording());
             }
             // The preview is the canvas, shown from ImGui's background list rather than in a window of
             // its own, so ImGui doesn't count the mouse as being over a window of its own when it is
@@ -1656,7 +1676,8 @@ int main()
         // it toggles pause (see all_widgets above for which widgets count, and why the
         // distance-flown text deliberately doesn't). ImGui already claims the click instead of us
         // whenever it wants the mouse (e.g. the menu bar), via InteractionMgr::tick().
-        if (interaction_mgr->mouse_button_down()) {
+        // (While a path is being edited, the click is the path's: see path_panel.h.)
+        if (interaction_mgr->mouse_button_down() && !path_panel.editing()) {
             float mouse_x = interaction_mgr->mouse_x_pos();
             float mouse_y = interaction_mgr->mouse_y_pos();
             bool in_video_rect = mouse_x >= -1.0f && mouse_x <= 1.0f && mouse_y >= -1.0f && mouse_y <= 1.0f;

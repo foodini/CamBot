@@ -26,6 +26,7 @@
 
 #include "file_time.h"
 #include "text_box.h"
+#include "tracked_path.h"
 
 // What a clip does with its sound when it is not played at normal speed.
 enum AudioMode {
@@ -299,6 +300,21 @@ public:
 	// where its anchor is if the edit uses that frame, or the nearest footage the edit does use if not.
 	void                    text_box_span(const TextBox& box, int64_t* start_ticks, int64_t* end_ticks) const;
 
+	// ---- Paths ----
+	// What follows something that moves through the picture (see tracked_path.h). Each belongs to one file of footage.
+	const std::vector<TrackedPath>& paths() const { return m_paths_of_targets; }
+	// Replaces all of them (as when reading a project or undoing).
+	void                    set_paths(const std::vector<TrackedPath>& paths);
+	// Adds a path, giving it an id no other has; returns the id.
+	int                     add_path(const TrackedPath& path);
+	bool                    remove_path(int id);
+	TrackedPath*            find_path(int id);
+	const TrackedPath*      find_path(int id) const;
+	// The field of view of the lens across the width of the picture, in degrees, which turns a place in the picture into a direction
+	// for the paths that follow the camera's orientation (see tracking::CameraLens). A setting of the project, not part of the edit.
+	double                  path_fov_degrees() const { return m_path_fov_degrees; }
+	void                    set_path_fov_degrees(double degrees) { m_path_fov_degrees = degrees; }
+
 	// ---- Launch ----
 	const FileTime&         launch_mark() const { return m_launch_mark; }
 	// Sets where launch is without saying the user chose it (see launch_marked()): the start of the flight stands in
@@ -352,6 +368,9 @@ private:
 	bool                     m_launch_marked;
 	std::vector<TextBox>     m_text_boxes;
 	int                      m_next_text_id;
+	std::vector<TrackedPath> m_paths_of_targets;     // (m_paths is the files'.)
+	int                      m_next_path_id;
+	double                   m_path_fov_degrees;
 
 	// The anchors on the flight clock, earliest first, for fast lookup.
 	struct ResolvedAnchor { double flight_seconds; double offset; };

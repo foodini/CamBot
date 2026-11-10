@@ -1,7 +1,7 @@
 #pragma once
 
 // Undo and redo for the edit timeline. An undo step is a copy of what the user's edits change: the
-// clips, the transitions between them, the text boxes laid over them, whether the edit has been started (see EditModel::edit_started), and where the playhead
+// clips, the transitions between them, the text boxes and paths laid over them, whether the edit has been started (see EditModel::edit_started), and where the playhead
 // was, so undoing puts the picture back where it was too. The clip lists are small, so keeping a
 // whole copy per step is simpler than recording how to reverse each edit.
 //
@@ -18,6 +18,7 @@ struct EditState {
 	std::vector<Clip>    clips;
 	std::vector<Transition> transitions;     // Between them (see EditList); empty, or count + 1 of them.
 	std::vector<TextBox> text_boxes;
+	std::vector<TrackedPath> paths;
 	bool              edit_started;
 	int64_t           playhead_ticks;
 	EditState() : edit_started(false), playhead_ticks(0) {}
