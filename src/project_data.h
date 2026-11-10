@@ -70,7 +70,7 @@ struct ProjectData {
 
 namespace project_io {
 
-const int CURRENT_VERSION = 8;
+const int CURRENT_VERSION = 9;
 
 bool parse_json(const std::string& text, ProjectData* project, std::string* error);
 std::string to_json(const ProjectData& project);

@@ -18,6 +18,7 @@
 #include "text_panel.h"
 #include "timecode.h"
 #include "timeline_editor.h"
+#include "timeline_scale.h"
 
 namespace {
 
@@ -25,6 +26,7 @@ const double PI = 3.14159265358979323846;
 const int    LIST_ROWS = 4;
 const float  CONTROL_LABEL_WIDTH = 82.0f;
 const float  HIT_RADIUS = 10.0f;         // How near the mouse has to be to a point to take hold of it, in pixels.
+const double FOLLOW_MARGIN = 0.15;        // How near the edge of the zoomed view the marker may get before the view follows it, as a fraction of its width.
 const float  DRAG_PIXELS = 4.0f;         // How far the mouse goes with a point held before it is a drag and not a click.
 const int    MOST_SAMPLES = 600;         // The most places the curve is worked out at to be drawn.
 const size_t NAME_BYTES = 96;
@@ -35,10 +37,10 @@ ImU32 color_of(const PathCircle& circle, int alpha) {
 
 }  // namespace
 
-PathPanel::PathPanel(EditModel* model, MediaContainerMgr* media, TimelineEditor* editor, TextPanel* text_panel)
-	: m_model(model), m_media(media), m_editor(editor), m_text_panel(text_panel), m_selected(0), m_editing(false), m_curve_shown(true),
-	  m_has_point(false), m_point_ticks(0), m_pressing(false), m_press_placed(false), m_press_moved(false), m_press_ticks(0),
-	  m_press_x(0.0f), m_press_y(0.0f), m_changing(false) {}
+PathPanel::PathPanel(EditModel* model, MediaContainerMgr* media, TimelineEditor* editor, TextPanel* text_panel, PathTracker* tracker)
+	: m_model(model), m_media(media), m_editor(editor), m_text_panel(text_panel), m_tracker(tracker), m_selected(0), m_editing(false), m_curve_shown(true),
+	  m_has_point(false), m_point_ticks(0), m_pressing(false), m_press_placed(false), m_press_moved(false), m_press_pan(false), m_press_u(0.0), m_press_v(0.0), m_press_ticks(0),
+	  m_press_x(0.0f), m_press_y(0.0f), m_view_panning(false), m_follow_ticks(-1), m_changing(false) {}
 
 TrackedPath* PathPanel::selected_path() {
 	return m_selected != 0 ? m_model->find_path(m_selected) : NULL;
@@ -48,22 +50,15 @@ const TrackedPath* PathPanel::selected_path() const {
 	return m_selected != 0 ? m_model->find_path(m_selected) : NULL;
 }
 
-tracking::CameraLens PathPanel::lens() const {
-	const double aspect = m_media->get_height() > 0.0f ? (double)m_media->get_width() / (double)m_media->get_height() : 16.0 / 9.0;
-	return tracking::CameraLens(m_model->path_fov_degrees() * PI / 180.0, aspect);
+int PathPanel::selected_id() const {
+	return selected_path() != NULL ? m_selected : 0;
 }
 
-const tracking::CameraOrientations& PathPanel::orientations(const TrackedPath& path) const {
-	return m_loader.orientations(path.media);
-}
-
-// Asks for the camera's orientation through the file the selected path follows (a quick call once it has been asked for).
-void PathPanel::ask_for_orientations(const TrackedPath& path) {
-	if (!path.curve.orientation_aware() || path.media < 0 || path.media >= m_media->media_count())
+void PathPanel::select(int id) {
+	if (id == m_selected)
 		return;
-	const FileTime now = m_model->edit_list().source_for(m_media->current_ticks());
-	const double start = now.media == path.media ? m_model->ticks_to_seconds(now.local_ticks) : 0.0;
-	m_loader.request(path.media, m_media->media_path(path.media), m_model->seconds_per_tick(), start);
+	stop_editing();
+	m_selected = id;
 }
 
 void PathPanel::begin_change() {
@@ -91,12 +86,21 @@ void PathPanel::start_editing() {
 }
 
 void PathPanel::stop_editing() {
-	if (m_pressing && (m_press_placed || m_press_moved))
+	if (m_pressing && !m_press_pan && (m_press_placed || m_press_moved))
 		m_editor->end_box_edit(*m_model, *m_media);
 	m_editing = false;
 	m_pressing = false;
 	m_has_point = false;
+	m_view = preview_zoom::View();
+	m_view_panning = false;
 	m_hover_text.clear();
+}
+
+void PathPanel::view_region(double* left, double* top, double* right, double* bottom) const {
+	preview_zoom::View view;
+	if (m_editing && !m_media->recording() && !m_model->in_source_view())
+		view = m_view;
+	preview_zoom::region(view, left, top, right, bottom);
 }
 
 bool PathPanel::timeline_ticks_for(int media, int64_t local_ticks, int64_t* timeline_ticks) const {
@@ -148,7 +152,7 @@ bool PathPanel::trim_pressed(bool left) {
 	TrackedPath* path = selected_path();
 	if (!m_editing || path == NULL || m_media->recording())
 		return false;
-	m_editor->trim_path(m_model, m_media, path->id, left, lens(), orientations(*path));
+	m_editor->trim_path(m_model, m_media, path->id, left, m_tracker->lens(), m_tracker->orientations(*path));
 	return true;
 }
 
@@ -200,7 +204,18 @@ void PathPanel::draw(bool can_change) {
 	ImGui::BeginChild("##pathlist", ImVec2(0.0f, row_height * (float)std::min<size_t>(paths.size(), LIST_ROWS) + 8.0f), ImGuiChildFlags_Borders);
 	for (size_t n = 0; n < paths.size(); n++) {
 		const TrackedPath& entry = paths[n];
-		const std::string label = entry.name + "  (" + std::to_string(entry.curve.points().size()) + ")##" + std::to_string(entry.id);
+		// How many points it has and how long it lasts (in the footage's own time, whatever the edit does with the speed).
+		std::string size_text = std::to_string(entry.curve.points().size());
+		if (!entry.curve.empty()) {
+			const double seconds = m_model->ticks_to_seconds(entry.curve.last_ticks() - entry.curve.first_ticks());
+			char length[32];
+			if (seconds < 60.0)
+				snprintf(length, sizeof(length), "%.1f s", seconds);
+			else
+				snprintf(length, sizeof(length), "%d:%02d", (int)(seconds / 60.0), (int)seconds % 60);
+			size_text += ", " + std::string(length);
+		}
+		const std::string label = entry.name + "  (" + size_text + ")##" + std::to_string(entry.id);
 		if (ImGui::Selectable(label.c_str(), entry.id == m_selected)) {
 			const bool was_selected = entry.id == m_selected;
 			stop_editing();
@@ -229,8 +244,9 @@ void PathPanel::draw(bool can_change) {
 		ImGui::TextDisabled("This path is on footage from another file.");
 	if (m_editing) {
 		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-		ImGui::TextWrapped("Click the picture to put the path's point for this frame there, drag to move it. Click a point to go to its frame. "
-			"Delete removes the selected point, [ and ] cut the path to this frame, Tab hides the curve, Esc finishes.");
+		ImGui::TextWrapped("Click the picture to put the path's point for this frame there, drag a point to move it. Click a point to go to its frame. "
+			"Delete removes the selected point, [ and ] cut the path to this frame, Tab hides the curve, Esc finishes. "
+			"The wheel zooms the picture about the mouse; zoomed in, drag the picture to move it.");
 		ImGui::PopStyleColor();
 	}
 
@@ -253,11 +269,11 @@ void PathPanel::draw(bool can_change) {
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Keeps the path on a target that holds its bearing while the camera turns and banks,\nand makes the points you put down correct for the target's own movement.");
 	if (aware) {
-		if (m_loader.loading(path->media))
-			ImGui::TextDisabled("Reading the camera's orientation... %d%%", (int)(m_loader.progress() * 100.0f));
-		else if (m_loader.has_orientations(path->media))
+		if (m_tracker->loader().loading(path->media))
+			ImGui::TextDisabled("Reading the camera's orientation... %d%%", (int)(m_tracker->loader().progress() * 100.0f));
+		else if (m_tracker->loader().has_orientations(path->media))
 			ImGui::TextDisabled("Following the camera's orientation.");
-		else if (m_loader.is_read(path->media))
+		else if (m_tracker->loader().is_read(path->media))
 			ImGui::TextDisabled("No orientation in this file: using places in the picture.");
 		float fov = (float)m_model->path_fov_degrees();
 		ImGui::SetNextItemWidth(control_width);
@@ -275,7 +291,7 @@ void PathPanel::draw(bool can_change) {
 		ImGui::SetTooltip("Draws a circle round the target in the export.");
 	float percent = circle.radius * 100.0f;
 	ImGui::SetNextItemWidth(control_width);
-	if (ImGui::DragFloat("Size", &percent, 0.05f, 0.5f, 25.0f, "%.1f%%", ImGuiSliderFlags_AlwaysClamp)) {
+	if (ImGui::DragFloat("Radius", &percent, 0.05f, 0.5f, 25.0f, "%.1f%%", ImGuiSliderFlags_AlwaysClamp)) {
 		circle.radius = percent / 100.0f;
 		circle_changed = true;
 	}
@@ -291,18 +307,21 @@ void PathPanel::draw(bool can_change) {
 }
 
 void PathPanel::draw_on_preview(const LayoutRect& preview, bool can_change) {
-	m_loader.update();
 	m_hover_text.clear();
 	TrackedPath* path = selected_path();
 	if (path == NULL) {
 		m_editing = false;
 		m_pressing = false;
 		m_has_point = false;
+		m_view = preview_zoom::View();
+		m_view_panning = false;
 		return;
 	}
-	ask_for_orientations(*path);
+	m_tracker->request(*path, true);
 	if (!can_change || m_model->in_source_view() || preview.w < 1.0f || preview.h < 1.0f) {
 		m_pressing = false;
+		m_view = preview_zoom::View();
+		m_view_panning = false;
 		return;
 	}
 	if (m_editing && m_text_panel->selected_id() != 0)
@@ -318,6 +337,8 @@ void PathPanel::draw_on_preview(const LayoutRect& preview, bool can_change) {
 	// Only the footage of the path's own file has the path on it.
 	if (m_editor->footage_ticks_at_playhead(*m_model, *m_media, path->media) < 0) {
 		m_pressing = false;
+		m_view = preview_zoom::View();
+		m_view_panning = false;
 		return;
 	}
 	const ImGuiIO& io = ImGui::GetIO();
@@ -328,10 +349,31 @@ void PathPanel::draw_on_preview(const LayoutRect& preview, bool can_change) {
 			stop_editing();
 	}
 	if (m_editing)
+		follow_marker(preview, *path, m_editor->footage_ticks_at_playhead(*m_model, *m_media, path->media));
+	if (m_editing)
 		handle_mouse(preview, *path);
 	path = selected_path();
 	if (path != NULL)
 		draw_overlay(preview, *path);
+}
+
+// Only the path being edited is followed (it is the only one drawn), and only when the frame has changed while the video plays or a mouse
+// button is down (scrubbing, or a click on a point that goes to its frame), so a frame stepped by key, or a picture the user has just
+// moved with the view where they want it, is left alone. A drag of the picture or of a point is the user's own, and not fought.
+void PathPanel::follow_marker(const LayoutRect& preview, const TrackedPath& path, int64_t now) {
+	const bool frame_changed = now != m_follow_ticks;
+	m_follow_ticks = now;
+	if (!frame_changed || !m_view.zoomed() || m_pressing || m_view_panning || path.curve.empty())
+		return;
+	if (EnvConfig::instance->is_paused() && !ImGui::IsAnyMouseDown())
+		return;
+	double u, v;
+	if (!path.curve.position_at(now, m_tracker->lens(), m_tracker->orientations(path), &u, &v))
+		return;
+	const double aspect = (double)preview.w / (double)preview.h;
+	double canvas_x, canvas_y;
+	frame_mapping::picture_to_preview(u, v, m_media->rotation_angle(), aspect, &canvas_x, &canvas_y);
+	m_view = preview_zoom::followed(m_view, canvas_x, canvas_y, FOLLOW_MARGIN);
 }
 
 void PathPanel::handle_mouse(const LayoutRect& preview, const TrackedPath& path) {
@@ -343,20 +385,59 @@ void PathPanel::handle_mouse(const LayoutRect& preview, const TrackedPath& path)
 	const ImVec2 mouse = io.MousePos;
 	const bool over = mouse.x >= preview.x && mouse.x < preview.x + preview.w && mouse.y >= preview.y && mouse.y < preview.y + preview.h;
 
-	// Where the mouse is in the picture.
+	// The wheel zooms the picture about the mouse, and the middle button drags it.
+	if (over && !io.WantCaptureMouse && io.MouseWheel != 0.0f) {
+		const double factor = pow(1.25, timeline_zoom::notches((double)io.MouseWheel));
+		m_view = preview_zoom::zoomed(m_view, (mouse.x - preview.x) / preview.w, (mouse.y - preview.y) / preview.h, factor);
+	}
+	if (m_view_panning) {
+		if (ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
+			m_view = preview_zoom::panned(m_view, io.MouseDelta.x / preview.w, io.MouseDelta.y / preview.h);
+			ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+		} else {
+			m_view_panning = false;
+		}
+	} else if (over && !io.WantCaptureMouse && ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
+		m_view_panning = true;
+	}
+
+	// Where the mouse is in the picture (the preview shows part of the canvas when it is zoomed).
 	double mouse_u = 0.0;
 	double mouse_v = 0.0;
-	frame_mapping::preview_to_picture((mouse.x - preview.x) / preview.w, (mouse.y - preview.y) / preview.h, rotation, aspect, &mouse_u, &mouse_v);
+	double mouse_canvas_x, mouse_canvas_y;
+	preview_zoom::to_canvas(m_view, (mouse.x - preview.x) / preview.w, (mouse.y - preview.y) / preview.h, &mouse_canvas_x, &mouse_canvas_y);
+	frame_mapping::preview_to_picture(mouse_canvas_x, mouse_canvas_y, rotation, aspect, &mouse_u, &mouse_v);
 	mouse_u = std::min(1.0, std::max(0.0, mouse_u));
 	mouse_v = std::min(1.0, std::max(0.0, mouse_v));
 
 	if (m_pressing) {
 		if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-			if (m_press_placed || m_press_moved)
+			if (m_press_pan) {
+				if (!m_press_moved) {
+					// A click, not a drag, on no point: this frame's point goes where it went down.
+					m_editor->begin_box_edit(*m_model, *m_media);
+					m_editor->set_path_point(m_model, id, m_press_ticks, m_press_u, m_press_v);
+					m_editor->end_box_edit(*m_model, *m_media);
+					m_has_point = true;
+					m_point_ticks = m_press_ticks;
+				}
+			} else if (m_press_placed || m_press_moved)
 				m_editor->end_box_edit(*m_model, *m_media);
 			else if (m_press_ticks != now)
 				go_to_frame(path.media, m_press_ticks);      // A click on another frame's point goes to its frame.
 			m_pressing = false;
+			return;
+		}
+		if (m_press_pan) {
+			// Dragging on the picture, where there is no point, moves the picture.
+			const float dx = mouse.x - m_press_x;
+			const float dy = mouse.y - m_press_y;
+			if (!m_press_moved && dx * dx + dy * dy >= DRAG_PIXELS * DRAG_PIXELS)
+				m_press_moved = true;
+			if (m_press_moved) {
+				m_view = preview_zoom::panned(m_view, io.MouseDelta.x / preview.w, io.MouseDelta.y / preview.h);
+				ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+			}
 			return;
 		}
 		if (!m_press_placed && !m_press_moved) {
@@ -380,8 +461,9 @@ void PathPanel::handle_mouse(const LayoutRect& preview, const TrackedPath& path)
 	int hit = -1;
 	float hit_distance = HIT_RADIUS * HIT_RADIUS;
 	for (size_t i = 0; i < points.size(); i++) {
-		double x, y;
-		frame_mapping::picture_to_preview(points[i].u, points[i].v, rotation, aspect, &x, &y);
+		double canvas_x, canvas_y, x, y;
+		frame_mapping::picture_to_preview(points[i].u, points[i].v, rotation, aspect, &canvas_x, &canvas_y);
+		preview_zoom::to_preview(m_view, canvas_x, canvas_y, &x, &y);
 		const float dx = preview.x + (float)x * preview.w - mouse.x;
 		const float dy = preview.y + (float)y * preview.h - mouse.y;
 		if (dx * dx + dy * dy <= hit_distance) {
@@ -411,9 +493,18 @@ void PathPanel::handle_mouse(const LayoutRect& preview, const TrackedPath& path)
 		m_press_x = mouse.x;
 		m_press_y = mouse.y;
 		m_press_moved = false;
+		m_press_pan = false;
 		if (hit >= 0) {
 			m_press_placed = false;
 			m_press_ticks = points[hit].ticks;
+		} else if (m_view.zoomed()) {
+			// Zoomed in, a drag on the picture moves it, so the point waits to see which this is.
+			m_press_placed = false;
+			m_press_pan = true;
+			m_press_ticks = now;
+			m_press_u = mouse_u;
+			m_press_v = mouse_v;
+			return;
 		} else {
 			// Not on a point: this frame's point goes here (a frame has one, so one that is already there moves).
 			m_press_placed = true;
@@ -430,8 +521,8 @@ void PathPanel::draw_overlay(const LayoutRect& preview, const TrackedPath& path)
 	const double rotation = m_media->rotation_angle();
 	const double aspect = (double)preview.w / (double)preview.h;
 	const int64_t now = m_editor->footage_ticks_at_playhead(*m_model, *m_media, path.media);
-	const tracking::CameraLens path_lens = lens();
-	const tracking::CameraOrientations& view_orientations = orientations(path);
+	const tracking::CameraLens path_lens = m_tracker->lens();
+	const tracking::CameraOrientations& view_orientations = m_tracker->orientations(path);
 	const int64_t frame = std::max<int64_t>(1, m_media->frame_ticks());
 
 	ImGui::SetNextWindowPos(ImVec2(preview.x, preview.y));
@@ -446,9 +537,10 @@ void PathPanel::draw_overlay(const LayoutRect& preview, const TrackedPath& path)
 		const ImU32 light = IM_COL32(255, 255, 255, 255);
 		const ImU32 color = color_of(path.circle, 255);
 		struct Screen {
-			static ImVec2 at(const LayoutRect& rect, double rotation_radians, double aspect_ratio, double u, double v) {
-				double x, y;
-				frame_mapping::picture_to_preview(u, v, rotation_radians, aspect_ratio, &x, &y);
+			static ImVec2 at(const LayoutRect& rect, const preview_zoom::View& view, double rotation_radians, double aspect_ratio, double u, double v) {
+				double canvas_x, canvas_y, x, y;
+				frame_mapping::picture_to_preview(u, v, rotation_radians, aspect_ratio, &canvas_x, &canvas_y);
+				preview_zoom::to_preview(view, canvas_x, canvas_y, &x, &y);
 				return ImVec2(rect.x + (float)x * rect.w, rect.y + (float)y * rect.h);
 			}
 		};
@@ -466,7 +558,7 @@ void PathPanel::draw_overlay(const LayoutRect& preview, const TrackedPath& path)
 					t = last;
 				double u, v;
 				if (path.curve.position_at(t, path_lens, view_orientations, &u, &v)) {
-					run.push_back(Screen::at(preview, rotation, aspect, u, v));
+					run.push_back(Screen::at(preview, m_view, rotation, aspect, u, v));
 				} else if (!run.empty()) {
 					if (run.size() >= 2) {
 						draw_list->AddPolyline(run.data(), (int)run.size(), dark, 0, 4.0f);
@@ -485,7 +577,7 @@ void PathPanel::draw_overlay(const LayoutRect& preview, const TrackedPath& path)
 				// The points that were set: a dot each, a ring on the one of the frame shown, and a filled white one on the selected point.
 				for (size_t i = 0; i < path.curve.points().size(); i++) {
 					const tracking::PathPoint& point = path.curve.points()[i];
-					const ImVec2 at = Screen::at(preview, rotation, aspect, point.u, point.v);
+					const ImVec2 at = Screen::at(preview, m_view, rotation, aspect, point.u, point.v);
 					draw_list->AddCircleFilled(at, 5.0f, color);
 					draw_list->AddCircle(at, 5.0f, dark, 0, 1.5f);
 					if (point.ticks == now)
@@ -496,16 +588,31 @@ void PathPanel::draw_overlay(const LayoutRect& preview, const TrackedPath& path)
 			}
 		}
 
+		if (m_view.zoomed() && m_editing) {
+			char zoom_text[64];
+			snprintf(zoom_text, sizeof(zoom_text), "Zoom %.1fx   (wheel zooms, drag to move)", m_view.zoom);
+			const ImVec2 text_size = ImGui::CalcTextSize(zoom_text);
+			const ImVec2 at(preview.x + (preview.w - text_size.x) * 0.5f, preview.y + preview.h - text_size.y - 8.0f);
+			draw_list->AddRectFilled(ImVec2(at.x - 6.0f, at.y - 3.0f), ImVec2(at.x + text_size.x + 6.0f, at.y + text_size.y + 3.0f), IM_COL32(0, 0, 0, 150), 4.0f);
+			draw_list->AddText(at, IM_COL32(255, 255, 255, 255), zoom_text);
+		}
+
 		// The marker: the circle that will be round the target, at the place the path has on this frame.
 		double u, v;
 		if (!path.curve.empty() && path.curve.position_at(now, path_lens, view_orientations, &u, &v)) {
 			const bool during = now >= path.curve.first_ticks() && now <= path.curve.last_ticks();
 			if (during || m_editing) {
 				const int alpha = during ? 255 : 110;
-				const ImVec2 at = Screen::at(preview, rotation, aspect, u, v);
+				const ImVec2 at = Screen::at(preview, m_view, rotation, aspect, u, v);
 				const ImU32 marker = color_of(path.circle, alpha);
-				if (path.circle.enabled) {
-					const float radius = path.circle.radius * preview.h * (float)frame_mapping::cover_scale(rotation, aspect);
+				if (path.circle.enabled && during) {
+					// The canvas has the circle (see PathOverlay), and the preview shows the canvas: only the place to take hold of is added.
+					if (m_editing) {
+						draw_list->AddCircleFilled(at, 3.5f, IM_COL32(0, 0, 0, 200));
+						draw_list->AddCircleFilled(at, 2.0f, marker);
+					}
+				} else if (path.circle.enabled) {
+					const float radius = path.circle.radius * preview.h * (float)(frame_mapping::cover_scale(rotation, aspect) * m_view.zoom);
 					draw_list->AddCircle(at, radius, IM_COL32(0, 0, 0, alpha * 200 / 255), 0, 5.0f);
 					draw_list->AddCircle(at, radius, marker, 0, 3.0f);
 				} else if (m_editing) {

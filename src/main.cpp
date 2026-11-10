@@ -42,7 +42,10 @@
 #include "camera_panel.h"
 #include "panel_section.h"
 #include "text_panel.h"
+#include "path_attachment.h"
+#include "path_overlay.h"
 #include "path_panel.h"
+#include "path_tracker.h"
 #include "text_renderer.h"
 #include "fade_overlay.h"
 #include "thumbnail_store.h"
@@ -641,11 +644,23 @@ static bool draw_left_panel(const LayoutRect& rect, const EditModel& edit_model,
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
                 ImGui::SetTooltip("Line the telemetry up with the video, and put the video files in order.\nShows all of the footage; your edit comes back afterward.");
         }
+        // Each panel's controls have an ID space of their own: two panels each with a control labelled "Size" or "Color" would otherwise be
+        // one control to ImGui, and changing one would change the other.
+        ImGui::PushID("speed_panel");
         speed_panel->draw(can_change);
+        ImGui::PopID();
+        ImGui::PushID("transition_panel");
         transition_panel->draw(can_change);
+        ImGui::PopID();
+        ImGui::PushID("text_panel");
         text_panel->draw(can_change);
+        ImGui::PopID();
+        ImGui::PushID("path_panel");
         path_panel->draw(can_change);
+        ImGui::PopID();
+        ImGui::PushID("camera_panel");
         camera_panel->draw();
+        ImGui::PopID();
         ImGui::Unindent(panel_section::indent_width());
     }
     ImGui::End();
@@ -1040,8 +1055,11 @@ int main()
     TextRenderer text_renderer;
     // Black laid over the finished frame for the edit's fade in at its start and fade out at its end.
     FadeOverlay fade_overlay;
-    TextPanel text_panel(&edit_model, &media_container_mgr, &timeline_editor, &env_config);
-    PathPanel path_panel(&edit_model, &media_container_mgr, &timeline_editor, &text_panel);
+    PathOverlay path_overlay;
+    PathScene path_scene;
+    PathTracker path_tracker(&edit_model, &media_container_mgr, (double)SCR_WIDTH / (double)SCR_HEIGHT);
+    TextPanel text_panel(&edit_model, &media_container_mgr, &timeline_editor, &env_config, &path_tracker);
+    PathPanel path_panel(&edit_model, &media_container_mgr, &timeline_editor, &text_panel, &path_tracker);
     CameraPanel camera_panel(&media_container_mgr);
     SpeedPanel speed_panel(&edit_model, &media_container_mgr, &timeline_editor);
     // What is picked on the timeline (a clip, or a transition's icon), and the section of the left panel for the transition.
@@ -1439,7 +1457,12 @@ int main()
                     ImGui::Separator();
                     // Not while the telemetry is still being read: the overlay would be missing the rest of the flight.
                     const bool telemetry_loading = telemetry_mgr.has_telemetry() && !telemetry_mgr.parsing_done();
-                    if (ImGui::MenuItem("Export Video...", nullptr, false, !media_container_mgr.recording() && !sync_view.active() && !telemetry_loading)) {
+                    // Nor while the camera's orientation is still being read for a path that is drawn: it would be exported where it is
+                    // on the preview now, which is not where the orientation puts it.
+                    const bool paths_loading = path_tracker.orientations_pending();
+                    if (paths_loading)
+                        ImGui::TextDisabled("Reading the camera's orientation for the paths...");
+                    if (ImGui::MenuItem("Export Video...", nullptr, false, !media_container_mgr.recording() && !sync_view.active() && !telemetry_loading && !paths_loading)) {
                         // With nothing marked, the flight timer and the distance flown would count from the start of
                         // the original footage, which a cut-down edit usually doesn't begin at. Offer to count from
                         // the first frame of the export instead; they can also go back and mark launch properly.
@@ -1548,8 +1571,10 @@ int main()
                 draw_splitter(layout.splitter, &timeline_height);
                 ReorderRequest reorder;
                 int selected_text = text_panel.selected_id();
-                timeline_view.draw(layout.timeline, edit_model, media_container_mgr, &timeline_editor, &reorder, &selected_text, &timeline_selection);
+                int selected_path = path_panel.selected_id();
+                timeline_view.draw(layout.timeline, edit_model, media_container_mgr, &timeline_editor, &reorder, &selected_text, &timeline_selection, &selected_path);
                 text_panel.select(selected_text);
+                path_panel.select(selected_path);
                 const float taller_timeline = timeline_view.take_height_request();   // A new row of text boxes needs room.
                 if (taller_timeline > timeline_height)
                     timeline_height = taller_timeline;
@@ -1564,10 +1589,14 @@ int main()
             // over the picture (the widgets drawn in the canvas take the clicks there). The canvas
             // texture has row 0 at the bottom, hence the flipped texture coordinates.
             if (shown_preview.w > 0.0f && shown_preview.h > 0.0f) {
+                // Zoomed in while a path is edited (see path_panel.h): part of the canvas fills the preview.
+                double view_left = 0.0, view_top = 0.0, view_right = 1.0, view_bottom = 1.0;
+                if (!sync_view.active())
+                    path_panel.view_region(&view_left, &view_top, &view_right, &view_bottom);
                 ImGui::GetBackgroundDrawList()->AddImage((ImTextureID)(uintptr_t)canvas.texture(),
                     ImVec2(shown_preview.x, shown_preview.y),
                     ImVec2(shown_preview.x + shown_preview.w, shown_preview.y + shown_preview.h),
-                    ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
+                    ImVec2((float)view_left, (float)(1.0 - view_top)), ImVec2((float)view_right, (float)(1.0 - view_bottom)));
             }
 
             // The export's outcome, to be acknowledged. (The throttled frames while exporting never reach here with
@@ -1772,6 +1801,7 @@ int main()
         // widget/video coordinate unchanged, and keeps the menu bar out of the pixels captured
         // below for recording. ImGui's own render pass sets its own full-window viewport and
         // restores this one afterward, so it must be reset here, every frame.
+        path_tracker.update();      // The camera's orientation for the paths, read a little each frame.
         canvas.bind();
         glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
         glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
@@ -1790,17 +1820,33 @@ int main()
         font_manager.render();
         // The text boxes showing at this frame, faded by where in their lives the frame is. Not in the Sync / Reorder
         // view, which shows the footage whole, with none of the edit's text.
-        if (!edit_model.in_source_view() && !edit_model.text_boxes().empty()) {
-            const std::vector<TextBox>& text_boxes = edit_model.text_boxes();
-            const int64_t now_ticks = media_container_mgr.current_ticks();
-            text_renderer.begin(SCR_WIDTH, SCR_HEIGHT);
-            for (size_t i = 0; i < text_boxes.size(); i++) {
-                int64_t start_ticks = 0;
-                int64_t end_ticks = 0;
-                edit_model.text_box_span(text_boxes[i], &start_ticks, &end_ticks);
-                text_renderer.draw(text_boxes[i], text_box::alpha_at(text_boxes[i], now_ticks - start_ticks));
+        if (!edit_model.in_source_view()) {
+            // What goes with the paths first: the circles and the leader lines, then the text over them. A text box attached to a path is
+            // where the path puts it (see path_tracker.h).
+            path_tracker.scene(media_container_mgr.rotation_angle(), media_container_mgr.current_ticks(), &path_scene);
+            if (!path_scene.lines.empty() || !path_scene.circles.empty()) {
+                path_overlay.begin(SCR_WIDTH, SCR_HEIGHT);
+                for (size_t i = 0; i < path_scene.lines.size(); i++) {
+                    const PathScene::Line& line = path_scene.lines[i];
+                    path_overlay.line(line.from_x, line.from_y, line.to_x, line.to_y, line.color, line.opacity);
+                }
+                for (size_t i = 0; i < path_scene.circles.size(); i++) {
+                    const PathScene::Circle& circle = path_scene.circles[i];
+                    path_overlay.ring(circle.x, circle.y, circle.radius, circle.color, circle.opacity);
+                }
+                path_overlay.end();
             }
-            text_renderer.end();
+            if (!path_scene.boxes.empty()) {
+                const std::vector<TextBox>& text_boxes = edit_model.text_boxes();
+                text_renderer.begin(SCR_WIDTH, SCR_HEIGHT);
+                for (size_t i = 0; i < path_scene.boxes.size(); i++) {
+                    TextBox shown = text_boxes[path_scene.boxes[i].index];
+                    shown.x = path_scene.boxes[i].x;
+                    shown.y = path_scene.boxes[i].y;
+                    text_renderer.draw(shown, path_scene.boxes[i].opacity);
+                }
+                text_renderer.end();
+            }
         }
         // The fade in from black at the start of the edit and out to black at its end, over everything above.
         if (!edit_model.in_source_view()) {

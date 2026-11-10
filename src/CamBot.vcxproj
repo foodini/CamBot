@@ -212,6 +212,11 @@
     <ClCompile Include="orientation_loader.cpp" />
     <ClCompile Include="frame_mapping.cpp" />
     <ClCompile Include="path_panel.cpp" />
+    <ClCompile Include="path_attachment.cpp" />
+    <ClCompile Include="path_overlay.cpp" />
+    <ClCompile Include="path_spans.cpp" />
+    <ClCompile Include="path_tracker.cpp" />
+    <ClCompile Include="preview_zoom.cpp" />
     <ClCompile Include="timeline_edit.cpp" />
     <ClCompile Include="sync_view.cpp" />
     <ClCompile Include="timeline_editor.cpp" />
@@ -321,6 +326,11 @@
     <ClInclude Include="orientation_loader.h" />
     <ClInclude Include="frame_mapping.h" />
     <ClInclude Include="path_panel.h" />
+    <ClInclude Include="path_attachment.h" />
+    <ClInclude Include="path_overlay.h" />
+    <ClInclude Include="path_spans.h" />
+    <ClInclude Include="path_tracker.h" />
+    <ClInclude Include="preview_zoom.h" />
     <ClInclude Include="timeline_edit.h" />
     <ClInclude Include="sync_view.h" />
     <ClInclude Include="timeline_editor.h" />

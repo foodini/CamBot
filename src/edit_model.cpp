@@ -424,6 +424,11 @@ bool EditModel::remove_path(int id) {
 	for (size_t i = 0; i < m_paths_of_targets.size(); i++) {
 		if (m_paths_of_targets[i].id == id) {
 			m_paths_of_targets.erase(m_paths_of_targets.begin() + i);
+			// A box attached to it becomes an ordinary one, where it was last put.
+			for (size_t k = 0; k < m_text_boxes.size(); k++) {
+				if (m_text_boxes[k].path_id == id)
+					m_text_boxes[k].path_id = 0;
+			}
 			return true;
 		}
 	}

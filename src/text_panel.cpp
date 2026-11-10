@@ -12,6 +12,8 @@
 
 #include "env_config.h"
 #include "media_container_manager.h"
+#include "path_attachment.h"
+#include "path_tracker.h"
 #include "text_box_geometry.h"
 #include "text_box.h"
 #include "text_fonts.h"
@@ -61,8 +63,8 @@ void draw_dashed_line(ImDrawList* draw_list, const ImVec2& a, const ImVec2& b, I
 
 }  // namespace
 
-TextPanel::TextPanel(EditModel* model, MediaContainerMgr* media, TimelineEditor* editor, EnvConfig* env_config)
-	: m_model(model), m_media(media), m_editor(editor), m_env_config(env_config), m_selected(0), m_field_active(false), m_buffer_id(0),
+TextPanel::TextPanel(EditModel* model, MediaContainerMgr* media, TimelineEditor* editor, EnvConfig* env_config, PathTracker* tracker)
+	: m_model(model), m_media(media), m_editor(editor), m_env_config(env_config), m_tracker(tracker), m_selected(0), m_field_active(false), m_buffer_id(0),
 	  m_defaults(env_config->text_defaults()), m_defaults_unsaved(false), m_seen_id(0), m_picker(0), m_picker_changed(false),
 	  m_drag_part(-1), m_drag_start_mouse_x(0.0f), m_drag_start_mouse_y(0.0f) {}
 
@@ -152,7 +154,7 @@ void TextPanel::draw(bool can_change) {
 	std::vector<size_t> order(boxes.size());
 	for (size_t i = 0; i < boxes.size(); i++) {
 		int64_t end = 0;
-		m_model->text_box_span(boxes[i], &starts[i], &end);
+		path_attachment::text_box_span(*m_model, boxes[i], &starts[i], &end);
 		order[i] = i;
 	}
 	std::stable_sort(order.begin(), order.end(), [&starts](size_t a, size_t b) { return starts[a] < starts[b]; });
@@ -163,7 +165,9 @@ void TextPanel::draw(bool can_change) {
 		const TextBox& box = boxes[order[n]];
 		char when[32];
 		ffsw::make_time(when, (float)m_model->ticks_to_seconds(starts[order[n]]), false);
-		const std::string label = std::string(when) + "  " + preview_of(box.text) + "##" + std::to_string(box.id);
+		const TrackedPath* attached_to = m_model->find_path(box.path_id);
+		const std::string label = std::string(when) + "  " + preview_of(box.text) + (attached_to != NULL ? "  (" + attached_to->name + ")" : std::string()) +
+			"##" + std::to_string(box.id);
 		if (ImGui::Selectable(label.c_str(), box.id == m_selected)) {
 			if (box.id == m_selected) {
 				m_selected = 0;                // Clicking the selected one again lets go of it.
@@ -280,8 +284,99 @@ bool TextPanel::color_control(const char* label, int which, float color[3]) {
 	return changed;
 }
 
+bool TextPanel::marker_for(const TextBox& box, int path_id, double* x, double* y) {
+	const TrackedPath* path = m_model->find_path(path_id);
+	if (path == NULL || path->curve.empty())
+		return false;
+	const double rotation = m_media->rotation_angle();
+	const double aspect = m_tracker->canvas_aspect();
+	if (m_tracker->marker(*path, rotation, aspect, m_media->current_ticks(), x, y))
+		return true;
+	// The path is not there at the playhead: where it begins.
+	TextBox probe = box;
+	probe.path_id = path_id;
+	const std::vector<path_spans::Piece> pieces = path_attachment::pieces_of(*m_model, probe);
+	return !pieces.empty() && m_tracker->marker(*path, rotation, aspect, pieces[0].span.start, x, y);
+}
+
+void TextPanel::displayed_position(const TextBox& box, double* x, double* y) {
+	*x = box.x;
+	*y = box.y;
+	double marker_x = 0.0;
+	double marker_y = 0.0;
+	if (box.path_id != 0 && box.attach_mode == ATTACH_FOLLOW && marker_for(box, box.path_id, &marker_x, &marker_y)) {
+		*x = marker_x + box.offset_x;
+		*y = marker_y + box.offset_y;
+	}
+}
+
+void TextPanel::attach(const TextBox& chosen, int path_id, int mode) {
+	const TextBox box = chosen;       // (The model's own changes below would change what a reference showed.)
+	double x = 0.0;
+	double y = 0.0;
+	displayed_position(box, &x, &y);
+	float offset_x = box.offset_x;
+	float offset_y = box.offset_y;
+	double marker_x = 0.0;
+	double marker_y = 0.0;
+	if (path_id != 0 && mode == ATTACH_FOLLOW && marker_for(box, path_id, &marker_x, &marker_y)) {
+		offset_x = (float)(x - marker_x);
+		offset_y = (float)(y - marker_y);
+	}
+	m_editor->begin_box_edit(*m_model, *m_media);
+	m_editor->set_geometry(m_model, box.id, (float)x, (float)y, box.w, box.h);
+	m_editor->set_attachment(m_model, box.id, path_id, mode, offset_x, offset_y);
+	m_editor->end_box_edit(*m_model, *m_media);
+}
+
+void TextPanel::draw_attachment(const TextBox& box) {
+	ImGui::BeginDisabled(m_media->recording());
+	const float control_width = -CONTROL_LABEL_WIDTH;
+	ImGui::SeparatorText("Path");
+	const std::vector<TrackedPath>& paths = m_model->paths();
+	if (paths.empty() && box.path_id == 0) {
+		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+		ImGui::TextWrapped("Add a path in the Paths section to attach this text to something that moves.");
+		ImGui::PopStyleColor();
+		ImGui::EndDisabled();
+		return;
+	}
+	const TrackedPath* current = m_model->find_path(box.path_id);
+	ImGui::SetNextItemWidth(control_width);
+	if (ImGui::BeginCombo("Attached to", current != NULL ? current->name.c_str() : "Nothing")) {
+		if (ImGui::Selectable("Nothing", current == NULL) && current != NULL)
+			attach(box, 0, box.attach_mode);
+		for (size_t i = 0; i < paths.size(); i++) {
+			ImGui::PushID(paths[i].id);
+			if (ImGui::Selectable(paths[i].name.c_str(), paths[i].id == box.path_id) && paths[i].id != box.path_id)
+				attach(box, paths[i].id, box.attach_mode);
+			ImGui::PopID();
+		}
+		ImGui::EndCombo();
+	}
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("The text shows for as long as the path does, and follows it or has a leader line to it.");
+	if (current != NULL) {
+		const char* const mode_names[2] = { "Moves with path", "Leader line" };
+		ImGui::SetNextItemWidth(control_width);
+		if (ImGui::BeginCombo("Style", mode_names[box.attach_mode == ATTACH_LEADER ? 1 : 0])) {
+			for (int mode = 0; mode < 2; mode++) {
+				if (ImGui::Selectable(mode_names[mode], mode == box.attach_mode) && mode != box.attach_mode)
+					attach(box, box.path_id, mode);
+			}
+			ImGui::EndCombo();
+		}
+		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+		ImGui::TextWrapped(box.attach_mode == ATTACH_LEADER ? "The text stays where you put it; a line runs from it to the path's circle."
+			: "The text keeps its place relative to the path: drag it on the picture to change where.");
+		ImGui::PopStyleColor();
+	}
+	ImGui::EndDisabled();
+}
+
 void TextPanel::draw_properties(const TextBox& box) {
 	const int id = box.id;
+	draw_attachment(box);
 	ImGui::BeginDisabled(m_media->recording());
 	const float control_width = -CONTROL_LABEL_WIDTH;
 
@@ -296,12 +391,15 @@ void TextPanel::draw_properties(const TextBox& box) {
 	int64_t ticks[3] = { box.fade_in_ticks, box.dwell_ticks, box.fade_out_ticks };
 	for (int n = 0; n < 3; n++) {
 		float seconds = (float)m_model->ticks_to_seconds(ticks[n]);
+		// An attached box shows for as long as its path does: there is no dwell to set.
+		const bool unused = n == 1 && box.path_id != 0;
+		ImGui::BeginDisabled(unused);
 		ImGui::SetNextItemWidth(control_width);
 		const bool changed = ImGui::DragFloat(timing_names[n], &seconds, 0.02f, 0.0f, 600.0f, "%.2f s", ImGuiSliderFlags_AlwaysClamp);
 		begin_edit_if_activated();
 		if (changed) {
 			ticks[n] = m_model->seconds_to_ticks(seconds);
-			if (n == 0) {
+			if (n == 0 && box.path_id == 0) {
 				// The fade in ends at the anchor, so it can't be longer than the video before that.
 				const int64_t before = m_model->timeline_ticks_nearest(box.anchor);
 				if (ticks[0] > before)
@@ -310,8 +408,9 @@ void TextPanel::draw_properties(const TextBox& box) {
 			m_editor->set_timing(m_model, id, box.anchor, ticks[0], ticks[1], ticks[2]);
 		}
 		end_edit_if_deactivated();
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("%s", timing_tips[n]);
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+			ImGui::SetTooltip("%s", unused ? "Attached to a path: the text shows for as long as the path does." : timing_tips[n]);
+		ImGui::EndDisabled();
 	}
 
 	// How it looks.
@@ -399,15 +498,34 @@ void TextPanel::draw_on_preview(const LayoutRect& preview, bool can_change) {
 	}
 	// Only while the box is on the picture: there is nothing to handle otherwise, and the rectangle would be in the way of the
 	// ordinary editing. (A drag in progress can't be cut short, as the playhead doesn't move during one.)
-	int64_t shows_from = 0;
-	int64_t shows_until = 0;
-	m_model->text_box_span(*box, &shows_from, &shows_until);
 	const int64_t now_ticks = m_media->current_ticks();
-	if (m_drag_part < 0 && (now_ticks < shows_from || now_ticks >= shows_until))
-		return;
+	// Where the box is on the picture: its own place, or, for one that follows a path, the path's point and its offset.
+	float box_x = box->x;
+	float box_y = box->y;
+	bool following = false;
+	double marker_x = 0.0;
+	double marker_y = 0.0;
+	if (box->path_id != 0) {
+		const path_attachment::Placement placement = m_tracker->place(*box, m_media->rotation_angle(), (double)preview.w / (double)preview.h, now_ticks);
+		if (m_drag_part < 0 && placement.alpha <= 0.0f)
+			return;
+		if (placement.alpha > 0.0f && box->attach_mode == ATTACH_FOLLOW) {
+			following = true;
+			box_x = placement.x;
+			box_y = placement.y;
+			marker_x = placement.marker_x;
+			marker_y = placement.marker_y;
+		}
+	} else {
+		int64_t shows_from = 0;
+		int64_t shows_until = 0;
+		path_attachment::text_box_span(*m_model, *box, &shows_from, &shows_until);
+		if (m_drag_part < 0 && (now_ticks < shows_from || now_ticks >= shows_until))
+			return;
+	}
 
 	const float HANDLE_SIZE = 12.0f;                       // How big the corner squares are drawn, in pixels.
-	const ImVec2 top_left(preview.x + box->x * preview.w, preview.y + box->y * preview.h);
+	const ImVec2 top_left(preview.x + box_x * preview.w, preview.y + box_y * preview.h);
 	const ImVec2 bottom_right(top_left.x + box->w * preview.w, top_left.y + box->h * preview.h);
 	// The mouse is the corner's from well away from the square, so the corner wins over the edges and the box for anything
 	// near it: a square 28 pixels across (14 each way), less on a very small box so the four don't crowd the middle out.
@@ -459,7 +577,7 @@ void TextPanel::draw_on_preview(const LayoutRect& preview, bool can_change) {
 			const float mouse_y = (mouse.y - preview.y) / preview.h;
 			if (ImGui::IsItemActivated()) {
 				m_drag_part = part;
-				m_drag_start_box = text_box_geometry::Rect(box->x, box->y, box->w, box->h);
+				m_drag_start_box = text_box_geometry::Rect(box_x, box_y, box->w, box->h);
 				m_drag_start_mouse_x = mouse_x;
 				m_drag_start_mouse_y = mouse_y;
 				m_editor->begin_box_edit(*m_model, *m_media);
@@ -475,6 +593,9 @@ void TextPanel::draw_on_preview(const LayoutRect& preview, bool can_change) {
 				else
 					moved = text_box_geometry::drag_edge(m_drag_start_box, part, dx, dy);
 				m_editor->set_geometry(m_model, m_selected, moved.x, moved.y, moved.w, moved.h);
+				// A box that follows a path is where the offset from the path's point puts it, so the offset is what the drag changes.
+				if (following)
+					m_editor->set_attachment(m_model, m_selected, box->path_id, box->attach_mode, (float)(moved.x - marker_x), (float)(moved.y - marker_y));
 			}
 			if (ImGui::IsItemDeactivated() && m_drag_part == part) {
 				m_editor->end_box_edit(*m_model, *m_media);

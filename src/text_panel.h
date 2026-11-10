@@ -21,11 +21,12 @@
 
 class EnvConfig;
 class MediaContainerMgr;
+class PathTracker;
 class TimelineEditor;
 
 class TextPanel {
 public:
-	TextPanel(EditModel* model, MediaContainerMgr* media, TimelineEditor* editor, EnvConfig* env_config);
+	TextPanel(EditModel* model, MediaContainerMgr* media, TimelineEditor* editor, EnvConfig* env_config, PathTracker* tracker);
 
 	// Draws the section, as part of the window the caller has open. `can_change` is false while an export runs.
 	void draw(bool can_change);
@@ -45,6 +46,7 @@ private:
 	MediaContainerMgr* m_media;
 	TimelineEditor*   m_editor;
 	EnvConfig*        m_env_config;
+	PathTracker*      m_tracker;
 	int               m_selected;
 	bool              m_field_active;     // The text field has the keyboard.
 	int               m_buffer_id;        // Whose words m_buffer holds.
@@ -65,6 +67,15 @@ private:
 	void follow_changes();
 	// The controls for when the box shows and how it looks.
 	void draw_properties(const TextBox& box);
+	// The controls for the path the box is attached to, if any, and how (see text_box.h).
+	void draw_attachment(const TextBox& box);
+	// Attaches the box to path `path_id` (0 for none) in `mode`, as one undo step. The box stays where it is on the picture: an attached
+	// box's offset from the path's point is set from where it is now, and one taken off a path keeps its place.
+	void attach(const TextBox& box, int path_id, int mode);
+	// Where path `path_id` is on the canvas for the box: at the playhead if it is there, otherwise where it begins. False if it has no place.
+	bool marker_for(const TextBox& box, int path_id, double* x, double* y);
+	// Where the box is on the canvas now (its top left): by its path if it follows one.
+	void displayed_position(const TextBox& box, double* x, double* y);
 	// A colour swatch with its label; clicking it opens the picker (with the recent colours). True if `color` was changed.
 	bool color_control(const char* label, int which, float color[3]);
 	// The undo step round a widget: opened when it is taken hold of, closed when it is let go.

@@ -22,6 +22,10 @@
 
 enum TextAlign { TEXT_ALIGN_LEFT = 0, TEXT_ALIGN_CENTER = 1, TEXT_ALIGN_RIGHT = 2 };
 
+// What a box attached to a path (see TextBox::path_id) does with it. A box moves with the path's point, keeping its offset from it, or
+// stays where it is and has a leader line drawn from it to the path's circle.
+enum AttachMode { ATTACH_FOLLOW = 0, ATTACH_LEADER = 1 };
+
 struct TextStyle {
 	int   font;             // Which of the fonts of text_fonts.h.
 	float size;             // The em height of the type, as a fraction of the frame's height (0.0444 is 48 points at 1080 tall).
@@ -52,6 +56,14 @@ struct TextBox {
 	float       w;
 	float       h;
 	TextStyle   style;
+	// The path (see tracked_path.h) the box is attached to, 0 for none. An attached box shows for the path's lifespan, not its own timing
+	// (see path_attachment.h): its fades are kept, but the dwell is not used. `x` and `y` are where it was last put on the picture, which
+	// is where it goes if the path is taken away; with ATTACH_FOLLOW the box is at the path's point plus (`offset_x`, `offset_y`), fractions
+	// of the frame, the offset of its top left.
+	int         path_id;
+	int         attach_mode;     // An AttachMode.
+	float       offset_x;
+	float       offset_y;
 
 	TextBox();
 	// How long it shows, from the first frame it fades in on (that many ticks before the anchor) to where it has gone.

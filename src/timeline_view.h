@@ -6,7 +6,9 @@
 // moves around it: left-drag (or click) scrubs, the right button drags to scan forward and back,
 // the wheel zooms about the cursor, and the middle button, Shift and the wheel, or a left-drag on
 // the ruler pans. Ctrl and the left button together pick up a clip and drop it in another place in
-// the order. Below the clips, when the project has text boxes (see text_box.h), is the text track: each box a block as long
+// the order. Below the clips, when the project has paths (see tracked_path.h), is the path track: a box for each
+// stretch of the timeline a path is on (a path split between clips has one for each), with its name in it, in the color of its circle;
+// a click picks the path. Under that, when the project has text boxes (see text_box.h), is the text track: each box a block as long
 // as it shows, with the start of its words in it, on rows of their own where boxes overlap. A click on a box selects it;
 // Ctrl and the left button on its body move it in time, and on either end of it change when it starts or stops (the box
 // stays tied to a frame of the video: see text_lanes.h). The buttons along its top cut the clips at the playhead (see timeline_editor.h); a
@@ -57,8 +59,11 @@ public:
 	// `selection` (see timeline_selection.h), if given, is what a click on a clip or on a transition's icon sets (the icons, a small
 	// square at each join and at the two ends of the video, are shown only with one). A click on a text box, or on nothing, lets go
 	// of it.
+	// The path track (see path_spans.h) is shown only with an editor, and `selected_path` (the id of the selected path, or 0 for none) is
+	// where it reads which path is selected and tells of a click on a path's box, which also takes the playhead to the frame clicked. A
+	// click on a text box lets go of the path, and one on a path lets go of the text box.
 	void draw(const LayoutRect& rect, EditModel& model, MediaContainerMgr& media, TimelineEditor* editor, ReorderRequest* reorder,
-		int* selected_text = nullptr, TimelineSelection* selection = nullptr);
+		int* selected_text = nullptr, TimelineSelection* selection = nullptr, int* selected_path = nullptr);
 
 	// Shows the whole timeline.
 	void fit() { m_scale.fit(); }
@@ -99,6 +104,7 @@ private:
 
 	// The number of rows of text boxes last time, to notice a new one, and the height the timeline was found to need then.
 	int     m_previous_lane_count;
+	int     m_previous_path_lane_count;
 	float   m_height_request;
 
 	// Right button: scanning at a rate set by how far the mouse is from where it was pressed.

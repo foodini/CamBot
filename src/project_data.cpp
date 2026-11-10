@@ -279,6 +279,22 @@ bool read_text_boxes(const Json::Value& list, size_t media_count, std::vector<Te
 		}
 		if (entry.isMember("style") && !read_text_style(entry["style"], &box.style, error))
 			return false;
+		if (entry.isMember("path")) {
+			// Attached to a path (version 9). Whether there is such a path is for the caller to check.
+			int64_t path_id = 0;
+			if (!read_whole(entry, "path", 0, &path_id, error))
+				return false;
+			box.path_id = (int)path_id;
+			if (entry.isMember("attach")) {
+				if (!entry["attach"].isString() || (entry["attach"].asString() != "follow" && entry["attach"].asString() != "leader")) {
+					set_error(error, "The project file's text \"attach\" should be \"follow\" or \"leader\".");
+					return false;
+				}
+				box.attach_mode = entry["attach"].asString() == "leader" ? ATTACH_LEADER : ATTACH_FOLLOW;
+			}
+			if (!read_number(entry, "offset_x", &box.offset_x, error) || !read_number(entry, "offset_y", &box.offset_y, error))
+				return false;
+		}
 		for (size_t other = 0; other < boxes->size(); other++) {
 			if ((*boxes)[other].id == box.id) {
 				set_error(error, "The project file has two text boxes with the same \"id\".");
@@ -414,6 +430,12 @@ Json::Value text_box_to_json(const TextBox& box) {
 	shadow["opacity"] = (double)box.style.shadow_opacity;
 	style["shadow"] = shadow;
 	entry["style"] = style;
+	if (box.path_id != 0) {
+		entry["path"] = box.path_id;
+		entry["attach"] = box.attach_mode == ATTACH_LEADER ? "leader" : "follow";
+		entry["offset_x"] = (double)box.offset_x;
+		entry["offset_y"] = (double)box.offset_y;
+	}
 	return entry;
 }
 

@@ -55,6 +55,9 @@ for test in *_test.cpp; do
     if [ "$name" = "timeline_scale_test" ]; then extra="../src/timeline_scale.cpp ../src/scan_gesture.cpp"; fi
     if [ "$name" = "tracking_path_test" ]; then extra="../src/tracking_path.cpp"; fi
     if [ "$name" = "frame_mapping_test" ]; then extra="../src/frame_mapping.cpp"; fi
+    if [ "$name" = "preview_zoom_test" ]; then extra="../src/preview_zoom.cpp"; fi
+    if [ "$name" = "path_attachment_test" ]; then extra="../src/path_attachment.cpp ../src/path_spans.cpp ../src/frame_mapping.cpp ../src/edit_model.cpp ../src/tracking_path.cpp ../src/text_box.cpp"; fi
+    if [ "$name" = "path_spans_test" ]; then extra="../src/path_spans.cpp ../src/edit_model.cpp ../src/tracking_path.cpp ../src/text_box.cpp"; fi
     if [ "$name" = "dji_orientation_test" ]; then extra="../src/dji_orientation.cpp ../src/tracking_path.cpp ../src/proto_wire.cpp"; fi
     # The decoder test runs the real MediaDecoder against a fake FFmpeg (fake_ffmpeg.cpp) that
     # serves small synthetic files, so no FFmpeg libraries or video files are needed.

@@ -94,7 +94,7 @@ static void test_speed_round_trip() {
 	const std::string plain_text = project_io::to_json(plain);
 	CHECK(plain_text.find("speed") == std::string::npos);
 	CHECK(plain_text.find("audio") == std::string::npos);
-	CHECK(plain_text.find("\"version\" : 8") != std::string::npos);
+	CHECK(plain_text.find("\"version\" : 9") != std::string::npos);
 	CHECK(plain_text.find("transitions") == std::string::npos);
 	// Written again, the text is the same: nothing creeps.
 	CHECK(project_io::to_json(back) == text);
@@ -171,6 +171,10 @@ static ProjectData full_project() {
 	second.id = 9;
 	second.anchor = FileTime(0, 30000);
 	second.text = "Short";
+	second.path_id = 5;
+	second.attach_mode = ATTACH_LEADER;
+	second.offset_x = 0.125f;
+	second.offset_y = -0.25f;
 	project.text_boxes.push_back(first);
 	project.text_boxes.push_back(second);
 	TrackedPath hawk;
@@ -248,6 +252,23 @@ static void test_full_round_trip() {
 	ProjectData rewritten = read;
 	project_io::fill_from_model(again, 1, 25000, &rewritten);
 	CHECK(rewritten == project);
+	// A box attached to a path the project does not have (its file is not there) is an ordinary box.
+	ProjectData orphaned = project;
+	orphaned.paths[1].media = 9;
+	EditModel without_path;
+	CHECK_MSG(project_io::apply_to_model(orphaned, durations, 1, 25000, &without_path, &error), "%s", error.c_str());
+	CHECK(without_path.text_boxes().size() == 2 && without_path.text_boxes()[0].path_id == 0 && without_path.text_boxes()[1].path_id == 0);
+	// Taking a path away takes it off its boxes too.
+	CHECK(again.text_boxes()[1].path_id == 5 && again.remove_path(5) && again.text_boxes()[1].path_id == 0);
+	// The kind of attachment has to be one there is.
+	std::string bad = text;
+	const size_t at = bad.find("\"leader\"");
+	CHECK(at != std::string::npos);
+	if (at != std::string::npos) {
+		bad.replace(at, 8, "\"sideways\"");
+		ProjectData refused;
+		CHECK(!project_io::parse_json(bad, &refused, &error));
+	}
 	CHECK(project_io::to_json(rewritten) == text);
 }
 
@@ -267,7 +288,7 @@ static void test_older_and_bad_files() {
 	CHECK(project_io::parse_json(project_text(3, "[{\"media\":0,\"in\":0,\"out\":100}]"), &project, &error));
 	// A newer file is refused politely.
 	project = ProjectData();
-	CHECK(!project_io::parse_json(project_text(9, "[{\"media\":0,\"in\":0,\"out\":100}]"), &project, &error));
+	CHECK(!project_io::parse_json(project_text(10, "[{\"media\":0,\"in\":0,\"out\":100}]"), &project, &error));
 	CHECK(error.find("newer version") != std::string::npos);
 	// Paths: older files have none; bad ones are refused with a sentence about it.
 	const std::string base = "{\"format\":\"cambot-project\",\"version\":8,\"video_files\":[\"a.mp4\"],\"time_base\":[1,25000],\"clips\":[{\"media\":0,\"in\":0,\"out\":100}],\"paths\":";

@@ -140,6 +140,17 @@ bool apply_to_model(const ProjectData& project, const std::vector<int64_t>& medi
 	}
 	model->set_paths(paths);
 	model->set_path_fov_degrees(project.path_fov_degrees);
+	// A box attached to a path the project no longer has (its file is gone) is an ordinary one.
+	std::vector<TextBox> attached_boxes = model->text_boxes();
+	bool detached = false;
+	for (size_t i = 0; i < attached_boxes.size(); i++) {
+		if (attached_boxes[i].path_id != 0 && model->find_path(attached_boxes[i].path_id) == NULL) {
+			attached_boxes[i].path_id = 0;
+			detached = true;
+		}
+	}
+	if (detached)
+		model->set_text_boxes(attached_boxes);
 
 	if (project.has_version2_sync) {
 		model->set_offset((double)project.version2_offset_s);

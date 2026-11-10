@@ -2,6 +2,7 @@
 
 #include "env_config.h"
 #include "media_container_manager.h"
+#include "path_attachment.h"
 #include "timeline_edit.h"
 #include "util.h"
 
@@ -303,7 +304,7 @@ void TimelineEditor::go_to_text_box(const EditModel& model, MediaContainerMgr* m
 		return;
 	int64_t start = 0;
 	int64_t end = 0;
-	model.text_box_span(*box, &start, &end);
+	path_attachment::text_box_span(model, *box, &start, &end);
 	int64_t target = start + box->fade_in_ticks;
 	const int64_t last_frame = model.edit_list().total_ticks() - media->frame_ticks();
 	if (target > last_frame)
@@ -442,6 +443,18 @@ void TimelineEditor::set_geometry(EditModel* model, int id, float x, float y, fl
 	box->y = y;
 	box->w = w;
 	box->h = h;
+}
+
+void TimelineEditor::set_attachment(EditModel* model, int id, int path_id, int mode, float offset_x, float offset_y) {
+	TextBox* box = model->find_text_box(id);
+	if (box == NULL)
+		return;
+	if (model->find_path(path_id) == NULL)
+		path_id = 0;
+	box->path_id = path_id;
+	box->attach_mode = mode == ATTACH_LEADER ? ATTACH_LEADER : ATTACH_FOLLOW;
+	box->offset_x = offset_x;
+	box->offset_y = offset_y;
 }
 
 void TimelineEditor::set_style(EditModel* model, int id, const TextStyle& style) {

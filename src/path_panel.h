@@ -17,7 +17,8 @@
 #include <string>
 
 #include "edit_model.h"
-#include "orientation_loader.h"
+#include "path_tracker.h"
+#include "preview_zoom.h"
 #include "tracking_path.h"
 #include "window_layout.h"
 
@@ -27,7 +28,7 @@ class TimelineEditor;
 
 class PathPanel {
 public:
-	PathPanel(EditModel* model, MediaContainerMgr* media, TimelineEditor* editor, TextPanel* text_panel);
+	PathPanel(EditModel* model, MediaContainerMgr* media, TimelineEditor* editor, TextPanel* text_panel, PathTracker* tracker);
 
 	// Draws the section, as part of the window the caller has open. `can_change` is false while an export runs.
 	void draw(bool can_change);
@@ -36,12 +37,21 @@ public:
 	// Call it every frame, with the other windows. `can_change` is false while an export runs.
 	void draw_on_preview(const LayoutRect& preview, bool can_change);
 
+	// The path selected in the list, or 0 if none (or if it has since been removed).
+	int selected_id() const;
+	// Selects a path (0 for none), as when one is clicked on the timeline. Editing stops if that is another path.
+	void select(int id);
+
 	// Whether the mouse on the picture belongs to the path (so a click there must not pause the video).
 	bool editing() const { return m_editing; }
 	// The keys that mean something else when a path is being edited: they return true if they were taken for the path (and so are not
 	// for the clip). Delete takes out the selected point; trimming makes the path begin or end at the frame shown.
 	bool delete_pressed();
 	bool trim_pressed(bool left);
+	// The part of the canvas the preview is to show, as fractions of it from its top left to its bottom right: all of it (0, 0, 1, 1) except
+	// while a path is being edited and the wheel has zoomed in (the wheel zooms about the mouse, a drag of the picture moves it). While the
+// video plays, or is scrubbed, the view also moves to keep the selected path's marker in it; stepping a frame at a time does not move it.
+	void view_region(double* left, double* top, double* right, double* bottom) const;
 	// A line about the point under the mouse (which frame it is of and how far from the one shown), for the transport bar; "" for none.
 	const std::string& hover_text() const { return m_hover_text; }
 
@@ -50,7 +60,7 @@ private:
 	MediaContainerMgr* m_media;
 	TimelineEditor*    m_editor;
 	TextPanel*         m_text_panel;
-	OrientationLoader  m_loader;
+	PathTracker*       m_tracker;
 
 	int                m_selected;          // The selected path's id, 0 for none.
 	bool               m_editing;
@@ -64,17 +74,19 @@ private:
 	bool               m_pressing;
 	bool               m_press_placed;      // The press put the point down (and so is a drag from the start).
 	bool               m_press_moved;       // The mouse has gone far enough for it to be a drag.
+	bool               m_press_pan;         // The press was on no point while zoomed in: a drag pans the picture, and a click puts the point down.
+	double             m_press_u;           // Where in the picture such a press was.
+	double             m_press_v;
 	int64_t            m_press_ticks;       // The frame of the point being worked on.
 	float              m_press_x;           // Where the mouse went down, in window pixels.
 	float              m_press_y;
+	preview_zoom::View m_view;              // How far the preview is zoomed in, while editing.
+	bool               m_view_panning;      // The middle button is dragging the picture.
+	int64_t            m_follow_ticks;      // The footage frame at the playhead when the view was last given the chance to follow the marker.
 	bool               m_changing;          // A change to the selected path is in progress (an undo step is open; see settle()).
 
 	TrackedPath*       selected_path();
 	const TrackedPath* selected_path() const;
-	tracking::CameraLens lens() const;
-	// What the path's curve is drawn through: the orientations of its file (none until they have been read).
-	const tracking::CameraOrientations& orientations(const TrackedPath& path) const;
-	void ask_for_orientations(const TrackedPath& path);
 	// Closes the undo step of a control that changes the path once the mouse is up.
 	void settle();
 	void begin_change();
@@ -86,4 +98,6 @@ private:
 	void go_to_frame(int media, int64_t local_ticks);
 	void draw_overlay(const LayoutRect& preview, const TrackedPath& path);
 	void handle_mouse(const LayoutRect& preview, const TrackedPath& path);
+	// While zoomed in and the video plays or is scrubbed, moves the view to keep the marker (the selected path's place on this frame) in it.
+	void follow_marker(const LayoutRect& preview, const TrackedPath& path, int64_t now);
 };

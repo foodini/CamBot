@@ -19,12 +19,14 @@ bool TextStyle::operator==(const TextStyle& other) const {
 }
 
 TextBox::TextBox()
-	: id(0), anchor(), fade_in_ticks(0), dwell_ticks(0), fade_out_ticks(0), text(), x(0.1f), y(0.75f), w(0.8f), h(0.15f), style() {}
+	: id(0), anchor(), fade_in_ticks(0), dwell_ticks(0), fade_out_ticks(0), text(), x(0.1f), y(0.75f), w(0.8f), h(0.15f), style(),
+	  path_id(0), attach_mode(ATTACH_FOLLOW), offset_x(0.0f), offset_y(0.0f) {}
 
 bool TextBox::operator==(const TextBox& other) const {
 	return id == other.id && anchor == other.anchor && fade_in_ticks == other.fade_in_ticks && dwell_ticks == other.dwell_ticks &&
 		fade_out_ticks == other.fade_out_ticks && text == other.text && x == other.x && y == other.y && w == other.w && h == other.h &&
-		style == other.style;
+		style == other.style && path_id == other.path_id && attach_mode == other.attach_mode && offset_x == other.offset_x &&
+		offset_y == other.offset_y;
 }
 
 namespace text_box {

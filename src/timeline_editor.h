@@ -84,6 +84,9 @@ public:
 	void set_text(EditModel* model, int id, const std::string& text);
 	// Where the box is, as fractions of the frame (see text_box.h).
 	void set_geometry(EditModel* model, int id, float x, float y, float w, float h);
+	// Attaches the box to path `path_id` (0 to take it off one) in `mode` (an AttachMode), with `offset_x` and `offset_y` (see TextBox). A
+	// path that is not there takes it off.
+	void set_attachment(EditModel* model, int id, int path_id, int mode, float offset_x, float offset_y);
 	// How the words look (see TextStyle).
 	void set_style(EditModel* model, int id, const TextStyle& style);
 	// When it shows: the frame it begins on, and the lengths of its fade in, dwell and fade out.

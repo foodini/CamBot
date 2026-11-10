@@ -27,6 +27,8 @@ public:
 	const tracking::CameraOrientations& orientations(int media) const;
 	// Whether `media` is still being read, and how far it has got, 0 to 1.
 	bool  loading(int media) const { return m_loading && m_loading_media == media; }
+	// Whether any file is being read.
+	bool  busy() const { return m_loading; }
 	float progress() const;
 	// Whether `media` has been read (whether or not it had orientations), and whether it has any.
 	bool  is_read(int media) const { return m_finished.find(media) != m_finished.end(); }

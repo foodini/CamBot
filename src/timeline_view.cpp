@@ -10,6 +10,8 @@
 #include "env_config.h"
 #include "file_io.h"
 #include "media_container_manager.h"
+#include "path_attachment.h"
+#include "path_spans.h"
 #include "scan_gesture.h"
 #include "seam_icon.h"
 #include "thumbnail_layout.h"
@@ -32,6 +34,7 @@ const float  LANE_GAP = 3.0f;                  // Between the clips and the firs
 const float  LANE_PADDING = 3.0f;              // Inside a text box's block, round its words.
 const float  TEXT_EDGE_GRAB = 8.0f;            // How near an end of a text box's block the mouse must be to take hold of the end.
 const float  TEXT_ROUNDING = 4.0f;
+const float  PATH_MIN_WIDTH = 6.0f;            // The least a path's box is drawn, so a path of one frame can still be seen and clicked.
 const float  PREFERRED_TRACK_HEIGHT = 56.0f;   // The least the clips get when a new row of text boxes makes the timeline grow.
 const float  RULER_TINT_FACTOR = 0.5f;         // The file's color on the ruler is darkened, so the times on it stay easy to read.
 const int    MAX_PICTURES_PER_CLIP = 80;
@@ -55,6 +58,8 @@ const ImU32 COLOR_TEXT_BORDER = IM_COL32(150, 160, 205, 255);
 const ImU32 COLOR_TEXT_SELECTED = IM_COL32(255, 255, 255, 255);
 const ImU32 COLOR_TEXT_WORDS = IM_COL32(235, 238, 250, 255);
 const ImU32 COLOR_TEXT_FADE = IM_COL32(0, 0, 0, 80);               // Darkens the stretches where the words fade in and out.
+const ImU32 COLOR_PATH_SELECTED = IM_COL32(255, 255, 255, 255);
+const ImU32 COLOR_PATH_WORDS = IM_COL32(245, 245, 250, 255);
 const ImU32 COLOR_TEXT_GRAB = IM_COL32(255, 255, 255, 90);         // Shows the ends and the body that Ctrl and the mouse can take.
 const ImU32 COLOR_SEAM_FILL = IM_COL32(20, 20, 26, 190);          // The icon at a join: dark, so the pictures show through a little.
 const ImU32 COLOR_SEAM_BORDER = IM_COL32(170, 170, 185, 255);
@@ -125,6 +130,19 @@ ImU32 darkened(ImU32 color, float factor) {
 	return IM_COL32(red, green, blue, 255);
 }
 
+// One stretch of the timeline a path is on (a path has one for each clip that holds some of it), and the row it is on.
+struct PathBox {
+	int              id;
+	text_lanes::Span span;
+	int              lane;
+	PathBox() : id(0), span(), lane(0) {}
+};
+
+// The color of a path (that of its circle) as a drawing color.
+ImU32 path_color(const PathCircle& circle) {
+	return IM_COL32((int)(circle.color[0] * 255.0f + 0.5f), (int)(circle.color[1] * 255.0f + 0.5f), (int)(circle.color[2] * 255.0f + 0.5f), 255);
+}
+
 // Which part of a text box's block the mouse is on, from its left and right ends in pixels: one of the ends if within a few
 // pixels of it (less on a block too narrow to spare them), otherwise the body.
 int text_part_at(float x, float left, float right) {
@@ -193,13 +211,13 @@ int64_t seam_playhead(const EditList& clips, int seam, int64_t frame_ticks) {
 TimelineView::TimelineView(const char* window_name) :
 	m_window_name(window_name), m_thumbnails(nullptr), m_panning(false), m_scrubbing(false), m_scrub_ticks(-1), m_drag_clip(-1), m_drag_to(-1),
 	m_text_drag_id(0), m_text_drag_part(0), m_text_drag_original(), m_text_drag_span(), m_text_drag_origin_x(0.0f),
-	m_previous_lane_count(0), m_height_request(0.0f),
+	m_previous_lane_count(0), m_previous_path_lane_count(0), m_height_request(0.0f),
 	m_scanning(false), m_scan_origin_x(0.0f), m_scan_accumulator(0.0f), m_last_playhead(-1), m_follow(true)
 {
 }
 
 void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainerMgr& media, TimelineEditor* editor, ReorderRequest* reorder,
-		int* selected_text, TimelineSelection* selection) {
+		int* selected_text, TimelineSelection* selection, int* selected_path) {
 	if (rect.w < 1.0f || rect.h < 1.0f)
 		return;
 	ImGui::SetNextWindowPos(ImVec2(rect.x, rect.y));
@@ -248,7 +266,7 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 
 	// A reminder of the mouse, if there's room for it.
 	const char* hint = editor != nullptr
-		? "Scroll to zoom.  Drag the ruler, middle-drag or Shift+scroll to pan.  Right-drag to scan.  Ctrl+drag a clip to move it, or a text box (or its ends) to retime it."
+		? "Scroll to zoom.  Drag the ruler, middle-drag or Shift+scroll to pan.  Right-drag to scan.  Ctrl+drag a clip to move it, or a text box (or its ends) to retime it.  Click a path to pick it."
 		: "Scroll to zoom.  Drag the ruler, middle-drag or Shift+scroll to pan.  Right-drag to scan.  Ctrl+drag a clip to move it.";
 	ImGui::SameLine(0.0f, 16.0f);
 	if (ImGui::CalcTextSize(hint).x < ImGui::GetContentRegionAvail().x)
@@ -273,35 +291,81 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 	if (show_text) {
 		const std::vector<TextBox>& boxes = model.text_boxes();
 		for (size_t i = 0; i < boxes.size(); i++) {
-			text_lanes::Span span;
-			model.text_box_span(boxes[i], &span.start, &span.end);
-			text_ids.push_back(boxes[i].id);
-			text_spans.push_back(span);
+			// A box attached to a path has a block for each stretch of the timeline the path is on; any other has one.
+			const std::vector<text_lanes::Span> shown = path_attachment::text_box_spans(model, boxes[i]);
+			for (size_t k = 0; k < shown.size(); k++) {
+				text_ids.push_back(boxes[i].id);
+				text_spans.push_back(shown[k]);
+			}
 		}
 		text_lane_of = text_lanes::assign(text_spans, &lane_count);
+	}
+	// The path track: a box for each stretch of the timeline a path is on, on rows of their own between the clips and the text
+	// boxes (paths that are on at the same time go on different rows). Like the text boxes, only in the editor's own timeline.
+	const bool show_paths = editor != nullptr && selected_path != nullptr && !model.in_source_view();
+	std::vector<PathBox> path_boxes;
+	int path_lane_count = 0;
+	if (show_paths) {
+		std::vector<text_lanes::Span> spans;
+		const std::vector<TrackedPath>& paths = model.paths();
+		for (size_t i = 0; i < paths.size(); i++) {
+			if (paths[i].curve.empty())
+				continue;
+			const std::vector<text_lanes::Span> pieces = path_spans::pieces(clips, paths[i].media, paths[i].curve.first_ticks(), paths[i].curve.last_ticks());
+			for (size_t k = 0; k < pieces.size(); k++) {
+				PathBox box;
+				box.id = paths[i].id;
+				box.span = pieces[k];
+				path_boxes.push_back(box);
+				spans.push_back(pieces[k]);
+			}
+		}
+		const std::vector<int> lanes = text_lanes::assign(spans, &path_lane_count);
+		for (size_t i = 0; i < path_boxes.size(); i++)
+			path_boxes[i].lane = lanes[i];
 	}
 	const float ruler_bottom = origin.y + RULER_HEIGHT;
 	const float track_top = ruler_bottom + TRACK_GAP;
 	const float lane_height = 2.0f * ImGui::GetTextLineHeight() + 2.0f * LANE_PADDING;
-	// The rows take what they need of the height, short of leaving the clips less than their least; any that don't fit are cut off
-	// (the user makes the timeline taller to see them).
+	const float path_lane_height = ImGui::GetTextLineHeight() + 2.0f * LANE_PADDING;     // One line: only the name.
+	// The rows (the paths', then the text boxes') take what they need of the height, short of leaving the clips less than their
+	// least; any that don't fit are cut off (the user makes the timeline taller to see them).
+	const float path_rows_height = (float)path_lane_count * (path_lane_height + LANE_GAP);
+	float path_area = path_rows_height;
 	float text_area = (float)lane_count * (lane_height + LANE_GAP);
-	const float text_room = larger(0.0f, available.y - RULER_HEIGHT - TRACK_GAP - TRACK_BOTTOM_MARGIN - MIN_TRACK_HEIGHT);
-	text_area = smaller(text_area, text_room);
-	float track_height = available.y - RULER_HEIGHT - TRACK_GAP - TRACK_BOTTOM_MARGIN - text_area;
+	const float rows_room = larger(0.0f, available.y - RULER_HEIGHT - TRACK_GAP - TRACK_BOTTOM_MARGIN - MIN_TRACK_HEIGHT);
+	path_area = smaller(path_area, rows_room);
+	text_area = smaller(text_area, rows_room - path_area);
+	const float rows_area = path_area + text_area;
+	float track_height = available.y - RULER_HEIGHT - TRACK_GAP - TRACK_BOTTOM_MARGIN - rows_area;
 	track_height = larger(MIN_TRACK_HEIGHT, smaller(MAX_TRACK_HEIGHT, track_height));
 	const float track_bottom = track_top + track_height;
-	const float text_top = track_bottom + LANE_GAP;
-	// A row of text boxes that is new, and doesn't fit, is a reason to make the timeline taller: otherwise it would appear below
+	const float path_top = track_bottom + LANE_GAP;
+	const float text_top = path_top + path_rows_height;
+	// A row of boxes that is new, and doesn't fit, is a reason to make the timeline taller: otherwise it would appear below
 	// the bottom of the window with nothing to show it is there.
-	if (show_text) {
-		if (lane_count > m_previous_lane_count) {
+	if (show_text || show_paths) {
+		if (lane_count > m_previous_lane_count || path_lane_count > m_previous_path_lane_count) {
 			const float wanted = (origin.y - rect.y) + RULER_HEIGHT + TRACK_GAP + PREFERRED_TRACK_HEIGHT + TRACK_BOTTOM_MARGIN +
-				(float)lane_count * (lane_height + LANE_GAP) + ImGui::GetStyle().WindowPadding.y;
+				(float)lane_count * (lane_height + LANE_GAP) + path_rows_height + ImGui::GetStyle().WindowPadding.y;
 			if (wanted > rect.h)
 				m_height_request = wanted;
 		}
 		m_previous_lane_count = lane_count;
+		m_previous_path_lane_count = path_lane_count;
+	}
+	// The path box under the mouse, as an index into path_boxes (or -1).
+	int path_under_mouse = -1;
+	if (show_paths) {
+		const ImVec2 mouse = ImGui::GetIO().MousePos;
+		for (int i = (int)path_boxes.size() - 1; i >= 0 && path_under_mouse < 0; i--) {
+			const float top = path_top + (float)path_boxes[i].lane * (path_lane_height + LANE_GAP);
+			const float left = origin.x + m_scale.tick_to_x((double)path_boxes[i].span.start);
+			const float right = larger(origin.x + m_scale.tick_to_x((double)path_boxes[i].span.end), left + PATH_MIN_WIDTH);
+			if (mouse.x >= left && mouse.x <= right && mouse.y >= top && mouse.y <= top + path_lane_height &&
+					top + path_lane_height <= origin.y + available.y)
+				path_under_mouse = i;
+		}
 	}
 	// The block under the mouse, as an index into text_ids (or -1), and which part of it. A block's ends are where they really
 	// are, which may be far off the strip when zoomed in.
@@ -397,6 +461,33 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 			if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && io.MousePos.y - origin.y < RULER_HEIGHT) {
 				// Pressed on the ruler: that slides the timeline instead of moving the playhead.
 				m_panning = true;
+			} else if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && path_under_mouse >= 0) {
+				// A click on a path's box picks the path, and takes the playhead to the frame clicked (kept inside that box).
+				const PathBox& box = path_boxes[path_under_mouse];
+				*selected_path = box.id;
+				if (selected_text != nullptr)
+					*selected_text = 0;
+				if (selection != nullptr)
+					selection->clear();
+				int64_t target = (int64_t)llround(m_scale.x_to_ticks(mouse_x));
+				target = target < box.span.start ? box.span.start : (target > box.span.end ? box.span.end : target);
+				const int64_t last_frame = clips.total_ticks() - media.frame_ticks();
+				target = target > last_frame ? last_frame : target;
+				target = target < 0 ? 0 : target;
+				EnvConfig::instance->pause();
+				media.seek_to_keyframe_near(target);
+				media.advance_to(target);
+				m_follow = true;
+			} else if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && io.KeyCtrl && text_under_mouse >= 0 &&
+				model.find_text_box(text_ids[text_under_mouse]) != nullptr && model.find_text_box(text_ids[text_under_mouse])->path_id != 0) {
+				// A text box attached to a path shows for as long as the path does, so there is nothing to drag: it is picked, as by a click.
+				*selected_text = text_ids[text_under_mouse];
+				if (selected_path != nullptr)
+					*selected_path = 0;
+				if (selection != nullptr)
+					selection->clear();
+				editor->go_to_text_box(model, &media, *selected_text);
+				m_follow = true;
 			} else if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && io.KeyCtrl && text_under_mouse >= 0) {
 				// Ctrl and the button on a text box: take hold of it (or an end of it) to change when it shows.
 				m_text_drag_id = text_ids[text_under_mouse];
@@ -405,6 +496,8 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 				m_text_drag_original = *model.find_text_box(m_text_drag_id);
 				m_text_drag_origin_x = io.MousePos.x;
 				*selected_text = m_text_drag_id;
+				if (selected_path != nullptr)
+					*selected_path = 0;
 				editor->begin_box_edit(model, media);
 				EnvConfig::instance->pause();
 			} else if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && io.KeyCtrl) {
@@ -427,6 +520,8 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 				if (text_under_mouse >= 0) {
 					// A click on a text box selects it and takes the playhead to where it shows in full.
 					*selected_text = text_ids[text_under_mouse];
+					if (selected_path != nullptr)
+						*selected_path = 0;
 					if (selection != nullptr)
 						selection->clear();
 					editor->go_to_text_box(model, &media, *selected_text);
@@ -489,7 +584,8 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 				editor->end_box_edit(model, media);
 			m_text_drag_id = 0;
 		}
-	} else if (text_under_mouse >= 0 && hovered && io.KeyCtrl && !m_scrubbing && !m_scanning && m_drag_clip < 0 && !exporting) {
+	} else if (text_under_mouse >= 0 && hovered && io.KeyCtrl && !m_scrubbing && !m_scanning && m_drag_clip < 0 && !exporting &&
+		model.find_text_box(text_ids[text_under_mouse]) != nullptr && model.find_text_box(text_ids[text_under_mouse])->path_id == 0) {
 		ImGui::SetMouseCursor(text_part_under_mouse == text_lanes::BODY ? ImGuiMouseCursor_ResizeAll : ImGuiMouseCursor_ResizeEW);
 	}
 	// A clip being carried: where it would land follows the mouse, and letting go drops it.
@@ -692,6 +788,38 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 	if (m_thumbnails != nullptr)
 		m_thumbnails->end_frame();
 
+	// The path track: a box for each stretch a path is on, in the path's color, with its name. All the boxes of the picked path are outlined.
+	for (size_t i = 0; i < path_boxes.size(); i++) {
+		const float top = path_top + (float)path_boxes[i].lane * (path_lane_height + LANE_GAP);
+		if (top + path_lane_height > strip_max.y)
+			continue;                      // Cut off for want of room.
+		const TrackedPath* path = model.find_path(path_boxes[i].id);
+		if (path == nullptr)
+			continue;
+		const float true_left = origin.x + m_scale.tick_to_x((double)path_boxes[i].span.start);
+		const float true_right = larger(origin.x + m_scale.tick_to_x((double)path_boxes[i].span.end), true_left + PATH_MIN_WIDTH);
+		if (true_right < strip_min.x || true_left > strip_max.x)
+			continue;
+		const float left = larger(true_left, strip_min.x - 4.0f);
+		const float right = smaller(true_right, strip_max.x + 4.0f);
+		const float bottom = top + path_lane_height;
+		const bool picked = path_boxes[i].id == *selected_path;
+		const ImU32 color = path_color(path->circle);
+		draw->AddRectFilled(ImVec2(left, top), ImVec2(right, bottom), darkened(color, 0.4f), TEXT_ROUNDING);
+		const float words_left = larger(true_left, strip_min.x) + LANE_PADDING + 1.0f;
+		const float words_right = smaller(true_right, strip_max.x) - LANE_PADDING;
+		if (words_right > words_left) {
+			draw->PushClipRect(ImVec2(words_left, top), ImVec2(words_right, bottom), true);
+			draw->AddText(ImVec2(words_left, top + LANE_PADDING), COLOR_PATH_WORDS, path->name.c_str());
+			draw->PopClipRect();
+		}
+		draw->AddRect(ImVec2(left, top), ImVec2(right, bottom), picked ? COLOR_PATH_SELECTED : color, TEXT_ROUNDING, 0, picked ? 2.0f : 1.0f);
+		if ((int)i == path_under_mouse && hovered && !m_scrubbing && !m_scanning && m_drag_clip < 0 && m_text_drag_id == 0) {
+			const int points = (int)path->curve.points().size();
+			ImGui::SetTooltip("%s\n%d point%s", path->name.c_str(), points, points == 1 ? "" : "s");
+		}
+	}
+
 	// The text track.
 	for (size_t i = 0; i < text_ids.size(); i++) {
 		const float top = text_top + (float)text_lane_of[i] * (lane_height + LANE_GAP);
@@ -730,7 +858,7 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 		}
 		draw->AddRect(ImVec2(left, top), ImVec2(right, bottom), selected ? COLOR_TEXT_SELECTED : COLOR_TEXT_BORDER, TEXT_ROUNDING, 0, selected ? 2.0f : 1.0f);
 		// With Ctrl down over a block, the places the mouse would take hold of light up: the two ends, or all of it.
-		if (io.KeyCtrl && (int)i == text_under_mouse && m_text_drag_id == 0 && !m_scrubbing && !m_scanning && m_drag_clip < 0) {
+		if (io.KeyCtrl && (int)i == text_under_mouse && m_text_drag_id == 0 && !m_scrubbing && !m_scanning && m_drag_clip < 0 && box->path_id == 0) {
 			const float grab = smaller(TEXT_EDGE_GRAB, (true_right - true_left) / 3.0f);
 			if (text_part_under_mouse == text_lanes::LEFT_END)
 				draw->AddRectFilled(ImVec2(left, top), ImVec2(left + grab, bottom), COLOR_TEXT_GRAB, TEXT_ROUNDING, ImDrawFlags_RoundCornersLeft);
@@ -848,7 +976,7 @@ void TimelineView::draw(const LayoutRect& rect, EditModel& model, MediaContainer
 	// The playhead on top of it all.
 	const float playhead_x = origin.x + m_scale.tick_to_x((double)playhead);
 	if (playhead_x >= strip_min.x - 6.0f && playhead_x <= strip_max.x + 6.0f) {
-		draw->AddLine(ImVec2(playhead_x, origin.y), ImVec2(playhead_x, (text_area > 0.0f ? text_top + text_area : track_bottom) + 2.0f), COLOR_PLAYHEAD, 2.0f);
+		draw->AddLine(ImVec2(playhead_x, origin.y), ImVec2(playhead_x, (rows_area > 0.0f ? track_bottom + LANE_GAP + rows_area : track_bottom) + 2.0f), COLOR_PLAYHEAD, 2.0f);
 		draw->AddTriangleFilled(ImVec2(playhead_x - 6.0f, origin.y), ImVec2(playhead_x + 6.0f, origin.y), ImVec2(playhead_x, origin.y + 9.0f),
 			COLOR_PLAYHEAD);
 	}
