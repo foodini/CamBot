@@ -123,9 +123,13 @@ void PathTracker::scene(double rotation_radians, int64_t timeline_ticks, PathSce
 		const TrackedPath& path = paths[i];
 		if (!path.circle.enabled || path.curve.empty())
 			continue;
+		// A path with text attached has its circle fade with the text (above), including the frames where the text is not yet, or no
+		// longer, opaque at all: it is not drawn then, not drawn whole as one with no text would be.
 		bool drawn = false;
 		for (size_t c = 0; c < scene->circles.size(); c++)
 			drawn = drawn || scene->circles[c].path_id == path.id;
+		for (size_t k = 0; k < boxes.size(); k++)
+			drawn = drawn || boxes[k].path_id == path.id;
 		if (drawn)
 			continue;
 		PathScene::Circle circle;
